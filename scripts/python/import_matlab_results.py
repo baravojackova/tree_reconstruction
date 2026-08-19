@@ -35,7 +35,7 @@ FILE_PATTERN = "volumes_*.csv"
 # Which Group to import from each table. "Estimated" uses the optimal
 # models plus the second run, so it has the most reliable mean and std.
 # Other valid choices: "Optimal", "All inputs", "Optimal (single)", "Simplified", "Filtered <10cm".
-IMPORT_GROUP = "Filtered <10cm"
+IMPORT_GROUP = "Optimal"
 
 # Shared master results table (read by compare_volumes.py).
 RESULTS_CSV = "volume_results.csv"

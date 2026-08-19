@@ -159,6 +159,13 @@ def cylinder_metrics(path, cut_cm=THIN_BRANCH_CUT_CM):
     trunk_len = float(length[order == 0].sum())
     branch_len = float(length[order >= 1].sum())
 
+    # trunk_len_10cm/branch_len_10cm: the filtered (>= cut_cm diameter)
+    # counterpart of trunk_len/branch_len above - SAME `keep` mask already
+    # computed for total_10cm/stem_10cm/branch_10cm, just summing `length`
+    # instead of `vol` over it (no new pass over the file, no new mask).
+    trunk_len_10cm = float(length[keep & (order == 0)].sum())
+    branch_len_10cm = float(length[keep & (order >= 1)].sum())
+
     base_z = float(start_z.min())
     order0_rows = list(zip(start_z[order == 0], length[order == 0], r[order == 0]))
     dbh = stem_diameter_at_height(order0_rows, base_z, TAPER_H_LOWER)
@@ -172,6 +179,7 @@ def cylinder_metrics(path, cut_cm=THIN_BRANCH_CUT_CM):
     return dict(total=total, stem=stem, branch=branch, dbh=dbh, height=height, taper=taper,
                 trunk_len=trunk_len, branch_len=branch_len,
                 total_10cm=total_10cm, stem_10cm=stem_10cm, branch_10cm=branch_10cm,
+                trunk_len_10cm=trunk_len_10cm, branch_len_10cm=branch_len_10cm,
                 n_total=n_total, n_kept=n_kept)
 
 
@@ -254,6 +262,7 @@ totals, stems, branches = [], [], []
 dbhs, heights, tapers = [], [], []
 trunk_lens, branch_lens = [], []
 totals_10cm, stems_10cm, branches_10cm = [], [], []
+trunk_lens_10cm, branch_lens_10cm = [], []
 n_totals, n_kepts = [], []
 print("Tree: %s   (%d realization files)\n" % (TREE_PREFIX, len(files)))
 print("%-24s %12s %12s %12s %8s %8s" % ("file", "total m^3", "stem m^3", "branch m^3", "dbh cm", "h m"))
@@ -264,6 +273,7 @@ for idx, path in files:
     dbhs.append(m["dbh"]); heights.append(m["height"]); tapers.append(m["taper"])
     trunk_lens.append(m["trunk_len"]); branch_lens.append(m["branch_len"])
     totals_10cm.append(m["total_10cm"]); stems_10cm.append(m["stem_10cm"]); branches_10cm.append(m["branch_10cm"])
+    trunk_lens_10cm.append(m["trunk_len_10cm"]); branch_lens_10cm.append(m["branch_len_10cm"])
     n_totals.append(m["n_total"]); n_kepts.append(m["n_kept"])
     print("%-24s %12.4f %12.4f %12.4f %8s %8.2f"
           % (os.path.basename(path), m["total"], m["stem"], m["branch"],
@@ -288,10 +298,12 @@ print("=> Mean DBH = %s   Mean height = %s   Mean taper = %s"
          ("%.2f m" % mean_height) if mean_height is not None else "n/a",
          ("%.2f cm/m" % mean_taper) if mean_taper is not None else "n/a"))
 
-# mean_stem/mean_branch (needed by the 10cm report right below, and again
-# later for the unfiltered upsert_result call).
+# mean_stem/mean_branch/mean_trunk_len/mean_branch_len (needed by the 10cm
+# report right below, and again later for the unfiltered upsert_result call).
 mean_stem = summarize(stems)[0]
 mean_branch = summarize(branches)[0]
+mean_trunk_len = mean_ignore_none(trunk_lens)
+mean_branch_len = mean_ignore_none(branch_lens)
 
 # ---- 10 cm cut-off comparison, averaged over all realizations -------------
 # Same style as "Cylinders, cut-off 10 cm" elsewhere in the project
@@ -300,6 +312,10 @@ mean_branch = summarize(branches)[0]
 mean_total_10cm = summarize(totals_10cm)[0]
 mean_stem_10cm = summarize(stems_10cm)[0]
 mean_branch_10cm = summarize(branches_10cm)[0]
+# trunk_len_10cm/branch_len_10cm: same summarize() averaging as the volumes
+# right above, just applied to the trunk_lens_10cm/branch_lens_10cm lists.
+mean_trunk_len_10cm = summarize(trunk_lens_10cm)[0]
+mean_branch_len_10cm = summarize(branch_lens_10cm)[0]
 mean_n_total = sum(n_totals) / len(n_totals)
 mean_n_kept = sum(n_kepts) / len(n_kepts)
 vol_removed = mean_total - mean_total_10cm
@@ -320,15 +336,20 @@ print("Stem   volume kept (mean)  : %.3f m3  (removed %.3f m3, %.1f %%)"
 print("Branch volume kept (mean)  : %.3f m3  (removed %.3f m3, %.1f %%)"
       % (mean_branch_10cm, branch_removed, (branch_removed / mean_branch * 100.0) if mean_branch else 0.0))
 
+# ---- same cut-off, but on LENGTH instead of volume (this turn's addition) --
+trunk_len_removed = mean_trunk_len - mean_trunk_len_10cm
+branch_len_removed = mean_branch_len - mean_branch_len_10cm
+print("Trunk  length kept (mean)  : %.3f m    (removed %.3f m, %.1f %%)"
+      % (mean_trunk_len_10cm, trunk_len_removed,
+         (trunk_len_removed / mean_trunk_len * 100.0) if mean_trunk_len else 0.0))
+print("Branch length kept (mean)  : %.3f m    (removed %.3f m, %.1f %%)"
+      % (mean_branch_len_10cm, branch_len_removed,
+         (branch_len_removed / mean_branch_len * 100.0) if mean_branch_len else 0.0))
+
 # ---- upsert this result into the shared master results CSV -----------------
 std_total = summarize(totals)[1]
-# (mean_stem/mean_branch already computed above, right before the 10cm report)
-# trunk_len/branch_len: mean across realizations, same averaging (mean_ignore_none)
-# already used for dbh/height/taper above - every realization always HAS a
-# trunk_len/branch_len (unlike dbh, which can be None), but mean_ignore_none
-# works fine either way.
-mean_trunk_len = mean_ignore_none(trunk_lens)
-mean_branch_len = mean_ignore_none(branch_lens)
+# (mean_stem/mean_branch/mean_trunk_len/mean_branch_len already computed
+# above, right before the 10cm report)
 # branch_filter = "none": these are the full TreeQSM cylinder realizations,
 # not restricted to any diameter cut-off.
 upsert_result(RESULTS_CSV, TREE_PREFIX, METHOD_LABEL,
@@ -340,6 +361,9 @@ upsert_result(RESULTS_CSV, TREE_PREFIX, METHOD_LABEL,
 # total/stem/branch = the FILTERED mean/std computed above (summarize(), the
 # exact same function used for the unfiltered row - just applied to the
 # totals_10cm/stems_10cm/branches_10cm lists instead of totals/stems/branches).
+# trunk_len/branch_len = mean_trunk_len_10cm/mean_branch_len_10cm, same idea
+# but for length (added this turn, so Trunk/Branch length charts and
+# field_error_summary() also work for this row in the vs.-reference mode).
 # dbh/height/taper are NOT recomputed: a 10 cm diameter cut-off barely touches
 # the stem near 1.3 m (it's always far thicker than 10 cm there) or the tree's
 # overall height, so the unfiltered values above are reused as-is, per your
@@ -348,9 +372,7 @@ std_total_10cm = summarize(totals_10cm)[1]
 upsert_result(RESULTS_CSV, TREE_PREFIX, METHOD_LABEL_10CM,
               mean_total_10cm, mean_stem_10cm, mean_branch_10cm, std_total_10cm,
               mean_dbh, mean_height, mean_taper,
-              None, None,   # trunk_len/branch_len: not tracked for the filtered
-                             # subset (only total/stem/branch VOLUME is filtered
-                             # here, mirroring the AdTree "(>=10cm only)" row).
+              mean_trunk_len_10cm, mean_branch_len_10cm,
               branch_filter="10cm")
 
 # Export the per-realization results and summary statistics to CSV.
