@@ -163,16 +163,33 @@ def plot_tree_overview(rows, tree):
             color_of[m] = default_colors[next_color_i % len(default_colors)]
             next_color_i += 1
 
-    # Which field (as returned by load_results()) goes in which subplot,
-    # and what to title that subplot.
+    # Which field (as returned by load_results()) goes in which subplot, and
+    # what to title that subplot. This list is the ONLY thing you touch to
+    # add/remove/reorder subplots - the loop below draws one subplot per
+    # entry, so adding a field is a one-line change here, not a copy-pasted
+    # block of plotting code. Just keep the subplot COUNT matching the grid
+    # shape passed to plt.subplots() right below (2x3 = 6 slots here).
+    #
+    # 6 of 8 possible fields were chosen (load_results() also has "stem" and
+    # "branch" volume): total volume, DBH, height and taper were already
+    # shown before this change; trunk_len/branch_len are the two ADDED here.
+    # stem/branch volume were left OUT to keep this at 2x3 - trunk_len and
+    # branch_len already answer the "shorter/less-complete structure vs.
+    # different radii" question stem_m3/branch_m3 would only answer at a
+    # coarser level, and they mirror exactly the fields compare_volumes.py's
+    # field_error_summary() already reports separately (dbh/height/taper/
+    # trunk_len/branch_len) - so this chart's 6 fields line up 1:1 with that
+    # console report instead of introducing a 7th/8th thing to track.
     fields = [
-        ("total",  "Total volume [m^3]"),
-        ("dbh",    "DBH [m]"),
-        ("height", "Height [m]"),
-        ("taper",  "Taper [cm/m]"),
+        ("total",      "Total volume [m^3]"),
+        ("dbh",        "DBH [m]"),
+        ("height",     "Height [m]"),
+        ("taper",      "Taper [cm/m]"),
+        ("trunk_len",  "Trunk length [m]"),
+        ("branch_len", "Branch length [m]"),
     ]
 
-    fig, axes = plt.subplots(2, 2, figsize=(12, 9))
+    fig, axes = plt.subplots(2, 3, figsize=(16, 9))
 
     for ax, (field_key, subplot_title) in zip(axes.flat, fields):
         # Skip methods with no value (None) for THIS field entirely, instead
