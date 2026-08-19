@@ -395,15 +395,8 @@ def parse_adqsm_params_file(path):
         branch_len = extract("BranchLength", line) or 0.0
         branches_num = extract("BranchesNum", line) or 0.0
         tree_height = extract("TreeHeight", line)
-        # DBH (trunk diameter at breast height) is NOT always exported by
-        # AdQSM, and its key name isn't fully standardized across versions,
-        # so we try a few common ones and use whichever is found first.
-        # If your TreesParams.txt uses a different key, add it to this list.
-        tree_dbh = None
-        for dbh_key in ("DBH", "Dbh", "TrunkDBH", "DBHeight", "DiameterBH"):
-            tree_dbh = extract(dbh_key, line)
-            if tree_dbh is not None:
-                break
+        # DBH (trunk diameter at breast height), exported by AdQSM as "TreeDBH".
+        tree_dbh = extract("TreeDBH", line)
         return dict(n=int(branches_num), total_len=trunk_len + branch_len, total_vol=tree_vol,
                     trunk_n=0, trunk_len=trunk_len, trunk_vol=trunk_vol,
                     branch_n=0, branch_len=branch_len, branch_vol=branch_vol,
