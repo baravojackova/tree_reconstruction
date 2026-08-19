@@ -23,8 +23,12 @@ import csv
 import os
 
 # =====================  PARAMETERS  ==================================
-# Path to the source measurement file (TAB-separated text).
-SOURCE_FILE = "IND.h.trees.txt"
+# Folder that contains the source measurement file. "." means "the folder
+# this script is run from".
+DATA_DIR = r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\data\IND01_54\exp_tanago"
+
+# Name of the source measurement file (TAB-separated text), inside DATA_DIR.
+SOURCE_FILE = os.path.join(DATA_DIR, "IND.h.trees.txt")
 
 # Which tree to report. Must match a value in the "treeID" column exactly.
 # If you set it to a name that is not in the file, the script prints the

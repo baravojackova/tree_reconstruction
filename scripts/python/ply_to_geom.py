@@ -36,7 +36,14 @@ from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import breadth_first_order, connected_components
 
 # =====================  PARAMETERS  ===================================
-INPUT_PLY = "IND01_054 - Cloud_skeleton.ply"   # input skeleton from AdTree
+# Directory holding this tree's source input files (the AdTree skeleton .ply,
+# and the AdQSM taper/branch/params exports). Edit this to point at a
+# different tree's folder; INPUT_PLY and the ADQSM_*_FILE paths below are all
+# resolved relative to it.
+AdQSM_DIR = r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\data\IND01_54\AdQSM\05"
+AdTree_DIR = r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\data\IND01_54"
+
+INPUT_PLY = os.path.join(AdTree_DIR, "IND01_054 - Cloud_skeleton.ply")   # input skeleton from AdTree
 
 # Radius threshold (in METERS). You can give several values -> several variants.
 # Example of a single variant:   RADIUS_THRESHOLDS = [0.010]
@@ -83,14 +90,14 @@ SMOOTH_ALPHA = 0.5                # 0..1 strength per pass
 CALIBRATE_RADII = True
 
 # AdQSM trunk taper curve: text file of "height[m] <TAB> diameter[m]" rows.
-ADQSM_TAPER_FILE = "taper.txt"
+ADQSM_TAPER_FILE = os.path.join(AdQSM_DIR, "taper.txt")
 
 # AdQSM per-branch table: text file with columns order, parent, diameter[m], ...
-ADQSM_BRANCH_FILE = "BranchStructure.txt"
+ADQSM_BRANCH_FILE = os.path.join(AdQSM_DIR, "BranchStructure.txt")
 
 # AdQSM tree parameters (volumes in m^3), used only for the reference line in
 # the volume comparison printout.
-ADQSM_PARAMS_FILE = "TreesParams.txt"
+ADQSM_PARAMS_FILE = os.path.join(AdQSM_DIR, "TreesParams.txt")
 
 # Measured trunk diameter at breast height (1.3 m), in METERS. If given, the
 # taper curve is rescaled so its value at 1.3 m matches this measurement.

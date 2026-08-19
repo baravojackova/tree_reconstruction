@@ -27,7 +27,7 @@ import os
 
 # =====================  PARAMETERS  ==================================
 # Folder to scan for the MATLAB volume tables.
-MATLAB_RESULTS_DIR = "."
+MATLAB_RESULTS_DIR = r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\scripts\matlab"
 
 # Which files to pick up (shell-style wildcard).
 FILE_PATTERN = "volumes_*.csv"
@@ -35,7 +35,7 @@ FILE_PATTERN = "volumes_*.csv"
 # Which Group to import from each table. "Estimated" uses the optimal
 # models plus the second run, so it has the most reliable mean and std.
 # Other valid choices: "Optimal", "All inputs", "Optimal (single)", "Simplified".
-IMPORT_GROUP = "Estimated"
+IMPORT_GROUP = "Optimal"
 
 # Shared master results table (read by compare_volumes.py).
 RESULTS_CSV = "volume_results.csv"

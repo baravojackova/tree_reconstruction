@@ -32,7 +32,7 @@ import numpy as np
 # =====================  PARAMETERS  ==================================
 # Folder that contains the realization files. "." means "the folder this
 # script is run from".
-DATA_DIR = "C:\\Users\\Spravce\\Documents\\BARA\\01_Skeny_Babice\\skeny_tanago\\AdTree\\qsm_tango"
+DATA_DIR = r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\data\IND01_54\qsm_tanago"
 
 # Tree to report. This is the tree ID embedded in the file names, e.g. for
 # "cyl_data_IND01_054.txt_0.5_0.55_5_0.025_0.075_3_4_1_t0.txt" ... "..._t19.txt"

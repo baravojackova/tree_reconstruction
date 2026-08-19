@@ -9,13 +9,13 @@ clc
 %% ------------------------------------------------------------
 %  1) USER SETTINGS - this is the ONLY block you need to edit
 %  ------------------------------------------------------------
-run_tag = 'v2auto';    % change for every new settings variant
+run_tag = 'v2manual';    % change for every new settings variant
 
 % Folder with the TreeQSM source code (contains treeqsm.m, +myfun, ...)
-src_dir = 'C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\skeny_tanago\src';
+src_dir = 'C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\scripts\matlab';
 
 % Folder with the point clouds and where all results will be written
-data_dir = 'C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\skeny_tanago\src';
+data_dir = 'C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\scripts\matlab';
 
 % --- tree identification -------------------------------------
 tree_id   = 'IND01_054';           % short name used for ALL output files
@@ -34,12 +34,12 @@ n_workers = 0;         % 0 = derive automatically from the number of tasks
 % define_input(P, nPD1, nPD2Min, nPD2Max) = how many values are tested
 % for each of the three patch-diameter parameters
 % !!! if manual input nPD = 1
-nPD1    = 2;
-nPD2Min = 2;
-nPD2Max = 2;
+nPD1    = 1;
+nPD2Min = 1;
+nPD2Max = 1;
 
 % --- MANUAL PatchDiam (see section 9) ------------------------
-manual_patchdiam = false;   % false = keep everything from define_input
+manual_patchdiam = true;   % false = keep everything from define_input
 
 % PatchDiam1 (rought first cover) has to be t ≥ PatchDiam2Max (gentle cover)
 
@@ -242,13 +242,13 @@ end
 %% ------------------------------------------------------------
 %  10) FIRST RUN - models over the parameter grid
 %  ------------------------------------------------------------
-tic
+tic     % start time monitoring
 if use_parallel
     QSMs = make_models_parallel(mat_name, res_name, n_models_first, inputs);
 else
     QSMs = make_models(mat_name, res_name, n_models_first, inputs);
 end
-fprintf('First QSM run finished in %.1f min.\n', toc/60);
+fprintf('First QSM run finished in %.1f min.\n', toc/60);   % toc - stop time moniroting
 
 %% ------------------------------------------------------------
 %  11) LOAD the results of the first run
@@ -337,6 +337,58 @@ vols = @(QA) cell2mat(arrayfun(@(Q) ...
     [Q.treedata.TotalVolume, Q.treedata.TrunkVolume, Q.treedata.BranchVolume] ./ 1000, ...
     QA(:), 'UniformOutput', false));
 
+% --- volume after filtering out cylinders thinner than cut_cm ----
+% (moved here from former section 17b, so the result can go into VolumeTable)
+cut_cm = 10;                      % cut-off diameter [cm]
+
+r_cyl = QSM_opt.cylinder.radius;      % [m]
+L_cyl = QSM_opt.cylinder.length;      % [m]
+V_cyl = pi .* r_cyl.^2 .* L_cyl;      % [m^3]
+d_cm  = 2 * r_cyl * 100;              % diameter [cm]
+
+keep = d_cm >= cut_cm;
+
+fprintf('\n--- Cylinders, cut-off %.0f cm ---\n', cut_cm);
+fprintf('Cylinders total  : %d\n', numel(r_cyl));
+fprintf('Cylinders kept   : %d (%.1f %%)\n', sum(keep), sum(keep)/numel(r_cyl)*100);
+fprintf('Volume total     : %.3f m3\n', sum(V_cyl));
+fprintf('Volume kept      : %.3f m3\n', sum(V_cyl(keep)));
+fprintf('Volume removed   : %.3f m3 (%.1f %%)\n', ...
+    sum(V_cyl(~keep)), sum(V_cyl(~keep))/sum(V_cyl)*100);
+
+% --- split cylinders into stem (order 0) and branches (order >= 1) ---
+order = QSM_opt.cylinder.BranchOrder;   % 0 = stem, >=1 = branch
+
+is_stem   = (order == 0);
+is_branch = (order >= 1);
+
+% combine with the diameter filter (keep) computed above
+keep_stem   = keep & is_stem;
+keep_branch = keep & is_branch;
+
+Vstem_filt   = sum(V_cyl(keep_stem));
+Vbranch_filt = sum(V_cyl(keep_branch));
+Vtotal_filt  = sum(V_cyl(keep));     % should equal Vstem_filt + Vbranch_filt
+
+fprintf('Stem volume kept    : %.3f m3\n', Vstem_filt);
+fprintf('Branch volume kept  : %.3f m3\n', Vbranch_filt);
+
+% --- unfiltered stem/branch volumes for comparison ---
+Vstem_total   = sum(V_cyl(is_stem));
+Vbranch_total = sum(V_cyl(is_branch));
+
+Vstem_removed_pct   = (Vstem_total   - Vstem_filt)   / Vstem_total   * 100;
+Vbranch_removed_pct = (Vbranch_total - Vbranch_filt) / Vbranch_total * 100;
+
+fprintf('Stem volume removed  : %.3f m3 (%.1f %%)\n', ...
+    Vstem_total - Vstem_filt, Vstem_removed_pct);
+fprintf('Branch volume removed: %.3f m3 (%.1f %%)\n', ...
+    Vbranch_total - Vbranch_filt, Vbranch_removed_pct);
+
+V_filtered = [Vtotal_filt, Vstem_filt, Vbranch_filt];
+fprintf('Check: stem+branch total = %.3f m3 (should equal %.3f m3)\n', ...
+    Vstem_total + Vbranch_total, sum(V_cyl));
+%
 % --- collect the groups --------------------------------------
 V_all  = vols(res.QSMs);              % whole parameter grid
 V_opt  = vols(res.QSMs(idx));         % winning combination
@@ -357,6 +409,7 @@ else
 end
 
 groups(end+1,:) = {'Simplified', V_simp};
+groups(end+1,:) = {'Filtered <10cm', V_filtered};
 
 % --- build the table -----------------------------------------
 attr = ["Total"; "Stem"; "Branches"];
@@ -401,28 +454,22 @@ save(vol_file, 'VolumeTable');
 writetable(VolumeTable, [vol_file '.csv']);
 fprintf('Volume table saved as %s.mat and %s.csv\n', vol_file, vol_file);
 %% ------------------------------------------------------------
-%  17b) VOLUME AFTER FILTERING OUT THIN CYLINDERS
-%       Reference study removed cylinders with diameter < 10 cm
+%  18) DBH AND HEIGHT FOR COMPARISON
 %  ------------------------------------------------------------
-cut_cm = 10;                      % cut-off diameter [cm]
-
-r = QSM_opt.cylinder.radius;      % [m]
-L = QSM_opt.cylinder.length;      % [m]
-V = pi .* r.^2 .* L;              % [m^3]
-d_cm = 2 * r * 100;               % diameter [cm]
-
-keep = d_cm >= cut_cm;
-
-fprintf('\n--- Cylinders, cut-off %.0f cm ---\n', cut_cm);
-fprintf('Cylinders total  : %d\n', numel(r));
-fprintf('Cylinders kept   : %d (%.1f %%)\n', sum(keep), sum(keep)/numel(r)*100);
-fprintf('Volume total     : %.3f m3\n', sum(V));
-fprintf('Volume kept      : %.3f m3\n', sum(V(keep)));
-fprintf('Volume removed   : %.3f m3 (%.1f %%)\n', ...
-    sum(V(~keep)), sum(V(~keep))/sum(V)*100);
-
+dbh_file = ['dbh_' tree_id '_' run_tag '.txt'];
+fid = fopen(dbh_file, 'w');
+fprintf(fid, '%.6f', QSM_opt.treedata.DBHqsm);   % stem diameter at 1.3 m [m]
+fclose(fid);
+fprintf('DBH exported to %s\n', dbh_file);
+%
+% ---- export tree height for the shared results table ----
+h_file = ['height_' tree_id '_' run_tag '.txt'];
+fid = fopen(h_file, 'w');
+fprintf(fid, '%.6f', QSM_opt.treedata.TreeHeight);   % tree height [m]
+fprintf('Height exported to %s\n', h_file);
+fclose(fid);
 %% ------------------------------------------------------------
-%  18) EXPORT - table with the input parameters of each model
+%  19) EXPORT - table with the input parameters of each model
 %  ------------------------------------------------------------
 n = length(QSM_simple);
 info = table('Size', [n 7], ...
@@ -443,9 +490,41 @@ time_sum      = sum(info.Time);       % total time in minutes
 time_sum(1,2) = time_sum./60;         % total time in hours
 
 %% ------------------------------------------------------------
-%  19) EXPORT geometry for ANSYS
+%  20) EXPORT geometry for ANSYS
 %  ------------------------------------------------------------
-n_opt     = length(QSM_simple);
+% --- choose the SOURCE model ------------------------------------
+% 'simplified' = QSM_simple (after simplify_qsm, section 16)
+% 'optimal'    = QSM_opt    (before simplification, section 16, output of select_optimum)
+ansys_source = 'optimal';   % <-- change to 'simplified' when you want the simplified export
+
+switch ansys_source
+    case 'simplified'
+        ansys_export_idx = 1;                 % index into QSM_simple
+        qsm_selected = QSM_simple(ansys_export_idx);
+    case 'optimal'
+        qsm_selected = QSM_opt;               % QSM_opt is a single model (not an array)
+    otherwise
+        error('ansys_source must be ''simplified'' or ''optimal''.');
+end
+
+n_opt = length(qsm_selected);
+
+fprintf('Exporting to ANSYS from source: %s (%d model(s))\n', ansys_source, n_opt);
+
+geom_orig = myfun.result_ansys(qsm_selected, n_opt);
+
+for i = 1:n_opt
+    geom_table = geom_orig{i};                            % table of one model
+    file_name  = sprintf('%s%d.txt', export_prefix, i);   % e.g. geom_IND07_v3_1.txt
+    writematrix(geom_table, file_name, 'Delimiter', '\t');
+    fprintf('Exported: %s\n', file_name);
+end
+
+%% ------------------------------------------------------------
+%  20) EXPORT geometry for ANSYS
+%  ------------------------------------------------------------
+qsm_selected = QSM_simple;
+n_opt     = length('QSM_simple');
 geom_orig = myfun.result_ansys(QSM_simple, n_opt);
 
 for i = 1:n_opt
