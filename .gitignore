@@ -5,6 +5,8 @@
 !.gitignore
 !README.md
 !scripts/
-!scripts/**     # include all files in scripts folder
+!scripts/python/**
+!scripts/matlab/runskem.m
+!scripts/ansys/**
 !results/ 
 !results/volume_results.csv
