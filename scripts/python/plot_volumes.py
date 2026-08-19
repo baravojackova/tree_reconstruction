@@ -123,15 +123,26 @@ def plot_total_volume_by_tree(rows):
 
 
 # ----------------------------------------------------------------------
-# d) One tree's overview: 2x2 grid of bar charts (total volume, DBH,
-#    height, taper), one bar per method, for a SINGLE tree. Makes sense
-#    even with only 1 tree in the CSV (unlike the boxplot/RMSE charts,
-#    which compare ACROSS trees).
+# d) One tree's overview: 2x3 grid of bar charts (total volume, DBH,
+#    height, taper, trunk length, branch length), one bar per method, for
+#    a SINGLE tree AND a SINGLE branch_filter ("none" or "10cm"). Makes
+#    sense even with only 1 tree in the CSV (unlike the boxplot/RMSE
+#    charts, which compare ACROSS trees).
+#
+#    branch_filter MUST be passed explicitly (no default) - drawing "none"
+#    (full reconstruction) and "10cm" (diameter-restricted) rows in the SAME
+#    bar chart would silently mix two different methodologies (very
+#    different branch_len scale especially - see compare_volumes.py's
+#    header comment for why they're kept apart everywhere else too).
 # ----------------------------------------------------------------------
-def plot_tree_overview(rows, tree):
-    tree_rows = [r for r in rows if r["tree"] == tree]
+def plot_tree_overview(rows, tree, branch_filter):
+    # Filter to THIS tree AND THIS branch_filter before anything else, so
+    # every method/color/field computed below only ever sees rows from one
+    # consistent methodology.
+    tree_rows = [r for r in rows if r["tree"] == tree and r["branch_filter"] == branch_filter]
     if not tree_rows:
-        print("No rows for tree '%s' - skipping tree overview." % tree)
+        print("No rows for tree '%s' with branch_filter='%s' - skipping this overview."
+              % (tree, branch_filter))
         return
 
     # Methods in the order they first appear for THIS tree (dict.fromkeys()
@@ -224,7 +235,11 @@ def plot_tree_overview(rows, tree):
                         xytext=(0, 3), textcoords="offset points",   # 3 points above the bar top
                         ha="center", va="bottom", fontsize=7)
 
-    fig.suptitle("Tree overview: %s" % tree, fontsize=14)
+    # Subtitle spells out which methodology this figure shows, so it's clear
+    # at a glance even without reading the filename.
+    filter_label = ("full reconstruction, branch_filter='none'" if branch_filter == "none"
+                     else "diameter >= 10 cm only, branch_filter='10cm'")
+    fig.suptitle("Tree overview: %s  (%s)" % (tree, filter_label), fontsize=14)
 
     # ONE legend for the whole figure (not one per subplot, which would just
     # repeat the same method names 4 times) - built from coloured squares
@@ -240,7 +255,7 @@ def plot_tree_overview(rows, tree):
 
     # rect leaves room at the top for suptitle and at the bottom for the legend.
     fig.tight_layout(rect=(0, 0.06, 1, 0.96))
-    save_and_report(fig, "tree_overview_%s.png" % tree)
+    save_and_report(fig, "tree_overview_%s_%s.png" % (tree, branch_filter))
 
 
 # ----------------------------------------------------------------------
@@ -329,11 +344,15 @@ if __name__ == "__main__":
     # Always makes sense, regardless of how many trees are in the CSV.
     plot_total_volume_by_tree(rows)
 
-    # One overview PNG per tree currently in the CSV - loops over whatever
-    # is actually there, so new trees get their own chart automatically the
-    # next time you run this, with nothing to edit here.
+    # TWO overview PNGs per tree currently in the CSV - one per branch_filter
+    # value, so "10cm" (vs.-reference) and "none" (full reconstruction) rows
+    # are never drawn together in the same bar chart (see plot_tree_overview()'s
+    # docstring for why mixing them would be misleading). If a tree has no
+    # rows for one of the two filters, plot_tree_overview() just prints a
+    # skip message for that one and moves on - harmless.
     for tree in all_trees:
-        plot_tree_overview(rows, tree)
+        plot_tree_overview(rows, tree, branch_filter="10cm")
+        plot_tree_overview(rows, tree, branch_filter="none")
 
     # The boxplot and RMSE/Bias/MAE charts compare methods ACROSS trees, so
     # they need at least 2 trees to say anything real; with only 1, skip

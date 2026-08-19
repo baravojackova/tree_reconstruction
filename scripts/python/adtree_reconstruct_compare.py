@@ -298,13 +298,16 @@ for variant_label, taper_file, branch_file, params_file in ADQSM_VARIANT_LIST:
             print_volume_stats("(d) AdQSM reference (TreesParams)", adqsm_ref)
             if adqsm_ref.get("height") is not None:
                 print("      AdQSM TreeHeight: %.2f m" % adqsm_ref["height"])
+            # branch_filter = "none": AdQSM's own TreesParams.txt totals are its
+            # full reconstruction, not restricted to any diameter cut-off.
             upsert_result(RESULTS_CSV, TREE_NAME,
                           "AdQSM (TreesParams)%s" % variant_method_suffix,
                           adqsm_ref["total_vol"], adqsm_ref["trunk_vol"], adqsm_ref["branch_vol"], None,
                           adqsm_ref.get("dbh"), adqsm_ref.get("height"), None,
                           # trunk_len/branch_len: already in this dict, straight from
                           # TrunkLength/BranchLength in TreesParams.txt (see parse_adqsm_params_file).
-                          adqsm_ref.get("trunk_len"), adqsm_ref.get("branch_len"))
+                          adqsm_ref.get("trunk_len"), adqsm_ref.get("branch_len"),
+                          branch_filter="none")
         else:
             print("  (no TreesParams.txt reference found at %s - skipping that row)" % params_file)
 
@@ -420,33 +423,45 @@ for variant_label, taper_file, branch_file, params_file in ADQSM_VARIANT_LIST:
             # suffix - it's simply re-written (with identical values) for every
             # variant, which is harmless since upsert_result overwrites by
             # (tree, method), not duplicates.
+            # branch_filter = "none": raw AdTree radii, no diameter cut-off applied.
             upsert_result(RESULTS_CSV, TREE_NAME, "AdTree raw r%dmm" % round(thr * 1000),
                           orig_stats["total_vol"], orig_stats["trunk_vol"], orig_stats["branch_vol"], None,
                           raw_dbh, height_m, raw_taper,
                           # trunk_len/branch_len: already in this dict (volume_stats()
                           # computes them the same way as trunk_vol/branch_vol).
-                          orig_stats["trunk_len"], orig_stats["branch_len"])
+                          orig_stats["trunk_len"], orig_stats["branch_len"],
+                          branch_filter="none")
             # "AdTree calibrated" DOES depend on which AdQSM variant it was
             # calibrated against, so it gets the variant suffix (when set).
             # NOTE: radius calibration only rescales/replaces RADII, never the
             # cylinder geometry itself, so cal_stats's lengths equal orig_stats's -
             # calibration cannot change how much length was reconstructed.
+            # branch_filter = "none": calibrated radii, but still the full
+            # reconstruction - no diameter cut-off applied (see the THIRD row
+            # right below for the "10cm"-filtered counterpart of this one).
             upsert_result(RESULTS_CSV, TREE_NAME,
                           "AdTree calibrated r%dmm%s" % (round(thr * 1000), variant_method_suffix),
                           cal_stats["total_vol"], cal_stats["trunk_vol"], cal_stats["branch_vol"], None,
                           cal_dbh, height_m, cal_taper,
-                          cal_stats["trunk_len"], cal_stats["branch_len"])
+                          cal_stats["trunk_len"], cal_stats["branch_len"],
+                          branch_filter="none")
             # Optional THIRD row: same tree/DBH/height/taper, but total/stem/branch
             # volume restricted to cylinders >= THIN_BRANCH_CUT_CM (like TreeQSM's
             # "...Filtered..." rows) - lets compare_volumes.py/plot_volumes.py show
             # the reference vs. an apples-to-apples "same cut-off" comparison.
             if WRITE_THIN_BRANCH_FILTERED_ROW:
+                # branch_filter = "10cm": this row IS the diameter-cut-off variant
+                # (its name already says "(>=10cm only)") - trunk_len/branch_len
+                # are left as None here since report_thin_branch_volume() doesn't
+                # currently track filtered LENGTH, only filtered volume (see the
+                # summary from when this row was added).
                 upsert_result(RESULTS_CSV, TREE_NAME,
                               "AdTree calibrated r%dmm%s (>=%.0fcm only)"
                               % (round(thr * 1000), variant_method_suffix, THIN_BRANCH_CUT_CM),
                               cal_thin["total_vol_kept"], cal_thin["trunk_vol_kept"],
                               cal_thin["branch_vol_kept"], None,
-                              cal_dbh, height_m, cal_taper)
+                              cal_dbh, height_m, cal_taper,
+                              branch_filter="10cm")
 
             print("  DBH (at %.1f m)   : raw AdTree = %s   |   calibrated = %s"
                   % (TAPER_H_LOWER, _fmt_dbh(raw_dbh), _fmt_dbh(cal_dbh)))

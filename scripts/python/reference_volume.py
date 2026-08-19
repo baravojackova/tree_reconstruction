@@ -116,7 +116,7 @@ def stem_diameter_at_height(stem_sections, h):
 
 
 def upsert_result(csv_path, tree, method, total, stem, branch, std, dbh=None, height=None, taper=None,
-                   trunk_len=None, branch_len=None):
+                   trunk_len=None, branch_len=None, branch_filter="none"):
     """Insert/update one (tree, method) row in the shared master results CSV
     (see compare_volumes.py for its format). Reads csv_path if it exists
     (creating it with the header if not), removes any existing row with the
@@ -124,9 +124,16 @@ def upsert_result(csv_path, tree, method, total, stem, branch, std, dbh=None, he
     so re-running a script overwrites its previous result instead of
     duplicating it. Numbers are formatted with 6 decimals; None -> "" (blank).
     Backward compatible: if csv_path still has an older/shorter header, its
-    rows are read fine and rewritten with the new columns added as blank."""
+    rows are read fine and rewritten with the new columns added as blank.
+
+    branch_filter is a plain string, NOT a number, so it is written as-is
+    (no fmt()): "none" = full/unfiltered reconstruction (the default), "10cm"
+    = trunk/branches restricted to diameter >= 10 cm (matching how the
+    destructive reference was physically measured - see compare_volumes.py's
+    header comment for why this distinction matters)."""
     header = ["tree", "method", "total_m3", "stem_m3", "branch_m3", "std_m3",
-              "dbh_m", "height_m", "taper_cm_per_m", "trunk_len_m", "branch_len_m"]
+              "dbh_m", "height_m", "taper_cm_per_m", "trunk_len_m", "branch_len_m",
+              "branch_filter"]
 
     def fmt(x):
         return "" if x is None else "%.6f" % x
@@ -140,7 +147,8 @@ def upsert_result(csv_path, tree, method, total, stem, branch, std, dbh=None, he
     rows.append({"tree": tree, "method": method, "total_m3": fmt(total),
                  "stem_m3": fmt(stem), "branch_m3": fmt(branch), "std_m3": fmt(std),
                  "dbh_m": fmt(dbh), "height_m": fmt(height), "taper_cm_per_m": fmt(taper),
-                 "trunk_len_m": fmt(trunk_len), "branch_len_m": fmt(branch_len)})
+                 "trunk_len_m": fmt(trunk_len), "branch_len_m": fmt(branch_len),
+                 "branch_filter": branch_filter})
 
     with open(csv_path, "w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=header)
@@ -246,5 +254,8 @@ selected_total_len_m = sum(length_by_fraction[f] for f in length_by_fraction
                             if INCLUDE_FRACTIONS.get(f, False)) * LENGTH_TO_M
 branch_len_m = (selected_total_len_m - trunk_len_m) if trunk_len_m is not None else None
 
+# branch_filter = "10cm": the de Tanago field crew physically only measured
+# sections down to a 10 cm taper diameter (see AdQSM.pdf Appendix A) - this
+# reference NEVER has a "none" (full/unfiltered) version, by methodology.
 upsert_result(RESULTS_CSV, TREE_ID, METHOD_LABEL, selected_total_m3, stem_m3, branch_m3, None,
-              dbh_m, height_m, taper_cm_per_m, trunk_len_m, branch_len_m)
+              dbh_m, height_m, taper_cm_per_m, trunk_len_m, branch_len_m, branch_filter="10cm")

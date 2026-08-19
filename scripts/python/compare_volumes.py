@@ -6,7 +6,7 @@
 #  per (tree, method). Columns:
 #
 #     tree, method, total_m3, stem_m3, branch_m3, std_m3, dbh_m, height_m,
-#     taper_cm_per_m, trunk_len_m, branch_len_m
+#     taper_cm_per_m, trunk_len_m, branch_len_m, branch_filter
 #
 #  - tree           : tree ID, e.g. "IND01_054"
 #  - method         : a free-text label, e.g. "AdQSM", "TreeQSM mine v2"
@@ -19,6 +19,9 @@
 #  - taper_cm_per_m : stem taper between two reference heights [cm/m] (may be blank)
 #  - trunk_len_m    : total trunk/stem centerline length [m]          (may be blank)
 #  - branch_len_m   : total branch centerline length [m]              (may be blank)
+#  - branch_filter  : "none" (full/unfiltered reconstruction) or "10cm"
+#                     (trunk/branches restricted to diameter >= 10 cm).
+#                     Blank/missing (older rows) is treated as "none".
 #
 #  trunk_len_m/branch_len_m exist to tell apart TWO different reasons a
 #  method could report less volume than another: either it reconstructs a
@@ -26,6 +29,20 @@
 #  or it reconstructs the SAME length but with systematically different
 #  radii (length matches, volume doesn't) - see field_error_summary() calls
 #  for "Trunk length"/"Branch length" at the bottom of this file.
+#
+#  WHY branch_filter EXISTS - the destructive field reference physically
+#  never measured branches thinner than a 10 cm taper diameter (de Tanago
+#  methodology, see AdQSM.pdf Appendix A). That makes a "vs. reference"
+#  comparison using a method's FULL (unfiltered) reconstruction methodologically
+#  unfair to that method - it's being penalised for wood the reference never
+#  even tried to measure. So this script prints TWO separate sections:
+#
+#    A) "vs. reference" - only branch_filter == "10cm" rows (the reference
+#       always has one; this is the fair, apples-to-apples accuracy check).
+#    B) "methods vs. each other" - only branch_filter == "none" rows (full
+#       reconstructions, no reference present at all) - here you're comparing
+#       what each method reconstructs INCLUDING thin branches, purely against
+#       each other, not against any "truth".
 #
 #  This script:
 #     1) reads that CSV,
@@ -62,17 +79,21 @@ REFERENCE_METHOD = "Reference (destructive)"
 
 
 # Starter content written only if RESULTS_CSV does not exist yet. The two
-# new trailing columns (trunk_len_m, branch_len_m) are left blank here since
-# this starter data predates them - real runs of the other scripts fill them in.
+# length columns (trunk_len_m, branch_len_m) are left blank here since this
+# starter data predates them - real runs of the other scripts fill them in.
+# branch_filter is filled in per the same rule the real scripts use: "10cm"
+# for the destructive reference (it can only ever be that), "none" for
+# everything else here (none of these starter rows are a "Filtered"/
+# "(>=10cm only)" variant).
 STARTER_ROWS = [
     ["tree", "method", "total_m3", "stem_m3", "branch_m3", "std_m3",
-     "dbh_m", "height_m", "taper_cm_per_m", "trunk_len_m", "branch_len_m"],
-    ["IND01_054", "Reference (destructive)", "1.7169", "1.2557", "0.4612", "", "", "", "", "", ""],
-    ["IND01_054", "AdQSM (TreesParams)",     "1.6905", "1.1302", "0.5603", "", "", "", "", "", ""],
-    ["IND01_054", "AdTree calibrated",       "1.9240", "1.3020", "0.6220", "", "", "", "", "", ""],
-    ["IND01_054", "TreeQSM de Tanago (mean 20)", "3.0838", "1.8383", "1.2455", "0.3113", "", "", "", "", ""],
-    ["IND01_054", "TreeQSM mine v1",         "3.6806", "1.5317", "2.1488", "0.1915", "", "", "", "", ""],
-    ["IND01_054", "TreeQSM mine v2",         "3.9744", "1.5737", "2.4007", "0.1923", "", "", "", "", ""],
+     "dbh_m", "height_m", "taper_cm_per_m", "trunk_len_m", "branch_len_m", "branch_filter"],
+    ["IND01_054", "Reference (destructive)", "1.7169", "1.2557", "0.4612", "", "", "", "", "", "", "10cm"],
+    ["IND01_054", "AdQSM (TreesParams)",     "1.6905", "1.1302", "0.5603", "", "", "", "", "", "", "none"],
+    ["IND01_054", "AdTree calibrated",       "1.9240", "1.3020", "0.6220", "", "", "", "", "", "", "none"],
+    ["IND01_054", "TreeQSM de Tanago (mean 20)", "3.0838", "1.8383", "1.2455", "0.3113", "", "", "", "", "", "none"],
+    ["IND01_054", "TreeQSM mine v1",         "3.6806", "1.5317", "2.1488", "0.1915", "", "", "", "", "", "none"],
+    ["IND01_054", "TreeQSM mine v2",         "3.9744", "1.5737", "2.4007", "0.1923", "", "", "", "", "", "none"],
 ]
 
 
@@ -101,6 +122,10 @@ def load_results(path):
                 "taper": to_float(r.get("taper_cm_per_m")),
                 "trunk_len": to_float(r.get("trunk_len_m")),
                 "branch_len": to_float(r.get("branch_len_m")),
+                # branch_filter: blank cell OR the column missing entirely
+                # (an older row, from before this column existed) both fall
+                # back to "none" - the "or" chain handles both None and "".
+                "branch_filter": (r.get("branch_filter") or "").strip() or "none",
             })
     return rows
 
@@ -127,8 +152,15 @@ def fmt_pct(x, width=8):
     return "%+*.1f%%" % (width - 1, x)
 
 
-def print_tree_block(tree, rows):
-    """Print the side-by-side method comparison for a single tree."""
+def print_tree_block(tree, rows, no_reference_note=None):
+    """Print the side-by-side method comparison for a single tree.
+
+    `no_reference_note`, if given, REPLACES the generic "(no reference
+    method...)" line printed when this tree has no REFERENCE_METHOD row in
+    `rows` - used by the "methods vs. each other" section in the RUN part
+    below, where that's expected (not a data problem), so a clearer,
+    section-specific note is shown instead. Purely a wording change - the
+    comparison math above is identical either way."""
     tree_rows = [r for r in rows if r["tree"] == tree]
     ref = next((r for r in tree_rows if r["method"] == REFERENCE_METHOD), None)
 
@@ -166,8 +198,11 @@ def print_tree_block(tree, rows):
                fmt(r["height"], width=8, dec=2), fmt_pct(height_pct),
                fmt(r["taper"], width=8, dec=2), fmt_pct(taper_pct)))
     if ref is None:
-        print("(no reference method '%s' for this tree - showing raw values only)"
-              % REFERENCE_METHOD)
+        if no_reference_note is not None:
+            print(no_reference_note)
+        else:
+            print("(no reference method '%s' for this tree - showing raw values only)"
+                  % REFERENCE_METHOD)
     print()
 
 
@@ -251,6 +286,15 @@ def field_error_summary(rows, key, label):
     print()
 
 
+def filter_by_branch_filter(rows, value):
+    """Keep only the rows whose branch_filter equals `value` ("none" or
+    "10cm"). This is the ONLY new filtering step for the two-mode RUN
+    section below - it happens BEFORE rows are handed to print_tree_block/
+    error_metrics/field_error_summary, so none of that existing math changes,
+    it just runs on a smaller (pre-filtered) list of rows."""
+    return [r for r in rows if r["branch_filter"] == value]
+
+
 # =========================  RUN  =====================================
 # Guarded by __name__ == "__main__" so this file can also be IMPORTED (e.g.
 # by plot_volumes.py, to reuse load_results/pct_diff/compute_error_metrics)
@@ -263,25 +307,37 @@ if __name__ == "__main__":
               % RESULTS_CSV)
 
     rows = load_results(RESULTS_CSV)
-    all_trees = sorted({r["tree"] for r in rows})
+
+    # ====================================================================
+    # MODE A: comparison AGAINST THE REFERENCE - only branch_filter == "10cm"
+    # rows (the destructive reference only ever has a "10cm" row, so this is
+    # the fair, apples-to-apples accuracy check - see the header comment for why).
+    # ====================================================================
+    print("#" * 118)
+    print("=== SROVNANI S REFERENCI (vetve/kmen >= 10 cm) ===")
+    print("#" * 118)
+    print()
+
+    rows_10cm = filter_by_branch_filter(rows, "10cm")
+    trees_10cm = sorted({r["tree"] for r in rows_10cm})
 
     if SELECT_TREE.upper() == "ALL":
-        for t in all_trees:
-            print_tree_block(t, rows)
-    elif SELECT_TREE in all_trees:
-        print_tree_block(SELECT_TREE, rows)
+        for t in trees_10cm:
+            print_tree_block(t, rows_10cm)
+    elif SELECT_TREE in trees_10cm:
+        print_tree_block(SELECT_TREE, rows_10cm)
     else:
-        print("Tree '%s' not found. Available trees: %s" % (SELECT_TREE, ", ".join(all_trees)))
-        raise SystemExit
+        print("Tree '%s' not found among branch_filter='10cm' rows. Available: %s"
+              % (SELECT_TREE, ", ".join(trees_10cm)))
 
     # Error metrics make sense whenever a reference exists (works for 1 or many trees).
-    error_metrics(rows)
+    error_metrics(rows_10cm)
 
     # DBH/height/taper are not volumes, so their error is reported separately
     # instead of folding them into the RMSE metrics block above.
-    field_error_summary(rows, "dbh", "DBH")
-    field_error_summary(rows, "height", "Height")
-    field_error_summary(rows, "taper", "Taper")
+    field_error_summary(rows_10cm, "dbh", "DBH")
+    field_error_summary(rows_10cm, "height", "Height")
+    field_error_summary(rows_10cm, "taper", "Taper")
 
     # Trunk/branch LENGTH (not volume) - same "one line per method" summary
     # as DBH/height/taper above, not squeezed into print_tree_block()'s
@@ -290,5 +346,36 @@ if __name__ == "__main__":
     # a normal terminal). Lets you tell apart "shorter/less-complete branch
     # structure" (length is off) from "same length, different radii" (length
     # matches, volume doesn't) - see the header comment at the top of this file.
-    field_error_summary(rows, "trunk_len", "Trunk length")
-    field_error_summary(rows, "branch_len", "Branch length")
+    field_error_summary(rows_10cm, "trunk_len", "Trunk length")
+    field_error_summary(rows_10cm, "branch_len", "Branch length")
+
+    # ====================================================================
+    # MODE B: methods COMPARED TO EACH OTHER - only branch_filter == "none"
+    # rows (full/unfiltered reconstructions, thin branches included). The
+    # destructive reference NEVER appears here (it methodologically can't -
+    # it only ever has a "10cm" row), so print_tree_block always finds no
+    # reference for this mode; a custom note explains that's expected, not
+    # a data problem. error_metrics/field_error_summary are SKIPPED here on
+    # purpose - with no reference there's nothing to compute Bias/RMSE/%
+    # error against, and printing an empty/all-zero table would be noise.
+    # ====================================================================
+    print()
+    print("#" * 118)
+    print("=== SROVNANI METOD MEZI SEBOU (plna rekonstrukce, vcetne tenkych vetvi) ===")
+    print("#" * 118)
+    print()
+
+    rows_none = filter_by_branch_filter(rows, "none")
+    trees_none = sorted({r["tree"] for r in rows_none})
+    no_ref_note = ("(No destructive-reference row here BY DESIGN - the reference only ever\n"
+                   " measured branches >= 10 cm, see the '10cm' section above. This is a pure\n"
+                   " method-vs-method comparison, not an accuracy evaluation.)")
+
+    if SELECT_TREE.upper() == "ALL":
+        for t in trees_none:
+            print_tree_block(t, rows_none, no_reference_note=no_ref_note)
+    elif SELECT_TREE in trees_none:
+        print_tree_block(SELECT_TREE, rows_none, no_reference_note=no_ref_note)
+    else:
+        print("Tree '%s' not found among branch_filter='none' rows. Available: %s"
+              % (SELECT_TREE, ", ".join(trees_none)))
