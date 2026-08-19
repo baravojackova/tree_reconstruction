@@ -314,7 +314,7 @@ if __name__ == "__main__":
     # the fair, apples-to-apples accuracy check - see the header comment for why).
     # ====================================================================
     print("#" * 118)
-    print("=== SROVNANI S REFERENCI (vetve/kmen >= 10 cm) ===")
+    print("=== COMPARISON AGAINST REFERENCE (branches/trunks >= 10 cm) ===")
     print("#" * 118)
     print()
 
@@ -361,7 +361,7 @@ if __name__ == "__main__":
     # ====================================================================
     print()
     print("#" * 118)
-    print("=== SROVNANI METOD MEZI SEBOU (plna rekonstrukce, vcetne tenkych vetvi) ===")
+    print("=== COMPARISON OF METHODS (full reconstruction, including thin branches) ===")
     print("#" * 118)
     print()
 

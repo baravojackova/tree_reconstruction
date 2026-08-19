@@ -35,7 +35,7 @@ FILE_PATTERN = "volumes_*.csv"
 # Which Group to import from each table. "Estimated" uses the optimal
 # models plus the second run, so it has the most reliable mean and std.
 # Other valid choices: "Optimal", "All inputs", "Optimal (single)", "Simplified", "Filtered <10cm".
-IMPORT_GROUP = "Optimal"
+IMPORT_GROUP = "Filtered <10cm"  # the de Tanago field crew physically only measured sections down to a 10 cm taper diameter (see AdQSM.pdf Appendix A) - this reference NEVER has a "none" (full/unfiltered) version, by methodology.
 
 # Shared master results table (read by compare_volumes.py).
 RESULTS_CSV = "volume_results.csv"
@@ -173,25 +173,51 @@ for path in files:
     tree = TREE_ID_MAP.get(tree_raw, tree_raw)      # map short id -> full id
     method = "TreeQSM mine (%s, %s)" % (run, IMPORT_GROUP)
 
-    # Optional DBH/height/trunk-length/branch-length, read from
-    # "dbh_<tree>_<run>.txt" / "height_<tree>_<run>.txt" /
-    # "trunklen_<tree>_<run>.txt" / "branchlen_<tree>_<run>.txt" next to the
-    # volumes table (single number each: metres for all four). The MATLAB
+    # Optional DBH/height, read from "dbh_<tree>_<run>.txt" / "height_<tree>_<run>.txt"
+    # next to the volumes table (single number each, in metres). The MATLAB
     # volumes_*.csv tables don't export a diameter profile, so taper cannot be
     # derived here and is always left as None.
     table_dir = os.path.dirname(path)
     dbh = read_single_number(os.path.join(table_dir, "dbh_%s_%s.txt" % (tree, run)))
     height = read_single_number(os.path.join(table_dir, "height_%s_%s.txt" % (tree, run)))
     taper = None
-    trunk_len = read_single_number(os.path.join(table_dir, "trunklen_%s_%s.txt" % (tree, run)))
-    branch_len = read_single_number(os.path.join(table_dir, "branchlen_%s_%s.txt" % (tree, run)))
 
     # branch_filter: "10cm" for any group whose NAME says it's restricted to
     # branches >= 10 cm diameter (currently only IMPORT_GROUP = "Filtered
     # <10cm", from runsken.m's section 17b) - "none" for every other group
     # (Estimated/Optimal/Optimal (single)/All inputs/Simplified), which use
-    # the full, unfiltered TreeQSM cylinder model.
+    # the full, unfiltered TreeQSM cylinder model. Computed BEFORE the
+    # trunk/branch length read below, so that read can reuse this exact same
+    # test to pick the right length file - see comment there.
     branch_filter = "10cm" if "Filtered" in IMPORT_GROUP else "none"
+
+    # Trunk/branch length: runsken.m section 18 exports TWO separate pairs of
+    # files - "trunklen_/branchlen_<tree>_<run>.txt" hold the UNFILTERED
+    # model's length (correct for Optimal/Estimated/... groups), while
+    # "trunklen_filtered_/branchlen_filtered_<tree>_<run>.txt" hold the
+    # length AFTER the same 10 cm cut-off as the "Filtered <10cm" group's
+    # volume. Reading the unfiltered file for a filtered group would silently
+    # pair a filtered VOLUME with an unfiltered LENGTH - so which file to read
+    # is decided by the SAME branch_filter test used just above, not a second,
+    # differently-worded check.
+    if branch_filter == "10cm":
+        trunk_len_file = "trunklen_filtered_%s_%s.txt" % (tree, run)
+        branch_len_file = "branchlen_filtered_%s_%s.txt" % (tree, run)
+    else:
+        trunk_len_file = "trunklen_%s_%s.txt" % (tree, run)
+        branch_len_file = "branchlen_%s_%s.txt" % (tree, run)
+
+    trunk_len = read_single_number(os.path.join(table_dir, trunk_len_file))
+    branch_len = read_single_number(os.path.join(table_dir, branch_len_file))
+    if branch_filter == "10cm" and (trunk_len is None or branch_len is None):
+        # Don't crash - just flag it clearly so it's not silently wrong: an
+        # older MATLAB run (before this fix) won't have written these two
+        # files yet, and re-using the unfiltered length would be the exact
+        # bug this change fixes. Re-run runsken.m for this tree/run to get them.
+        print("  WARNING: missing filtered length file(s) for %s / %s (%s / %s) - "
+              "trunk_len/branch_len left blank for this row. Re-run runsken.m "
+              "for this tree/run to generate them."
+              % (tree, run, trunk_len_file, branch_len_file))
 
     upsert_result(RESULTS_CSV, tree, method, total, stem, branch, std, dbh, height, taper,
                   trunk_len, branch_len, branch_filter=branch_filter)

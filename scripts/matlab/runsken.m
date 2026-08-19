@@ -385,6 +385,28 @@ fprintf('Stem volume removed  : %.3f m3 (%.1f %%)\n', ...
 fprintf('Branch volume removed: %.3f m3 (%.1f %%)\n', ...
     Vbranch_total - Vbranch_filt, Vbranch_removed_pct);
 
+% --- same cut-off, but applied to LENGTH instead of volume ------------
+% Uses the SAME keep/is_stem/is_branch masks and the SAME L_cyl array
+% already used for Vstem_filt/Vbranch_filt above - just sum(L_cyl(...))
+% instead of sum(V_cyl(...)). This lets "TreeQSM mine (*, Filtered<10cm)"
+% report its OWN filtered trunk/branch length (exported in section 18
+% below) instead of reusing the unfiltered model's length.
+Lstem_filt   = sum(L_cyl(keep_stem));
+Lbranch_filt = sum(L_cyl(keep_branch));
+
+Lstem_total   = sum(L_cyl(is_stem));
+Lbranch_total = sum(L_cyl(is_branch));
+
+Lstem_removed_pct   = (Lstem_total   - Lstem_filt)   / Lstem_total   * 100;
+Lbranch_removed_pct = (Lbranch_total - Lbranch_filt) / Lbranch_total * 100;
+
+fprintf('Stem length kept     : %.3f m\n', Lstem_filt);
+fprintf('Branch length kept   : %.3f m\n', Lbranch_filt);
+fprintf('Stem length removed  : %.3f m (%.1f %%)\n', ...
+    Lstem_total - Lstem_filt, Lstem_removed_pct);
+fprintf('Branch length removed: %.3f m (%.1f %%)\n', ...
+    Lbranch_total - Lbranch_filt, Lbranch_removed_pct);
+
 V_filtered = [Vtotal_filt, Vstem_filt, Vbranch_filt];
 fprintf('Check: stem+branch total = %.3f m3 (should equal %.3f m3)\n', ...
     Vstem_total + Vbranch_total, sum(V_cyl));
@@ -485,6 +507,25 @@ branchlen_file = ['branchlen_' tree_id '_' run_tag '.txt'];
 fid = fopen(branchlen_file, 'w');
 fprintf(fid, '%.6f', QSM_opt.treedata.BranchLength);   % branch length [m]
 fprintf('Branch length exported to %s\n', branchlen_file);
+fclose(fid);
+%
+% ---- export FILTERED (>= cut_cm diameter) trunk/branch length ----
+% ADDED, does not replace trunklen_*.txt/branchlen_*.txt above: those two
+% still hold the UNFILTERED length (used by Optimal/Estimated/... groups).
+% These two new files hold Lstem_filt/Lbranch_filt from section 17b, for
+% the "Filtered <10cm" group specifically - different filename so neither
+% overwrites the other, and import_matlab_results.py picks the right one
+% based on which group it's importing.
+trunklen_filtered_file = ['trunklen_filtered_' tree_id '_' run_tag '.txt'];
+fid = fopen(trunklen_filtered_file, 'w');
+fprintf(fid, '%.6f', Lstem_filt);   % filtered trunk/stem length [m]
+fprintf('Filtered trunk length exported to %s\n', trunklen_filtered_file);
+fclose(fid);
+%
+branchlen_filtered_file = ['branchlen_filtered_' tree_id '_' run_tag '.txt'];
+fid = fopen(branchlen_filtered_file, 'w');
+fprintf(fid, '%.6f', Lbranch_filt);   % filtered branch length [m]
+fprintf('Filtered branch length exported to %s\n', branchlen_filtered_file);
 fclose(fid);
 %% ------------------------------------------------------------
 %  19) EXPORT - table with the input parameters of each model
