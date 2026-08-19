@@ -4,9 +4,14 @@
 # ...except the code and the results table:
 !.gitignore
 !README.md
+
 !scripts/
+!scripts/python/
 !scripts/python/**
-!scripts/matlab/runskem.m
+!scripts/matlab/
+!scripts/matlab/runsken.m
+!scripts/ansys/
 !scripts/ansys/**
-!results/ 
+
+!results/
 !results/volume_results.csv
