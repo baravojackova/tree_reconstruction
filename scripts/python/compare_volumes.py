@@ -158,9 +158,12 @@ def print_tree_block(tree, rows):
     print()
 
 
-def error_metrics(rows):
-    """Across all trees, compute Bias/MAE/RMSE/CV-RMSE of each method vs the
-    reference, using only trees where BOTH that method and the reference exist."""
+def compute_error_metrics(rows):
+    """Same Bias/MAE/RMSE/CV-RMSE calculation as error_metrics() below, but
+    RETURNS the numbers instead of printing them (one dict per method), so
+    other scripts (e.g. plot_volumes.py) can reuse this exact calculation
+    instead of duplicating the math and risking the two going out of sync.
+    Only trees where BOTH that method and the reference exist are used."""
     trees = sorted({r["tree"] for r in rows})
     methods = [m for m in dict.fromkeys(r["method"] for r in rows)
                if m != REFERENCE_METHOD]
@@ -168,13 +171,7 @@ def error_metrics(rows):
     # quick lookup: (tree, method) -> total
     total_of = {(r["tree"], r["method"]): r["total"] for r in rows}
 
-    print("=" * 78)
-    print("Error metrics vs '%s'  (total volume, across trees)" % REFERENCE_METHOD)
-    print("-" * 78)
-    print("%-28s %5s %9s %9s %9s %9s" %
-          ("method", "n", "Bias", "MAE", "RMSE", "CV-RMSE%"))
-    print("-" * 78)
-
+    results = []
     for m in methods:
         pairs = []
         for t in trees:
@@ -191,8 +188,25 @@ def error_metrics(rows):
         mae = sum(abs(e) for e in errs) / n
         rmse = math.sqrt(sum(e * e for e in errs) / n)
         cv_rmse = rmse / (sum(refs) / n) * 100.0 if refs else 0.0
+        results.append(dict(method=m, n=n, bias=bias, mae=mae, rmse=rmse, cv_rmse=cv_rmse))
+    return results
+
+
+def error_metrics(rows):
+    """Across all trees, compute (via compute_error_metrics) and PRINT
+    Bias/MAE/RMSE/CV-RMSE of each method vs the reference."""
+    results = compute_error_metrics(rows)
+
+    print("=" * 78)
+    print("Error metrics vs '%s'  (total volume, across trees)" % REFERENCE_METHOD)
+    print("-" * 78)
+    print("%-28s %5s %9s %9s %9s %9s" %
+          ("method", "n", "Bias", "MAE", "RMSE", "CV-RMSE%"))
+    print("-" * 78)
+
+    for r in results:
         print("%-28s %5d %9.3f %9.3f %9.3f %9.1f" %
-              (m[:28], n, bias, mae, rmse, cv_rmse))
+              (r["method"][:28], r["n"], r["bias"], r["mae"], r["rmse"], r["cv_rmse"]))
     print("(Bias/MAE/RMSE in m^3. n = number of trees compared. With one tree,")
     print(" MAE = RMSE = |error| and CV-RMSE is that error relative to the reference.)")
     print()
@@ -225,29 +239,33 @@ def field_error_summary(rows, key, label):
 
 
 # =========================  RUN  =====================================
-if not os.path.exists(RESULTS_CSV):
-    with open(RESULTS_CSV, "w", encoding="utf-8", newline="") as f:
-        csv.writer(f).writerows(STARTER_ROWS)
-    print("No results file found - wrote a starter '%s' with the IND01_054 data.\n"
-          % RESULTS_CSV)
+# Guarded by __name__ == "__main__" so this file can also be IMPORTED (e.g.
+# by plot_volumes.py, to reuse load_results/pct_diff/compute_error_metrics)
+# without re-running all these prints / writing the starter CSV as a side effect.
+if __name__ == "__main__":
+    if not os.path.exists(RESULTS_CSV):
+        with open(RESULTS_CSV, "w", encoding="utf-8", newline="") as f:
+            csv.writer(f).writerows(STARTER_ROWS)
+        print("No results file found - wrote a starter '%s' with the IND01_054 data.\n"
+              % RESULTS_CSV)
 
-rows = load_results(RESULTS_CSV)
-all_trees = sorted({r["tree"] for r in rows})
+    rows = load_results(RESULTS_CSV)
+    all_trees = sorted({r["tree"] for r in rows})
 
-if SELECT_TREE.upper() == "ALL":
-    for t in all_trees:
-        print_tree_block(t, rows)
-elif SELECT_TREE in all_trees:
-    print_tree_block(SELECT_TREE, rows)
-else:
-    print("Tree '%s' not found. Available trees: %s" % (SELECT_TREE, ", ".join(all_trees)))
-    raise SystemExit
+    if SELECT_TREE.upper() == "ALL":
+        for t in all_trees:
+            print_tree_block(t, rows)
+    elif SELECT_TREE in all_trees:
+        print_tree_block(SELECT_TREE, rows)
+    else:
+        print("Tree '%s' not found. Available trees: %s" % (SELECT_TREE, ", ".join(all_trees)))
+        raise SystemExit
 
-# Error metrics make sense whenever a reference exists (works for 1 or many trees).
-error_metrics(rows)
+    # Error metrics make sense whenever a reference exists (works for 1 or many trees).
+    error_metrics(rows)
 
-# DBH/height/taper are not volumes, so their error is reported separately
-# instead of folding them into the RMSE metrics block above.
-field_error_summary(rows, "dbh", "DBH")
-field_error_summary(rows, "height", "Height")
-field_error_summary(rows, "taper", "Taper")
+    # DBH/height/taper are not volumes, so their error is reported separately
+    # instead of folding them into the RMSE metrics block above.
+    field_error_summary(rows, "dbh", "DBH")
+    field_error_summary(rows, "height", "Height")
+    field_error_summary(rows, "taper", "Taper")

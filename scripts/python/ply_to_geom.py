@@ -40,7 +40,29 @@ from scipy.sparse.csgraph import breadth_first_order, connected_components
 # and the AdQSM taper/branch/params exports). Edit this to point at a
 # different tree's folder; INPUT_PLY and the ADQSM_*_FILE paths below are all
 # resolved relative to it.
+#
+# --- AdQSM variant(s) ---------------------------------------------------
+# AdQSM can be reconstructed several times with different settings, each
+# saved in its own subfolder (e.g. ".../AdQSM/05", ".../AdQSM/08" - the
+# folder name is just whatever you called that reconstruction run). You can
+# either:
+#   (1) point at ONE such folder with AdQSM_DIR (simple, old behaviour), or
+#   (2) list SEVERAL subfolder names in ADQSM_VARIANTS to process all of
+#       them in a single run of this script (similar to how RADIUS_THRESHOLDS
+#       lets you try several radius thresholds in one run).
+#
+# Case (1) - single variant (default, still works exactly as before):
 AdQSM_DIR = r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\data\IND01_54\AdQSM\05"
+
+# Case (2) - several variants. Leave ADQSM_VARIANTS empty/None to use only
+# AdQSM_DIR above (case 1). To use several variants instead, set BOTH:
+#   ADQSM_BASE_DIR = r"C:\...\data\IND01_54\AdQSM"
+#   ADQSM_VARIANTS = ["05", "08"]
+# Each name in ADQSM_VARIANTS must be a subfolder of ADQSM_BASE_DIR that
+# contains its own taper.txt, BranchStructure.txt and TreesParams.txt.
+ADQSM_BASE_DIR = None
+ADQSM_VARIANTS = None   # e.g. ["05", "08"]
+
 AdTree_DIR = r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\data\IND01_54"
 
 INPUT_PLY = os.path.join(AdTree_DIR, "IND01_054 - Cloud_skeleton.ply")   # input skeleton from AdTree
@@ -89,16 +111,6 @@ SMOOTH_ALPHA = 0.5                # 0..1 strength per pass
 # radii, exactly like before this feature existed.
 CALIBRATE_RADII = True
 
-# AdQSM trunk taper curve: text file of "height[m] <TAB> diameter[m]" rows.
-ADQSM_TAPER_FILE = os.path.join(AdQSM_DIR, "taper.txt")
-
-# AdQSM per-branch table: text file with columns order, parent, diameter[m], ...
-ADQSM_BRANCH_FILE = os.path.join(AdQSM_DIR, "BranchStructure.txt")
-
-# AdQSM tree parameters (volumes in m^3), used only for the reference line in
-# the volume comparison printout.
-ADQSM_PARAMS_FILE = os.path.join(AdQSM_DIR, "TreesParams.txt")
-
 # Measured trunk diameter at breast height (1.3 m), in METERS. If given, the
 # taper curve is rescaled so its value at 1.3 m matches this measurement.
 # Set to None to use the taper curve exactly as read from ADQSM_TAPER_FILE.
@@ -116,6 +128,38 @@ RESULTS_CSV = "volume_results.csv"
 # upper). DBH is the stem diameter at TAPER_H_LOWER (1.3 m = breast height).
 TAPER_H_LOWER = 1.3    # lower reference height [m]
 TAPER_H_UPPER = 10.0   # upper reference height [m]
+# =====================================================================
+
+# --- Build the list of AdQSM variants to actually process --------------
+# You should NOT need to edit this block - edit AdQSM_DIR (single variant)
+# or ADQSM_BASE_DIR + ADQSM_VARIANTS (several variants) above instead.
+#
+# The RUN section further below loops over ADQSM_VARIANT_LIST. Each entry
+# is a tuple (variant_label, taper_file, branch_file, params_file):
+#   - variant_label is None when you used the simple single-AdQSM_DIR case
+#     (case 1 above) - in that case output filenames/method names get NO
+#     extra suffix, exactly like before this feature existed.
+#   - variant_label is the variant's subfolder name (e.g. "05") when you
+#     used ADQSM_VARIANTS (case 2) - in that case it's appended to output
+#     filenames and to method names in RESULTS_CSV, so the variants don't
+#     overwrite each other and stay distinguishable in the results table.
+if ADQSM_VARIANTS:
+    ADQSM_VARIANT_LIST = []
+    for variant_name in ADQSM_VARIANTS:
+        variant_dir = os.path.join(ADQSM_BASE_DIR, variant_name)
+        ADQSM_VARIANT_LIST.append((
+            variant_name,
+            os.path.join(variant_dir, "taper.txt"),            # taper curve
+            os.path.join(variant_dir, "BranchStructure.txt"),  # per-branch table
+            os.path.join(variant_dir, "TreesParams.txt"),      # whole-tree params
+        ))
+else:
+    ADQSM_VARIANT_LIST = [(
+        None,
+        os.path.join(AdQSM_DIR, "taper.txt"),
+        os.path.join(AdQSM_DIR, "BranchStructure.txt"),
+        os.path.join(AdQSM_DIR, "TreesParams.txt"),
+    )]
 # =====================================================================
 
 # --- Output file name(s) --------------------------------------------
@@ -351,10 +395,19 @@ def parse_adqsm_params_file(path):
         branch_len = extract("BranchLength", line) or 0.0
         branches_num = extract("BranchesNum", line) or 0.0
         tree_height = extract("TreeHeight", line)
+        # DBH (trunk diameter at breast height) is NOT always exported by
+        # AdQSM, and its key name isn't fully standardized across versions,
+        # so we try a few common ones and use whichever is found first.
+        # If your TreesParams.txt uses a different key, add it to this list.
+        tree_dbh = None
+        for dbh_key in ("DBH", "Dbh", "TrunkDBH", "DBHeight", "DiameterBH"):
+            tree_dbh = extract(dbh_key, line)
+            if tree_dbh is not None:
+                break
         return dict(n=int(branches_num), total_len=trunk_len + branch_len, total_vol=tree_vol,
                     trunk_n=0, trunk_len=trunk_len, trunk_vol=trunk_vol,
                     branch_n=0, branch_len=branch_len, branch_vol=branch_vol,
-                    height=tree_height)
+                    height=tree_height, dbh=tree_dbh)
 
     return None
 
@@ -725,92 +778,135 @@ smooth_root = int(np.argmin(xyz[:, 2]))
 xyz = smooth_centerline(xyz, edges, smooth_root, SMOOTH_ITERS, SMOOTH_ALPHA)
 print("  centerline smoothing: %d passes, alpha=%.2f" % (SMOOTH_ITERS, SMOOTH_ALPHA))
 
-if CALIBRATE_RADII:
-    print("\nLoading AdQSM calibration data...")
-    taper_heights, taper_diameters = parse_adqsm_taper_file(ADQSM_TAPER_FILE)
-    trunk_radius_func = make_trunk_radius_func(taper_heights, taper_diameters, FIELD_DBH)
-    adqsm_median_by_order = parse_adqsm_branch_file(ADQSM_BRANCH_FILE)
-    print("  %s: %d height/diameter rows, %.1f-%.1f m"
-          % (ADQSM_TAPER_FILE, len(taper_heights), taper_heights.min(), taper_heights.max()))
-    if FIELD_DBH is not None:
-        print("  taper curve rescaled so radius at 1.3 m = FIELD_DBH/2 = %.4f m" % (FIELD_DBH / 2.0))
-    print("  %s: AdQSM median radius by order: %s"
-          % (ADQSM_BRANCH_FILE,
-             ", ".join("%d=%.4f m" % (o, r) for o, r in sorted(adqsm_median_by_order.items()))))
-
-    raw_stats = raw_skeleton_stats(xyz_raw, rad, edges)
-    print("  raw PLY skeleton baseline (all tree edges, AdTree radii):")
-    print_volume_stats("raw skeleton (AdTree)", raw_stats)
-
 print("\n%-12s %-12s %-12s %-12s" % ("threshold", "cylinders", "length [m]", "file"))
 print("Volume verification below is computed from the exact cylinders written to "
       "each geom file (pi * radius^2 * length per cylinder).\n")
 z_base = float(xyz[:, 2].min())   # tree base; DBH/height/taper are measured from here
 multiple_thresholds = len(RADIUS_THRESHOLDS) > 1
-for thr in RADIUS_THRESHOLDS:
-    root, cyl, cyl_order = convert(xyz, rad, edges, thr, SEG_LEN_MIN, SEG_LEN_MAX, SEG_LEN_K)
-    out = OUTPUT_PATTERN.format(r=int(round(thr * 1000))) if multiple_thresholds else OUTPUT_NAME
+multiple_variants = len(ADQSM_VARIANT_LIST) > 1   # True only if you used ADQSM_VARIANTS (case 2 above)
 
-    # Height of the pruned model: z-range of the nodes actually used by these
-    # cylinders. Unaffected by radius calibration (geometry doesn't change).
-    node_ids = sorted({idx for a, b, r, pid in cyl for idx in (a, b)})
-    height_m = float(xyz[node_ids, 2].max() - xyz[node_ids, 2].min()) if node_ids else None
-
-    if CALIBRATE_RADII:
-        orig_lengths, orig_radii = cylinder_metrics(xyz, cyl)
-        orig_stats = volume_stats(orig_lengths, orig_radii, np.asarray(cyl_order))
-        # DBH/taper of the UNCALIBRATED (raw AdTree) trunk, before radii are replaced.
-        raw_dbh = stem_diameter_at_height(xyz, cyl, cyl_order, z_base, TAPER_H_LOWER)
-        raw_d_upper = stem_diameter_at_height(xyz, cyl, cyl_order, z_base, TAPER_H_UPPER)
-        raw_taper = ((raw_dbh - raw_d_upper) * 100.0 / (TAPER_H_UPPER - TAPER_H_LOWER)
-                     if raw_dbh is not None and raw_d_upper is not None else None)
-
-        new_radii, factors = calibrate_cylinder_radii(
-            xyz, cyl, cyl_order, trunk_radius_func, adqsm_median_by_order)
-        cyl = [(a, b, float(new_radii[i]), pid) for i, (a, b, r, pid) in enumerate(cyl)]
-
-    write_geom(out, xyz, cyl, root, RECENTER_XY)
-    total_len = sum(float(np.linalg.norm(xyz[b] - xyz[a])) for a, b, _, _ in cyl)
-    print("%-12s %-12d %-12.1f %-12s" % ("%d mm" % round(thr * 1000), len(cyl), total_len, out))
-    report_volume(xyz, cyl, thr)   # uses the (possibly calibrated) radii above
+# Outer loop: one pass per AdQSM variant (just one pass, using the plain
+# AdQSM_DIR, unless you filled in ADQSM_VARIANTS). Everything inside this
+# loop (loading AdQSM data, calibrating, writing geom files, saving results)
+# is repeated once per variant, so several reconstructions can be compared
+# side by side in the same RESULTS_CSV without overwriting each other.
+for variant_label, taper_file, branch_file, params_file in ADQSM_VARIANT_LIST:
+    # variant_suffix/variant_method_suffix are "" when there is only one
+    # variant (so filenames/method names look exactly like before this
+    # feature existed); otherwise they tag the variant name onto them.
+    variant_suffix = ("_adqsm%s" % variant_label) if variant_label else ""
+    variant_method_suffix = (" (AdQSM %s)" % variant_label) if variant_label else ""
 
     if CALIBRATE_RADII:
-        print("  AdQSM calibration factors (order: AdQSM_median_radius / AdTree_median_radius):")
-        for o in sorted(factors):
-            print("    order %d : factor = %.3f" % (o, factors[o]))
-        cal_lengths, cal_radii = cylinder_metrics(xyz, cyl)
-        cal_stats = volume_stats(cal_lengths, cal_radii, np.asarray(cyl_order))
+        print("\nLoading AdQSM calibration data%s..."
+              % (" (variant: %s)" % variant_label if variant_label else ""))
+        taper_heights, taper_diameters = parse_adqsm_taper_file(taper_file)
+        trunk_radius_func = make_trunk_radius_func(taper_heights, taper_diameters, FIELD_DBH)
+        adqsm_median_by_order = parse_adqsm_branch_file(branch_file)
+        print("  %s: %d height/diameter rows, %.1f-%.1f m"
+              % (taper_file, len(taper_heights), taper_heights.min(), taper_heights.max()))
+        if FIELD_DBH is not None:
+            print("  taper curve rescaled so radius at 1.3 m = FIELD_DBH/2 = %.4f m" % (FIELD_DBH / 2.0))
+        print("  %s: AdQSM median radius by order: %s"
+              % (branch_file,
+                 ", ".join("%d=%.4f m" % (o, r) for o, r in sorted(adqsm_median_by_order.items()))))
 
-        # DBH/taper of the CALIBRATED trunk, using the now-replaced radii.
-        cal_dbh = stem_diameter_at_height(xyz, cyl, cyl_order, z_base, TAPER_H_LOWER)
-        cal_d_upper = stem_diameter_at_height(xyz, cyl, cyl_order, z_base, TAPER_H_UPPER)
-        cal_taper = ((cal_dbh - cal_d_upper) * 100.0 / (TAPER_H_UPPER - TAPER_H_LOWER)
-                     if cal_dbh is not None and cal_d_upper is not None else None)
+        raw_stats = raw_skeleton_stats(xyz_raw, rad, edges)
+        print("  raw PLY skeleton baseline (all tree edges, AdTree radii):")
+        print_volume_stats("raw skeleton (AdTree)", raw_stats)
 
-        # ---- upsert both the uncalibrated and calibrated rows for this threshold ----
-        upsert_result(RESULTS_CSV, TREE_NAME, "AdTree raw r%dmm" % round(thr * 1000),
-                      orig_stats["total_vol"], orig_stats["trunk_vol"], orig_stats["branch_vol"], None,
-                      raw_dbh, height_m, raw_taper)
-        upsert_result(RESULTS_CSV, TREE_NAME, "AdTree calibrated r%dmm" % round(thr * 1000),
-                      cal_stats["total_vol"], cal_stats["trunk_vol"], cal_stats["branch_vol"], None,
-                      cal_dbh, height_m, cal_taper)
-
-        print("  DBH (at %.1f m)   : raw AdTree = %s   |   calibrated = %s"
-              % (TAPER_H_LOWER, _fmt_dbh(raw_dbh), _fmt_dbh(cal_dbh)))
-        print("  Taper (%.1f-%.1f m): raw AdTree = %s   |   calibrated = %s"
-              % (TAPER_H_LOWER, TAPER_H_UPPER, _fmt_taper(raw_taper), _fmt_taper(cal_taper)))
-        print("  Height (pruned model): %s" % (("%.2f m" % height_m) if height_m is not None else "n/a"))
-
-        print("  Volume comparison (a) raw skeleton vs. (b) processed/AdTree vs. (c) processed/calibrated:")
-        print_volume_stats("(a) raw skeleton (AdTree)", raw_stats)
-        print_volume_stats("(b) processed, AdTree radii", orig_stats)
-        print_volume_stats("(c) processed, CALIBRATED", cal_stats)
-        adqsm_ref = parse_adqsm_params_file(ADQSM_PARAMS_FILE)
+        # ---- (task 1) upsert the AdQSM reference itself into RESULTS_CSV ----
+        # This is AdQSM's OWN reported volume (straight from TreesParams.txt),
+        # not anything derived from the AdTree skeleton - it does not depend on
+        # RADIUS_THRESHOLDS, so it's only written once per variant (here),
+        # outside the threshold loop below.
+        adqsm_ref = parse_adqsm_params_file(params_file)
         if adqsm_ref is not None:
             print_volume_stats("(d) AdQSM reference (TreesParams)", adqsm_ref)
             if adqsm_ref.get("height") is not None:
                 print("      AdQSM TreeHeight: %.2f m" % adqsm_ref["height"])
-    print()
+            upsert_result(RESULTS_CSV, TREE_NAME,
+                          "AdQSM (TreesParams)%s" % variant_method_suffix,
+                          adqsm_ref["total_vol"], adqsm_ref["trunk_vol"], adqsm_ref["branch_vol"], None,
+                          adqsm_ref.get("dbh"), adqsm_ref.get("height"), None)
+        else:
+            print("  (no TreesParams.txt reference found at %s - skipping that row)" % params_file)
 
-    if SHOW_PLOT or SAVE_PLOT_PNG:
-        plot_model(xyz, cyl, root, RECENTER_XY, thr, out, SHOW_PLOT, SAVE_PLOT_PNG)
+    # Inner loop: one pass per radius threshold (same as before this feature
+    # existed), now repeated for each AdQSM variant above.
+    for thr in RADIUS_THRESHOLDS:
+        root, cyl, cyl_order = convert(xyz, rad, edges, thr, SEG_LEN_MIN, SEG_LEN_MAX, SEG_LEN_K)
+        base_name = OUTPUT_PATTERN.format(r=int(round(thr * 1000))) if multiple_thresholds else OUTPUT_NAME
+        if variant_suffix:
+            # insert the variant tag just before the file extension, e.g.
+            # "geom_r30_optim.txt" -> "geom_r30_optim_adqsm05.txt"
+            name_part, ext_part = os.path.splitext(base_name)
+            out = name_part + variant_suffix + ext_part
+        else:
+            out = base_name
+
+        # Height of the pruned model: z-range of the nodes actually used by these
+        # cylinders. Unaffected by radius calibration (geometry doesn't change).
+        node_ids = sorted({idx for a, b, r, pid in cyl for idx in (a, b)})
+        height_m = float(xyz[node_ids, 2].max() - xyz[node_ids, 2].min()) if node_ids else None
+
+        if CALIBRATE_RADII:
+            orig_lengths, orig_radii = cylinder_metrics(xyz, cyl)
+            orig_stats = volume_stats(orig_lengths, orig_radii, np.asarray(cyl_order))
+            # DBH/taper of the UNCALIBRATED (raw AdTree) trunk, before radii are replaced.
+            raw_dbh = stem_diameter_at_height(xyz, cyl, cyl_order, z_base, TAPER_H_LOWER)
+            raw_d_upper = stem_diameter_at_height(xyz, cyl, cyl_order, z_base, TAPER_H_UPPER)
+            raw_taper = ((raw_dbh - raw_d_upper) * 100.0 / (TAPER_H_UPPER - TAPER_H_LOWER)
+                         if raw_dbh is not None and raw_d_upper is not None else None)
+
+            new_radii, factors = calibrate_cylinder_radii(
+                xyz, cyl, cyl_order, trunk_radius_func, adqsm_median_by_order)
+            cyl = [(a, b, float(new_radii[i]), pid) for i, (a, b, r, pid) in enumerate(cyl)]
+
+        write_geom(out, xyz, cyl, root, RECENTER_XY)
+        total_len = sum(float(np.linalg.norm(xyz[b] - xyz[a])) for a, b, _, _ in cyl)
+        print("%-12s %-12d %-12.1f %-12s" % ("%d mm" % round(thr * 1000), len(cyl), total_len, out))
+        report_volume(xyz, cyl, thr)   # uses the (possibly calibrated) radii above
+
+        if CALIBRATE_RADII:
+            print("  AdQSM calibration factors (order: AdQSM_median_radius / AdTree_median_radius):")
+            for o in sorted(factors):
+                print("    order %d : factor = %.3f" % (o, factors[o]))
+            cal_lengths, cal_radii = cylinder_metrics(xyz, cyl)
+            cal_stats = volume_stats(cal_lengths, cal_radii, np.asarray(cyl_order))
+
+            # DBH/taper of the CALIBRATED trunk, using the now-replaced radii.
+            cal_dbh = stem_diameter_at_height(xyz, cyl, cyl_order, z_base, TAPER_H_LOWER)
+            cal_d_upper = stem_diameter_at_height(xyz, cyl, cyl_order, z_base, TAPER_H_UPPER)
+            cal_taper = ((cal_dbh - cal_d_upper) * 100.0 / (TAPER_H_UPPER - TAPER_H_LOWER)
+                         if cal_dbh is not None and cal_d_upper is not None else None)
+
+            # ---- upsert both the uncalibrated and calibrated rows for this threshold ----
+            # "AdTree raw" does NOT depend on AdQSM at all, so it gets no variant
+            # suffix - it's simply re-written (with identical values) for every
+            # variant, which is harmless since upsert_result overwrites by
+            # (tree, method), not duplicates.
+            upsert_result(RESULTS_CSV, TREE_NAME, "AdTree raw r%dmm" % round(thr * 1000),
+                          orig_stats["total_vol"], orig_stats["trunk_vol"], orig_stats["branch_vol"], None,
+                          raw_dbh, height_m, raw_taper)
+            # "AdTree calibrated" DOES depend on which AdQSM variant it was
+            # calibrated against, so it gets the variant suffix (when set).
+            upsert_result(RESULTS_CSV, TREE_NAME,
+                          "AdTree calibrated r%dmm%s" % (round(thr * 1000), variant_method_suffix),
+                          cal_stats["total_vol"], cal_stats["trunk_vol"], cal_stats["branch_vol"], None,
+                          cal_dbh, height_m, cal_taper)
+
+            print("  DBH (at %.1f m)   : raw AdTree = %s   |   calibrated = %s"
+                  % (TAPER_H_LOWER, _fmt_dbh(raw_dbh), _fmt_dbh(cal_dbh)))
+            print("  Taper (%.1f-%.1f m): raw AdTree = %s   |   calibrated = %s"
+                  % (TAPER_H_LOWER, TAPER_H_UPPER, _fmt_taper(raw_taper), _fmt_taper(cal_taper)))
+            print("  Height (pruned model): %s" % (("%.2f m" % height_m) if height_m is not None else "n/a"))
+
+            print("  Volume comparison (a) raw skeleton vs. (b) processed/AdTree vs. (c) processed/calibrated:")
+            print_volume_stats("(a) raw skeleton (AdTree)", raw_stats)
+            print_volume_stats("(b) processed, AdTree radii", orig_stats)
+            print_volume_stats("(c) processed, CALIBRATED", cal_stats)
+        print()
+
+        if SHOW_PLOT or SAVE_PLOT_PNG:
+            plot_model(xyz, cyl, root, RECENTER_XY, thr, out, SHOW_PLOT, SAVE_PLOT_PNG)
