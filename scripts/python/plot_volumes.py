@@ -56,6 +56,7 @@ from compare_volumes import (
     load_results,
     pct_diff,
     compute_error_metrics,
+    filter_by_branch_filter,
 )
 
 # =====================  PARAMETERS  ==================================
@@ -85,6 +86,16 @@ def save_and_report(fig, filename):
 # a) Bar chart: total_m3 per method, grouped by tree.
 # ----------------------------------------------------------------------
 def plot_total_volume_by_tree(rows):
+    # Only branch_filter == "10cm" rows: this chart draws the REFERENCE
+    # method's bar highlighted, so it's implicitly a "vs. reference" chart -
+    # mixing in "none" (full/unfiltered) rows here would compare some
+    # methods' full reconstructions against a reference that only ever
+    # measured >= 10 cm, exactly the unfair comparison branch_filter exists
+    # to prevent (see compare_volumes.py's header comment). Filtering here
+    # too (not just in the RUN section below) means this function stays
+    # correct even if called directly with unfiltered rows.
+    rows = filter_by_branch_filter(rows, "10cm")
+
     trees = sorted({r["tree"] for r in rows})
     # dict.fromkeys() keeps the methods in the order they first appear in
     # the CSV (a plain set() would print them in a random order every run).
@@ -262,6 +273,11 @@ def plot_tree_overview(rows, tree, branch_filter):
 # b) Box plot: percentage error vs. reference, per method, across trees.
 # ----------------------------------------------------------------------
 def plot_error_boxplot(rows):
+    # Only "10cm" rows - this chart is entirely about error vs. the
+    # reference, which only ever has a "10cm" row (see plot_total_volume_by_tree
+    # above / compare_volumes.py's header comment for why).
+    rows = filter_by_branch_filter(rows, "10cm")
+
     trees = sorted({r["tree"] for r in rows})
     methods = [m for m in dict.fromkeys(r["method"] for r in rows) if m != REFERENCE_METHOD]
     total_of = {(r["tree"], r["method"]): r["total"] for r in rows}
@@ -303,6 +319,10 @@ def plot_error_boxplot(rows):
 #    compare_volumes.py's printed "Error metrics" table).
 # ----------------------------------------------------------------------
 def plot_error_metrics_bar(rows):
+    # Only "10cm" rows - same reason as plot_error_boxplot() above: Bias/MAE/
+    # RMSE are computed against the reference, which only ever has a "10cm" row.
+    rows = filter_by_branch_filter(rows, "10cm")
+
     metrics = compute_error_metrics(rows)   # reuses compare_volumes.py's own calculation
     if not metrics:
         print("No method could be compared to the reference - skipping error-metrics chart.")
@@ -341,8 +361,15 @@ if __name__ == "__main__":
     rows = load_results(RESULTS_CSV)
     all_trees = sorted({r["tree"] for r in rows})
 
+    # Pre-filtered once here too (mirrors compare_volumes.py's RUN section),
+    # and passed into the three "vs. reference" chart functions below - they
+    # also filter internally (see each function's comment), so this is a
+    # belt-and-suspenders double-filter: harmless (filtering "10cm" rows by
+    # "10cm" again is a no-op) and keeps the RUN section's intent explicit.
+    rows_10cm = filter_by_branch_filter(rows, "10cm")
+
     # Always makes sense, regardless of how many trees are in the CSV.
-    plot_total_volume_by_tree(rows)
+    plot_total_volume_by_tree(rows_10cm)
 
     # TWO overview PNGs per tree currently in the CSV - one per branch_filter
     # value, so "10cm" (vs.-reference) and "none" (full reconstruction) rows
@@ -354,14 +381,17 @@ if __name__ == "__main__":
         plot_tree_overview(rows, tree, branch_filter="10cm")
         plot_tree_overview(rows, tree, branch_filter="none")
 
-    # The boxplot and RMSE/Bias/MAE charts compare methods ACROSS trees, so
-    # they need at least 2 trees to say anything real; with only 1, skip
-    # them (instead of drawing a single degenerate point/bar) and say why.
-    if len(all_trees) >= 2:
-        plot_error_boxplot(rows)
-        plot_error_metrics_bar(rows)
+    # The boxplot and RMSE/Bias/MAE charts compare methods ACROSS trees vs.
+    # the reference, so what matters is how many trees have a "10cm" row (a
+    # tree could exist in the CSV with ONLY "none" rows, e.g. no destructive
+    # reference measured for it yet) - not the raw tree count.
+    trees_10cm = sorted({r["tree"] for r in rows_10cm})
+    if len(trees_10cm) >= 2:
+        plot_error_boxplot(rows_10cm)
+        plot_error_metrics_bar(rows_10cm)
     else:
-        print("Only %d tree in %s - skipping error_boxplot.png and "
-              "error_metrics_bar.png (both compare methods ACROSS trees, so "
-              "they need at least 2 trees to be meaningful). Add more trees "
-              "to the CSV and re-run to get them." % (len(all_trees), RESULTS_CSV))
+        print("Only %d tree(s) with branch_filter='10cm' rows in %s - skipping "
+              "error_boxplot.png and error_metrics_bar.png (both compare methods "
+              "ACROSS trees vs. the reference, so they need at least 2 such trees "
+              "to be meaningful). Add more trees to the CSV and re-run to get them."
+              % (len(trees_10cm), RESULTS_CSV))
