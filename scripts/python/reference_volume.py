@@ -115,17 +115,18 @@ def stem_diameter_at_height(stem_sections, h):
     return None
 
 
-def upsert_result(csv_path, tree, method, total, stem, branch, std, dbh=None, height=None, taper=None):
+def upsert_result(csv_path, tree, method, total, stem, branch, std, dbh=None, height=None, taper=None,
+                   trunk_len=None, branch_len=None):
     """Insert/update one (tree, method) row in the shared master results CSV
     (see compare_volumes.py for its format). Reads csv_path if it exists
     (creating it with the header if not), removes any existing row with the
     same tree AND method, appends the new row, and writes the file back -
     so re-running a script overwrites its previous result instead of
     duplicating it. Numbers are formatted with 6 decimals; None -> "" (blank).
-    Backward compatible: if csv_path still has the old 6-column header, its
+    Backward compatible: if csv_path still has an older/shorter header, its
     rows are read fine and rewritten with the new columns added as blank."""
     header = ["tree", "method", "total_m3", "stem_m3", "branch_m3", "std_m3",
-              "dbh_m", "height_m", "taper_cm_per_m"]
+              "dbh_m", "height_m", "taper_cm_per_m", "trunk_len_m", "branch_len_m"]
 
     def fmt(x):
         return "" if x is None else "%.6f" % x
@@ -138,7 +139,8 @@ def upsert_result(csv_path, tree, method, total, stem, branch, std, dbh=None, he
     rows = [r for r in rows if not (r["tree"] == tree and r["method"] == method)]
     rows.append({"tree": tree, "method": method, "total_m3": fmt(total),
                  "stem_m3": fmt(stem), "branch_m3": fmt(branch), "std_m3": fmt(std),
-                 "dbh_m": fmt(dbh), "height_m": fmt(height), "taper_cm_per_m": fmt(taper)})
+                 "dbh_m": fmt(dbh), "height_m": fmt(height), "taper_cm_per_m": fmt(taper),
+                 "trunk_len_m": fmt(trunk_len), "branch_len_m": fmt(branch_len)})
 
     with open(csv_path, "w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=header)
@@ -163,8 +165,11 @@ if TREE_ID not in all_trees:
 tree_rows = [r for r in rows if r["treeID"] == TREE_ID]
 
 # Sum the section volumes per fraction (in the source unit, cm^3), and count
-# how many sections each fraction has.
+# how many sections each fraction has. Also sum the section LENGTHS ("L",
+# same column already read by stem_diameter_at_height above) per fraction,
+# the exact same way - this gives trunk_len_m/branch_len_m for the CSV below.
 volume_by_fraction = {}
+length_by_fraction = {}
 count_by_fraction = {}
 for r in tree_rows:
     frac = r["Fraction"]
@@ -173,6 +178,9 @@ for r in tree_rows:
         continue  # skip sections without a numeric volume (e.g. 'NA')
     volume_by_fraction[frac] = volume_by_fraction.get(frac, 0.0) + vol
     count_by_fraction[frac] = count_by_fraction.get(frac, 0) + 1
+    length = to_float(r["L"])
+    if length is not None:
+        length_by_fraction[frac] = length_by_fraction.get(frac, 0.0) + length
 
 # ---- print a per-fraction breakdown, marking which ones are included -------
 print("Tree: %s   (source: %s)" % (TREE_ID, SOURCE_FILE))
@@ -229,5 +237,14 @@ print("Taper (%.1f-%.1f m)             : %s"
 stem_included = INCLUDE_FRACTIONS.get("stem", False) and "stem" in volume_by_fraction
 stem_m3 = (volume_by_fraction["stem"] * VOLUME_TO_M3) if stem_included else None
 branch_m3 = (selected_total_m3 - stem_m3) if stem_m3 is not None else None
+
+# trunk_len_m/branch_len_m: same "stem included?" / "everything else selected"
+# logic as stem_m3/branch_m3 above, just applied to length_by_fraction instead
+# of volume_by_fraction.
+trunk_len_m = (length_by_fraction["stem"] * LENGTH_TO_M) if (stem_included and "stem" in length_by_fraction) else None
+selected_total_len_m = sum(length_by_fraction[f] for f in length_by_fraction
+                            if INCLUDE_FRACTIONS.get(f, False)) * LENGTH_TO_M
+branch_len_m = (selected_total_len_m - trunk_len_m) if trunk_len_m is not None else None
+
 upsert_result(RESULTS_CSV, TREE_ID, METHOD_LABEL, selected_total_m3, stem_m3, branch_m3, None,
-              dbh_m, height_m, taper_cm_per_m)
+              dbh_m, height_m, taper_cm_per_m, trunk_len_m, branch_len_m)

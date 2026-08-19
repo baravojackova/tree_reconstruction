@@ -6,7 +6,7 @@
 #  per (tree, method). Columns:
 #
 #     tree, method, total_m3, stem_m3, branch_m3, std_m3, dbh_m, height_m,
-#     taper_cm_per_m
+#     taper_cm_per_m, trunk_len_m, branch_len_m
 #
 #  - tree           : tree ID, e.g. "IND01_054"
 #  - method         : a free-text label, e.g. "AdQSM", "TreeQSM mine v2"
@@ -17,6 +17,15 @@
 #  - dbh_m          : stem diameter at 1.3 m above the tree base [m] (may be blank)
 #  - height_m       : total tree height [m]                          (may be blank)
 #  - taper_cm_per_m : stem taper between two reference heights [cm/m] (may be blank)
+#  - trunk_len_m    : total trunk/stem centerline length [m]          (may be blank)
+#  - branch_len_m   : total branch centerline length [m]              (may be blank)
+#
+#  trunk_len_m/branch_len_m exist to tell apart TWO different reasons a
+#  method could report less volume than another: either it reconstructs a
+#  shorter/less-complete branch structure (visible as a length difference),
+#  or it reconstructs the SAME length but with systematically different
+#  radii (length matches, volume doesn't) - see field_error_summary() calls
+#  for "Trunk length"/"Branch length" at the bottom of this file.
 #
 #  This script:
 #     1) reads that CSV,
@@ -52,16 +61,18 @@ REFERENCE_METHOD = "Reference (destructive)"
 # =====================================================================
 
 
-# Starter content written only if RESULTS_CSV does not exist yet.
+# Starter content written only if RESULTS_CSV does not exist yet. The two
+# new trailing columns (trunk_len_m, branch_len_m) are left blank here since
+# this starter data predates them - real runs of the other scripts fill them in.
 STARTER_ROWS = [
     ["tree", "method", "total_m3", "stem_m3", "branch_m3", "std_m3",
-     "dbh_m", "height_m", "taper_cm_per_m"],
-    ["IND01_054", "Reference (destructive)", "1.7169", "1.2557", "0.4612", "", "", "", ""],
-    ["IND01_054", "AdQSM (TreesParams)",     "1.6905", "1.1302", "0.5603", "", "", "", ""],
-    ["IND01_054", "AdTree calibrated",       "1.9240", "1.3020", "0.6220", "", "", "", ""],
-    ["IND01_054", "TreeQSM de Tanago (mean 20)", "3.0838", "1.8383", "1.2455", "0.3113", "", "", ""],
-    ["IND01_054", "TreeQSM mine v1",         "3.6806", "1.5317", "2.1488", "0.1915", "", "", ""],
-    ["IND01_054", "TreeQSM mine v2",         "3.9744", "1.5737", "2.4007", "0.1923", "", "", ""],
+     "dbh_m", "height_m", "taper_cm_per_m", "trunk_len_m", "branch_len_m"],
+    ["IND01_054", "Reference (destructive)", "1.7169", "1.2557", "0.4612", "", "", "", "", "", ""],
+    ["IND01_054", "AdQSM (TreesParams)",     "1.6905", "1.1302", "0.5603", "", "", "", "", "", ""],
+    ["IND01_054", "AdTree calibrated",       "1.9240", "1.3020", "0.6220", "", "", "", "", "", ""],
+    ["IND01_054", "TreeQSM de Tanago (mean 20)", "3.0838", "1.8383", "1.2455", "0.3113", "", "", "", "", ""],
+    ["IND01_054", "TreeQSM mine v1",         "3.6806", "1.5317", "2.1488", "0.1915", "", "", "", "", ""],
+    ["IND01_054", "TreeQSM mine v2",         "3.9744", "1.5737", "2.4007", "0.1923", "", "", "", "", ""],
 ]
 
 
@@ -88,6 +99,8 @@ def load_results(path):
                 "dbh": to_float(r.get("dbh_m")),
                 "height": to_float(r.get("height_m")),
                 "taper": to_float(r.get("taper_cm_per_m")),
+                "trunk_len": to_float(r.get("trunk_len_m")),
+                "branch_len": to_float(r.get("branch_len_m")),
             })
     return rows
 
@@ -269,3 +282,13 @@ if __name__ == "__main__":
     field_error_summary(rows, "dbh", "DBH")
     field_error_summary(rows, "height", "Height")
     field_error_summary(rows, "taper", "Taper")
+
+    # Trunk/branch LENGTH (not volume) - same "one line per method" summary
+    # as DBH/height/taper above, not squeezed into print_tree_block()'s
+    # already-wide per-tree table (that table is 118 characters wide with 5
+    # metric pairs already; two more pairs would make it wrap/unreadable in
+    # a normal terminal). Lets you tell apart "shorter/less-complete branch
+    # structure" (length is off) from "same length, different radii" (length
+    # matches, volume doesn't) - see the header comment at the top of this file.
+    field_error_summary(rows, "trunk_len", "Trunk length")
+    field_error_summary(rows, "branch_len", "Branch length")

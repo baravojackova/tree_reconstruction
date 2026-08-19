@@ -116,6 +116,31 @@ CALIBRATE_RADII = True
 # Set to None to use the taper curve exactly as read from ADQSM_TAPER_FILE.
 FIELD_DBH = None
 
+# --- Thin-branch (< 10 cm) volume diagnostic ---------------------------
+# The de Tanago field reference only measured branches down to a 10 cm
+# TAPER diameter (see AdQSM.pdf Appendix A) - the same cut-off already
+# applied to TreeQSM in runsken.m (section 17b, "Cylinders, cut-off 10 cm").
+# This block prints, for BOTH AdTree calibrated cylinders and the raw
+# AdQSM BranchStructure.txt, how much volume (or - for AdQSM, if no branch
+# length is available - just count/share) sits below this cut-off. The
+# point is to check whether AdQSM/AdTree calibrated agreeing closely with
+# the reference is a REAL result, or just because they structurally put
+# little volume into branches that thin anyway (unlike TreeQSM, which
+# reconstructs all of them, thin or not).
+THIN_BRANCH_CUT_CM = 10.0
+
+# Print the first few raw rows of AdQSM's BranchStructure.txt (with column
+# names/indices) before using it, so you can SEE its actual columns instead
+# of trusting the parsing code blindly. Purely diagnostic; safe to turn off
+# once you've checked your file's layout.
+PRINT_ADQSM_BRANCH_SAMPLE = True
+
+# Also write a second CSV row per (radius threshold, AdQSM variant) with the
+# AdTree-calibrated volume restricted to cylinders >= THIN_BRANCH_CUT_CM
+# (similar in spirit to TreeQSM's "...Filtered..." rows), so it can be
+# compared directly in compare_volumes.py / plot_volumes.py. Set False to skip.
+WRITE_THIN_BRANCH_FILTERED_ROW = True
+
 # Tree ID used for this tree's rows in the shared results table (RESULTS_CSV).
 TREE_NAME = "IND01_054"
 
@@ -364,6 +389,171 @@ def parse_adqsm_branch_file(path):
     return {o: float(np.median(r)) for o, r in diam_by_order.items()}
 
 
+def _read_adqsm_branch_header(path):
+    """Return the BranchStructure.txt header row (list of column names) if
+    the file has one (a line whose first TAB-separated field is literally
+    "order"), else None. Used by the two diagnostic functions below so they
+    both agree on what each column means, instead of guessing twice."""
+    with open(path, "r", encoding="latin-1") as f:
+        for line in f:
+            parts = line.rstrip("\r\n").split("\t")
+            if parts and parts[0] == "order":
+                return parts
+    return None
+
+
+def _find_adqsm_column(header_cols, keywords):
+    """Return the index of the first header column whose name contains ANY
+    of `keywords` (case-insensitive), or None if there is no header or no
+    match. E.g. _find_adqsm_column(header, ["length"]) -> index of the
+    "length(m)" column, whatever its exact spelling."""
+    if not header_cols:
+        return None
+    for i, name in enumerate(header_cols):
+        if any(k in name.lower() for k in keywords):
+            return i
+    return None
+
+
+def print_adqsm_branch_file_sample(path, n=10):
+    """DIAGNOSTIC: print the first `n` valid data rows of an AdQSM
+    BranchStructure.txt, split by TAB, one line per column, showing the
+    column's index AND its name (read from the file's own header row, if
+    present) AND its value. Run this before trusting any calculation based
+    on the file, so you can see its real layout instead of assuming it.
+    """
+    header_cols = _read_adqsm_branch_header(path)
+    if header_cols:
+        print("  Header row found: %s" % "\t".join(header_cols))
+    else:
+        print("  No header row found ('order\\t...') - columns are unlabeled below.")
+
+    shown = 0
+    with open(path, "r", encoding="latin-1") as f:
+        for line in f:
+            parts = line.rstrip("\r\n").split("\t")
+            if not parts or parts[0] == "order" or not parts[0]:
+                continue           # skip the header row and blank lines
+            try:
+                int(parts[0])       # data rows start with an integer branch order
+            except ValueError:
+                continue
+            print("  --- row %d (%d columns) ---" % (shown, len(parts)))
+            for i, value in enumerate(parts):
+                col_name = header_cols[i] if header_cols and i < len(header_cols) else "col%d" % i
+                print("    [%d] %-16s = %s" % (i, col_name, value))
+            shown += 1
+            if shown >= n:
+                break
+
+
+def report_adqsm_thin_branch(path, cut_cm=10.0, params_file=None):
+    """AdQSM equivalent of report_thin_branch_volume() (see below), built
+    directly from BranchStructure.txt.
+
+    IMPORTANT: this file gives only ONE diameter per row (no proximal/distal
+    pair), so AdQSM.pdf's own Smalian's-formula volume can't be reproduced
+    here. If a "length" column exists, this function instead approximates
+    each row's volume as a CONSTANT-diameter cylinder (pi*(d/2)^2*length) -
+    a rough estimate that OVER-counts volume for branches that taper a lot
+    along their length (thin, elongated ones especially). To let you judge
+    how large that bias is, the cylinder-approximation totals are printed
+    next to AdQSM's own official TrunkVolume/BranchVolume from
+    TreesParams.txt (via params_file), if given.
+
+    The file's own "volume(...)" column is intentionally NOT used: its sum
+    is off by several orders of magnitude from TreesParams.txt's official
+    BranchVolume/TrunkVolume (not a simple unit-conversion factor), so it
+    does not appear to be a trustworthy per-branch wood volume.
+
+    If NO length column can be found at all, falls back to a proxy: just
+    the COUNT and PERCENTAGE of branches thinner than cut_cm - clearly
+    labelled as a proxy, since no volume can honestly be computed from
+    diameter alone.
+    """
+    header_cols = _read_adqsm_branch_header(path)
+    idx_diam = _find_adqsm_column(header_cols, ["diameter"])
+    if idx_diam is None:
+        idx_diam = 2   # fallback: column 2 is "diameter(m)" in this dataset
+    idx_length = _find_adqsm_column(header_cols, ["length"])
+
+    orders, diam_m, length_m = [], [], []
+    with open(path, "r", encoding="latin-1") as f:
+        for line in f:
+            parts = line.rstrip("\r\n").split("\t")
+            if len(parts) < 7:
+                continue
+            try:
+                order = int(parts[0])
+                diameter = float(parts[idx_diam])
+            except (ValueError, IndexError):
+                continue
+            orders.append(order)
+            diam_m.append(diameter)
+            if idx_length is not None:
+                try:
+                    length_m.append(float(parts[idx_length]))
+                except (ValueError, IndexError):
+                    length_m.append(None)
+            else:
+                length_m.append(None)
+
+    orders = np.asarray(orders)
+    diam_m = np.asarray(diam_m)
+    diam_cm = diam_m * 100.0
+    is_stem = orders == 0
+    is_branch = orders >= 1
+    keep = diam_cm >= cut_cm       # True = at/above the cut-off (kept by the reference)
+
+    print("\n--- AdQSM BranchStructure.txt, cut-off %.0f cm diameter ---" % cut_cm)
+    have_length = idx_length is not None and all(v is not None for v in length_m)
+
+    if have_length:
+        length_arr = np.asarray(length_m)
+        volumes = np.pi * (diam_m / 2.0) ** 2 * length_arr   # constant-diameter cylinder approx.
+        diam_name = header_cols[idx_diam] if header_cols else "diameter"
+        length_name = header_cols[idx_length] if header_cols else "length"
+        print("  Using columns: diameter='%s' (col %d), length='%s' (col %d)"
+              % (diam_name, idx_diam, length_name, idx_length))
+        print("  NOTE: single-diameter cylinder approximation (no proximal/distal pair")
+        print("  available for Smalian's formula) - this OVER-estimates volume for")
+        print("  tapering branches. See the official-totals comparison below.")
+
+        stem_vol = float(volumes[is_stem].sum())
+        branch_vol = float(volumes[is_branch].sum())
+        stem_vol_kept = float(volumes[is_stem & keep].sum())
+        branch_vol_kept = float(volumes[is_branch & keep].sum())
+
+        for label, v_total, v_kept in (("Stem", stem_vol, stem_vol_kept),
+                                        ("Branch", branch_vol, branch_vol_kept)):
+            v_removed = v_total - v_kept
+            pct_removed = (v_removed / v_total * 100.0) if v_total else 0.0
+            print("  %-6s: total %.3f m3 (cylinder approx) | kept %.3f m3 | "
+                  "removed %.3f m3 (%.1f %%)" % (label, v_total, v_kept, v_removed, pct_removed))
+
+        if params_file is not None:
+            official = parse_adqsm_params_file(params_file)
+            if official is not None:
+                print("  For comparison, AdQSM's OWN official totals (TreesParams.txt):")
+                print("    TrunkVolume  = %7.3f m3   (cylinder approx above: %7.3f m3, %.1fx)"
+                      % (official["trunk_vol"], stem_vol,
+                         (stem_vol / official["trunk_vol"]) if official["trunk_vol"] else float("nan")))
+                print("    BranchVolume = %7.3f m3   (cylinder approx above: %7.3f m3, %.1fx)"
+                      % (official["branch_vol"], branch_vol,
+                         (branch_vol / official["branch_vol"]) if official["branch_vol"] else float("nan")))
+    else:
+        # No usable length column - deliberately do NOT invent a volume;
+        # report only what the file actually supports: branch count/share.
+        print("  No usable length column found in BranchStructure.txt - volume can't")
+        print("  be computed. PROXY METRIC ONLY (branch count/share, NOT volume):")
+        for label, mask in (("Stem", is_stem), ("Branch", is_branch)):
+            n_total = int(mask.sum())
+            n_removed = int((mask & ~keep).sum())
+            pct_removed = (n_removed / n_total * 100.0) if n_total else 0.0
+            print("    %-6s: %5d total, %5d thinner than %.0f cm (%.1f %%)"
+                  % (label, n_total, n_removed, cut_cm, pct_removed))
+
+
 def parse_adqsm_params_file(path):
     """Parse an AdQSM TreesParams.txt file and return a dict shaped like the
     ones `volume_stats` produces (so it can be printed by `print_volume_stats`),
@@ -395,8 +585,8 @@ def parse_adqsm_params_file(path):
         branch_len = extract("BranchLength", line) or 0.0
         branches_num = extract("BranchesNum", line) or 0.0
         tree_height = extract("TreeHeight", line)
-        # DBH (trunk diameter at breast height), exported by AdQSM as "TreeDBH".
-        tree_dbh = extract("TreeDBH", line)
+        # DBH (trunk diameter at breast height), exported by AdQSM as "TreeDBH" in cm.
+        tree_dbh = extract("TreeDBH", line)/100
         return dict(n=int(branches_num), total_len=trunk_len + branch_len, total_vol=tree_vol,
                     trunk_n=0, trunk_len=trunk_len, trunk_vol=trunk_vol,
                     branch_n=0, branch_len=branch_len, branch_vol=branch_vol,
@@ -453,17 +643,69 @@ def volume_stats(lengths, radii, order_arr):
                 branch_n=n - t_n, branch_len=total_len - t_len, branch_vol=total_vol - t_vol)
 
 
-def upsert_result(csv_path, tree, method, total, stem, branch, std, dbh=None, height=None, taper=None):
+def report_thin_branch_volume(lengths, radii, order_arr, cut_cm=10.0):
+    """Diagnostic: how much cylinder volume sits in cylinders THINNER than
+    `cut_cm` diameter, split into stem (order 0) and branches (order >= 1).
+    Mirrors "Cylinders, cut-off 10 cm" in runsken.m (section 17b) so the two
+    printouts are directly comparable: the de Tanago field reference only
+    measured branches down to a 10 cm taper diameter, so any volume below
+    that cut-off could never have been checked against it anyway.
+
+    lengths/radii/order_arr are arrays parallel to the final cylinders (same
+    ones cylinder_metrics()/volume_stats() use). Returns a dict with the
+    kept (>= cut_cm) volumes, so the RUN section can optionally write them
+    into RESULTS_CSV as a second, filtered row.
+    """
+    lengths = np.asarray(lengths)
+    radii = np.asarray(radii)
+    order_arr = np.asarray(order_arr)
+
+    volumes = np.pi * radii ** 2 * lengths      # per-cylinder volume [m^3]
+    diam_cm = 2.0 * radii * 100.0               # per-cylinder diameter [cm]
+    keep = diam_cm >= cut_cm                    # True = at/above the cut-off (kept)
+
+    is_stem = order_arr == 0
+    is_branch = order_arr >= 1
+
+    n_total = len(radii)
+    n_kept = int(keep.sum())
+    vol_total = float(volumes.sum())
+    vol_kept = float(volumes[keep].sum())
+    vol_removed = vol_total - vol_kept
+
+    print("\n--- Cylinders, cut-off %.0f cm (AdTree calibrated) ---" % cut_cm)
+    print("Cylinders total  : %d" % n_total)
+    print("Cylinders kept   : %d (%.1f %%)" % (n_kept, (n_kept / n_total * 100.0) if n_total else 0.0))
+    print("Volume total     : %.3f m3" % vol_total)
+    print("Volume kept      : %.3f m3" % vol_kept)
+    print("Volume removed   : %.3f m3 (%.1f %%)"
+          % (vol_removed, (vol_removed / vol_total * 100.0) if vol_total else 0.0))
+
+    result = dict(total_vol=vol_total, total_vol_kept=vol_kept)
+    for label, key, mask in (("Stem", "trunk", is_stem), ("Branch", "branch", is_branch)):
+        v_total = float(volumes[mask].sum())
+        v_kept = float(volumes[mask & keep].sum())
+        v_removed = v_total - v_kept
+        pct_removed = (v_removed / v_total * 100.0) if v_total else 0.0
+        print("%-6s volume kept  : %.3f m3  (removed %.3f m3, %.1f %%)"
+              % (label, v_kept, v_removed, pct_removed))
+        result["%s_vol" % key] = v_total
+        result["%s_vol_kept" % key] = v_kept
+    return result
+
+
+def upsert_result(csv_path, tree, method, total, stem, branch, std, dbh=None, height=None, taper=None,
+                   trunk_len=None, branch_len=None):
     """Insert/update one (tree, method) row in the shared master results CSV
     (see compare_volumes.py for its format). Reads csv_path if it exists
     (creating it with the header if not), removes any existing row with the
     same tree AND method, appends the new row, and writes the file back -
     so re-running a script overwrites its previous result instead of
     duplicating it. Numbers are formatted with 6 decimals; None -> "" (blank).
-    Backward compatible: if csv_path still has the old 6-column header, its
+    Backward compatible: if csv_path still has an older/shorter header, its
     rows are read fine and rewritten with the new columns added as blank."""
     header = ["tree", "method", "total_m3", "stem_m3", "branch_m3", "std_m3",
-              "dbh_m", "height_m", "taper_cm_per_m"]
+              "dbh_m", "height_m", "taper_cm_per_m", "trunk_len_m", "branch_len_m"]
 
     def fmt(x):
         return "" if x is None else "%.6f" % x
@@ -476,7 +718,8 @@ def upsert_result(csv_path, tree, method, total, stem, branch, std, dbh=None, he
     rows = [r for r in rows if not (r["tree"] == tree and r["method"] == method)]
     rows.append({"tree": tree, "method": method, "total_m3": fmt(total),
                  "stem_m3": fmt(stem), "branch_m3": fmt(branch), "std_m3": fmt(std),
-                 "dbh_m": fmt(dbh), "height_m": fmt(height), "taper_cm_per_m": fmt(taper)})
+                 "dbh_m": fmt(dbh), "height_m": fmt(height), "taper_cm_per_m": fmt(taper),
+                 "trunk_len_m": fmt(trunk_len), "branch_len_m": fmt(branch_len)})
 
     with open(csv_path, "w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=header)
@@ -821,9 +1064,18 @@ for variant_label, taper_file, branch_file, params_file in ADQSM_VARIANT_LIST:
             upsert_result(RESULTS_CSV, TREE_NAME,
                           "AdQSM (TreesParams)%s" % variant_method_suffix,
                           adqsm_ref["total_vol"], adqsm_ref["trunk_vol"], adqsm_ref["branch_vol"], None,
-                          adqsm_ref.get("dbh"), adqsm_ref.get("height"), None)
+                          adqsm_ref.get("dbh"), adqsm_ref.get("height"), None,
+                          # trunk_len/branch_len: already in this dict, straight from
+                          # TrunkLength/BranchLength in TreesParams.txt (see parse_adqsm_params_file).
+                          adqsm_ref.get("trunk_len"), adqsm_ref.get("branch_len"))
         else:
             print("  (no TreesParams.txt reference found at %s - skipping that row)" % params_file)
+
+        # ---- (Part B) thin-branch diagnostic straight from BranchStructure.txt ----
+        if PRINT_ADQSM_BRANCH_SAMPLE:
+            print("\n  BranchStructure.txt column check (first 10 rows):")
+            print_adqsm_branch_file_sample(branch_file, n=10)
+        report_adqsm_thin_branch(branch_file, cut_cm=THIN_BRANCH_CUT_CM, params_file=params_file)
 
     # Inner loop: one pass per radius threshold (same as before this feature
     # existed), now repeated for each AdQSM variant above.
@@ -868,6 +1120,10 @@ for variant_label, taper_file, branch_file, params_file in ADQSM_VARIANT_LIST:
             cal_lengths, cal_radii = cylinder_metrics(xyz, cyl)
             cal_stats = volume_stats(cal_lengths, cal_radii, np.asarray(cyl_order))
 
+            # ---- (Part A) thin-branch diagnostic on the CALIBRATED cylinders ----
+            cal_thin = report_thin_branch_volume(cal_lengths, cal_radii, cyl_order,
+                                                  cut_cm=THIN_BRANCH_CUT_CM)
+
             # DBH/taper of the CALIBRATED trunk, using the now-replaced radii.
             cal_dbh = stem_diameter_at_height(xyz, cyl, cyl_order, z_base, TAPER_H_LOWER)
             cal_d_upper = stem_diameter_at_height(xyz, cyl, cyl_order, z_base, TAPER_H_UPPER)
@@ -881,13 +1137,31 @@ for variant_label, taper_file, branch_file, params_file in ADQSM_VARIANT_LIST:
             # (tree, method), not duplicates.
             upsert_result(RESULTS_CSV, TREE_NAME, "AdTree raw r%dmm" % round(thr * 1000),
                           orig_stats["total_vol"], orig_stats["trunk_vol"], orig_stats["branch_vol"], None,
-                          raw_dbh, height_m, raw_taper)
+                          raw_dbh, height_m, raw_taper,
+                          # trunk_len/branch_len: already in this dict (volume_stats()
+                          # computes them the same way as trunk_vol/branch_vol).
+                          orig_stats["trunk_len"], orig_stats["branch_len"])
             # "AdTree calibrated" DOES depend on which AdQSM variant it was
             # calibrated against, so it gets the variant suffix (when set).
+            # NOTE: radius calibration only rescales/replaces RADII, never the
+            # cylinder geometry itself, so cal_stats's lengths equal orig_stats's -
+            # calibration cannot change how much length was reconstructed.
             upsert_result(RESULTS_CSV, TREE_NAME,
                           "AdTree calibrated r%dmm%s" % (round(thr * 1000), variant_method_suffix),
                           cal_stats["total_vol"], cal_stats["trunk_vol"], cal_stats["branch_vol"], None,
-                          cal_dbh, height_m, cal_taper)
+                          cal_dbh, height_m, cal_taper,
+                          cal_stats["trunk_len"], cal_stats["branch_len"])
+            # Optional THIRD row: same tree/DBH/height/taper, but total/stem/branch
+            # volume restricted to cylinders >= THIN_BRANCH_CUT_CM (like TreeQSM's
+            # "...Filtered..." rows) - lets compare_volumes.py/plot_volumes.py show
+            # the reference vs. an apples-to-apples "same cut-off" comparison.
+            if WRITE_THIN_BRANCH_FILTERED_ROW:
+                upsert_result(RESULTS_CSV, TREE_NAME,
+                              "AdTree calibrated r%dmm%s (>=%.0fcm only)"
+                              % (round(thr * 1000), variant_method_suffix, THIN_BRANCH_CUT_CM),
+                              cal_thin["total_vol_kept"], cal_thin["trunk_vol_kept"],
+                              cal_thin["branch_vol_kept"], None,
+                              cal_dbh, height_m, cal_taper)
 
             print("  DBH (at %.1f m)   : raw AdTree = %s   |   calibrated = %s"
                   % (TAPER_H_LOWER, _fmt_dbh(raw_dbh), _fmt_dbh(cal_dbh)))

@@ -34,8 +34,8 @@ FILE_PATTERN = "volumes_*.csv"
 
 # Which Group to import from each table. "Estimated" uses the optimal
 # models plus the second run, so it has the most reliable mean and std.
-# Other valid choices: "Optimal", "All inputs", "Optimal (single)", "Simplified".
-IMPORT_GROUP = "Optimal"
+# Other valid choices: "Optimal", "All inputs", "Optimal (single)", "Simplified", "Filtered <10cm".
+IMPORT_GROUP = "Filtered <10cm"
 
 # Shared master results table (read by compare_volumes.py).
 RESULTS_CSV = "volume_results.csv"
@@ -97,13 +97,14 @@ def extract_group(rows, group):
     return tree, run, total, stem, branch, std_total
 
 
-def upsert_result(csv_path, tree, method, total, stem, branch, std, dbh=None, height=None, taper=None):
+def upsert_result(csv_path, tree, method, total, stem, branch, std, dbh=None, height=None, taper=None,
+                   trunk_len=None, branch_len=None):
     """Insert/update one (tree, method) row in the shared master results CSV.
     Re-running overwrites the previous row instead of duplicating it.
-    Backward compatible: if csv_path still has the old 6-column header, its
+    Backward compatible: if csv_path still has an older/shorter header, its
     rows are read fine and rewritten with the new columns added as blank."""
     header = ["tree", "method", "total_m3", "stem_m3", "branch_m3", "std_m3",
-              "dbh_m", "height_m", "taper_cm_per_m"]
+              "dbh_m", "height_m", "taper_cm_per_m", "trunk_len_m", "branch_len_m"]
 
     def fmt(x):
         return "" if x is None else "%.6f" % x
@@ -116,7 +117,8 @@ def upsert_result(csv_path, tree, method, total, stem, branch, std, dbh=None, he
     rows = [r for r in rows if not (r["tree"] == tree and r["method"] == method)]
     rows.append({"tree": tree, "method": method, "total_m3": fmt(total),
                  "stem_m3": fmt(stem), "branch_m3": fmt(branch), "std_m3": fmt(std),
-                 "dbh_m": fmt(dbh), "height_m": fmt(height), "taper_cm_per_m": fmt(taper)})
+                 "dbh_m": fmt(dbh), "height_m": fmt(height), "taper_cm_per_m": fmt(taper),
+                 "trunk_len_m": fmt(trunk_len), "branch_len_m": fmt(branch_len)})
 
     with open(csv_path, "w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=header)
@@ -163,16 +165,21 @@ for path in files:
     tree = TREE_ID_MAP.get(tree_raw, tree_raw)      # map short id -> full id
     method = "TreeQSM mine (%s, %s)" % (run, IMPORT_GROUP)
 
-    # Optional DBH/height, read from "dbh_<tree>_<run>.txt" / "height_<tree>_<run>.txt"
-    # next to the volumes table (single number in metres each). The MATLAB
+    # Optional DBH/height/trunk-length/branch-length, read from
+    # "dbh_<tree>_<run>.txt" / "height_<tree>_<run>.txt" /
+    # "trunklen_<tree>_<run>.txt" / "branchlen_<tree>_<run>.txt" next to the
+    # volumes table (single number each: metres for all four). The MATLAB
     # volumes_*.csv tables don't export a diameter profile, so taper cannot be
     # derived here and is always left as None.
     table_dir = os.path.dirname(path)
     dbh = read_single_number(os.path.join(table_dir, "dbh_%s_%s.txt" % (tree, run)))
     height = read_single_number(os.path.join(table_dir, "height_%s_%s.txt" % (tree, run)))
     taper = None
+    trunk_len = read_single_number(os.path.join(table_dir, "trunklen_%s_%s.txt" % (tree, run)))
+    branch_len = read_single_number(os.path.join(table_dir, "branchlen_%s_%s.txt" % (tree, run)))
 
-    upsert_result(RESULTS_CSV, tree, method, total, stem, branch, std, dbh, height, taper)
+    upsert_result(RESULTS_CSV, tree, method, total, stem, branch, std, dbh, height, taper,
+                  trunk_len, branch_len)
     imported += 1
 
     def show(x):

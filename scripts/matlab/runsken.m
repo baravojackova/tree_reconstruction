@@ -468,6 +468,24 @@ fid = fopen(h_file, 'w');
 fprintf(fid, '%.6f', QSM_opt.treedata.TreeHeight);   % tree height [m]
 fprintf('Height exported to %s\n', h_file);
 fclose(fid);
+%
+% ---- export trunk/branch length for the shared results table ----
+% QSM_opt.treedata.TrunkLength/BranchLength are set in tree_data.m as
+% sum(Len(Trunk)) / sum(Len(~Trunk)) - i.e. the exact same cylinder length
+% array used to compute TrunkVolume/BranchVolume above, just summed instead
+% of pi*r^2*length-weighted-summed. Already in metres (unlike the *Volume
+% fields, which are in litres), so no unit conversion is needed here.
+trunklen_file = ['trunklen_' tree_id '_' run_tag '.txt'];
+fid = fopen(trunklen_file, 'w');
+fprintf(fid, '%.6f', QSM_opt.treedata.TrunkLength);   % trunk/stem length [m]
+fprintf('Trunk length exported to %s\n', trunklen_file);
+fclose(fid);
+%
+branchlen_file = ['branchlen_' tree_id '_' run_tag '.txt'];
+fid = fopen(branchlen_file, 'w');
+fprintf(fid, '%.6f', QSM_opt.treedata.BranchLength);   % branch length [m]
+fprintf('Branch length exported to %s\n', branchlen_file);
+fclose(fid);
 %% ------------------------------------------------------------
 %  19) EXPORT - table with the input parameters of each model
 %  ------------------------------------------------------------
