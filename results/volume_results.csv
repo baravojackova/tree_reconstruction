@@ -1,0 +1,6 @@
+tree,method,total_m3,stem_m3,branch_m3,std_m3
+IND01_054,Reference (destructive),1.716940,1.255695,0.461245,
+IND01_054,TreeQSM de Tanago (mean),3.083805,1.838312,1.245493,0.311293
+IND01_054,AdTree raw r5mm,2.630905,1.692104,0.938801,
+IND01_054,AdTree calibrated r5mm,1.924038,1.302266,0.621772,
+IND01_054,AdQSM (TreesParams),1.690530,1.130220,0.560307,

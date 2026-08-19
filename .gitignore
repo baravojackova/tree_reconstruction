@@ -1,0 +1,10 @@
+# ignore everything by default
+*
+
+# ...except the code and the results table:
+!.gitignore
+!README.md
+!scripts/
+!scripts/**     # include all files in scripts folder
+!results/ 
+!results/volume_results.csv
