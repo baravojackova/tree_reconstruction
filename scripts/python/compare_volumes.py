@@ -5,14 +5,18 @@
 #  All results live in ONE simple "master" CSV (RESULTS_CSV below), one row
 #  per (tree, method). Columns:
 #
-#     tree, method, total_m3, stem_m3, branch_m3, std_m3
+#     tree, method, total_m3, stem_m3, branch_m3, std_m3, dbh_m, height_m,
+#     taper_cm_per_m
 #
-#  - tree      : tree ID, e.g. "IND01_054"
-#  - method    : a free-text label, e.g. "AdQSM", "TreeQSM mine v2"
-#  - total_m3  : total wood volume [m^3]
-#  - stem_m3   : stem/trunk volume [m^3]   (may be blank)
-#  - branch_m3 : branch volume [m^3]        (may be blank)
-#  - std_m3    : standard deviation of the total, if known (may be blank)
+#  - tree           : tree ID, e.g. "IND01_054"
+#  - method         : a free-text label, e.g. "AdQSM", "TreeQSM mine v2"
+#  - total_m3       : total wood volume [m^3]
+#  - stem_m3        : stem/trunk volume [m^3]   (may be blank)
+#  - branch_m3      : branch volume [m^3]        (may be blank)
+#  - std_m3         : standard deviation of the total, if known (may be blank)
+#  - dbh_m          : stem diameter at 1.3 m above the tree base [m] (may be blank)
+#  - height_m       : total tree height [m]                          (may be blank)
+#  - taper_cm_per_m : stem taper between two reference heights [cm/m] (may be blank)
 #
 #  This script:
 #     1) reads that CSV,
@@ -50,13 +54,14 @@ REFERENCE_METHOD = "Reference (destructive)"
 
 # Starter content written only if RESULTS_CSV does not exist yet.
 STARTER_ROWS = [
-    ["tree", "method", "total_m3", "stem_m3", "branch_m3", "std_m3"],
-    ["IND01_054", "Reference (destructive)", "1.7169", "1.2557", "0.4612", ""],
-    ["IND01_054", "AdQSM (TreesParams)",     "1.6905", "1.1302", "0.5603", ""],
-    ["IND01_054", "AdTree calibrated",       "1.9240", "1.3020", "0.6220", ""],
-    ["IND01_054", "TreeQSM de Tanago (mean 20)", "3.0838", "1.8383", "1.2455", "0.3113"],
-    ["IND01_054", "TreeQSM mine v1",         "3.6806", "1.5317", "2.1488", "0.1915"],
-    ["IND01_054", "TreeQSM mine v2",         "3.9744", "1.5737", "2.4007", "0.1923"],
+    ["tree", "method", "total_m3", "stem_m3", "branch_m3", "std_m3",
+     "dbh_m", "height_m", "taper_cm_per_m"],
+    ["IND01_054", "Reference (destructive)", "1.7169", "1.2557", "0.4612", "", "", "", ""],
+    ["IND01_054", "AdQSM (TreesParams)",     "1.6905", "1.1302", "0.5603", "", "", "", ""],
+    ["IND01_054", "AdTree calibrated",       "1.9240", "1.3020", "0.6220", "", "", "", ""],
+    ["IND01_054", "TreeQSM de Tanago (mean 20)", "3.0838", "1.8383", "1.2455", "0.3113", "", "", ""],
+    ["IND01_054", "TreeQSM mine v1",         "3.6806", "1.5317", "2.1488", "0.1915", "", "", ""],
+    ["IND01_054", "TreeQSM mine v2",         "3.9744", "1.5737", "2.4007", "0.1923", "", "", ""],
 ]
 
 
@@ -80,6 +85,9 @@ def load_results(path):
                 "stem": to_float(r.get("stem_m3")),
                 "branch": to_float(r.get("branch_m3")),
                 "std": to_float(r.get("std_m3")),
+                "dbh": to_float(r.get("dbh_m")),
+                "height": to_float(r.get("height_m")),
+                "taper": to_float(r.get("taper_cm_per_m")),
             })
     return rows
 
@@ -91,17 +99,33 @@ def fmt(x, width=10, dec=4):
     return ("%*.*f" % (width, dec, x))
 
 
+def pct_diff(value, ref_value):
+    """Percent difference of value vs. ref_value, or None if either is
+    missing (blank cell in the printed table)."""
+    if value is None or ref_value is None or ref_value == 0:
+        return None
+    return (value - ref_value) / ref_value * 100.0
+
+
+def fmt_pct(x, width=8):
+    """Format a percent difference, or a blank cell if None."""
+    if x is None:
+        return " " * (width - 1) + "-"
+    return "%+*.1f%%" % (width - 1, x)
+
+
 def print_tree_block(tree, rows):
     """Print the side-by-side method comparison for a single tree."""
     tree_rows = [r for r in rows if r["tree"] == tree]
     ref = next((r for r in tree_rows if r["method"] == REFERENCE_METHOD), None)
 
-    print("=" * 78)
+    print("=" * 118)
     print("Tree: %s" % tree)
-    print("-" * 78)
-    print("%-28s %10s %10s %10s %10s" %
-          ("method", "total", "stem", "branch", "d(total)"))
-    print("-" * 78)
+    print("-" * 118)
+    print("%-28s %10s %10s %10s %10s   %8s %8s   %8s %8s   %8s %8s" %
+          ("method", "total", "stem", "branch", "d(total)",
+           "DBH[m]", "d(DBH)", "H[m]", "d(H)", "taper", "d(taper)"))
+    print("-" * 118)
 
     # reference first (if present), then the rest in file order
     ordered = ([ref] if ref else []) + [r for r in tree_rows if r is not ref]
@@ -117,9 +141,17 @@ def print_tree_block(tree, rows):
                 dcol = "%+.3f (%+.0f%%)" % (d_abs, d_pct)
         else:
             dcol = "-"
-        print("%-28s %s %s %s   %s" %
+
+        dbh_pct = None if r is ref else pct_diff(r["dbh"], ref["dbh"] if ref else None)
+        height_pct = None if r is ref else pct_diff(r["height"], ref["height"] if ref else None)
+        taper_pct = None if r is ref else pct_diff(r["taper"], ref["taper"] if ref else None)
+
+        print("%-28s %s %s %s   %-16s %s %s   %s %s   %s %s" %
               (r["method"][:28], fmt(r["total"]), fmt(r["stem"]),
-               fmt(r["branch"]), dcol))
+               fmt(r["branch"]), dcol,
+               fmt(r["dbh"], width=8, dec=3), fmt_pct(dbh_pct),
+               fmt(r["height"], width=8, dec=2), fmt_pct(height_pct),
+               fmt(r["taper"], width=8, dec=2), fmt_pct(taper_pct)))
     if ref is None:
         print("(no reference method '%s' for this tree - showing raw values only)"
               % REFERENCE_METHOD)
@@ -166,6 +198,32 @@ def error_metrics(rows):
     print()
 
 
+def field_error_summary(rows, key, label):
+    """Print one short line per method: its mean percent error vs. the
+    reference for a single field (dbh/height/taper), across all trees where
+    both values are known. Kept OUT of the volume RMSE metrics block above
+    by design - these fields are not volumes."""
+    trees = sorted({r["tree"] for r in rows})
+    methods = [m for m in dict.fromkeys(r["method"] for r in rows) if m != REFERENCE_METHOD]
+    value_of = {(r["tree"], r["method"]): r[key] for r in rows}
+
+    print("%s error vs '%s':" % (label, REFERENCE_METHOD))
+    printed_any = False
+    for m in methods:
+        diffs = []
+        for t in trees:
+            d = pct_diff(value_of.get((t, m)), value_of.get((t, REFERENCE_METHOD)))
+            if d is not None:
+                diffs.append(d)
+        if not diffs:
+            continue
+        printed_any = True
+        print("  %-28s %+6.1f%%  (n=%d)" % (m[:28], sum(diffs) / len(diffs), len(diffs)))
+    if not printed_any:
+        print("  (no method has both a value and a reference value for this field)")
+    print()
+
+
 # =========================  RUN  =====================================
 if not os.path.exists(RESULTS_CSV):
     with open(RESULTS_CSV, "w", encoding="utf-8", newline="") as f:
@@ -187,3 +245,9 @@ else:
 
 # Error metrics make sense whenever a reference exists (works for 1 or many trees).
 error_metrics(rows)
+
+# DBH/height/taper are not volumes, so their error is reported separately
+# instead of folding them into the RMSE metrics block above.
+field_error_summary(rows, "dbh", "DBH")
+field_error_summary(rows, "height", "Height")
+field_error_summary(rows, "taper", "Taper")

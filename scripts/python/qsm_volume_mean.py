@@ -43,7 +43,13 @@ TREE_PREFIX = "IND01_054"
 # cylinder-data format. Change these only if your files use a different layout.
 COL_RADIUS = 0
 COL_LENGTH = 1
+COL_START_Z = 4
 COL_ORDER = 11
+
+# Reference heights [m] used for DBH (lower) and the taper metric (lower/
+# upper). DBH is the stem diameter at TAPER_H_LOWER (1.3 m = breast height).
+TAPER_H_LOWER = 1.3    # lower reference height [m]
+TAPER_H_UPPER = 10.0   # upper reference height [m]
 
 # Where to write the CSV export (per-realization rows + summary rows).
 # Set to None to skip CSV export.
@@ -77,19 +83,67 @@ def find_realization_files(data_dir, prefix):
     return hits
 
 
-def cylinder_volumes(path):
-    """Load one cylinder file and return (total, stem, branch) volume in m^3."""
+def stem_diameter_at_height(order0_rows, base_z, h):
+    """Diameter [m] of the stem (BranchOrder 0 cylinders) at height h [m]
+    above the tree base (base_z). Each cylinder's approximate height span is
+    [start_z - base_z, start_z - base_z + length]; the diameter of the span
+    that contains h is returned, falling back to the nearest cylinder for
+    small gaps between spans. Returns None if h is outside the height range
+    actually covered by stem cylinders (no extrapolation/guessing). Reused
+    for both DBH and the taper metric."""
+    if len(order0_rows) == 0:
+        return None
+    spans = [(sz - base_z, sz - base_z + length, radius) for sz, length, radius in order0_rows]
+    lo = min(s[0] for s in spans)
+    hi = max(s[1] for s in spans)
+    if h < lo or h > hi:
+        return None
+    for h_start, h_end, radius in spans:
+        if h_start <= h <= h_end:
+            return 2.0 * radius
+
+    def dist(span):
+        h_start, h_end, _ = span
+        return h_start - h if h < h_start else h - h_end
+
+    nearest = min(spans, key=dist)
+    return 2.0 * nearest[2]
+
+
+def cylinder_metrics(path):
+    """Load one cylinder file and return a dict with total/stem/branch volume
+    [m^3], DBH [m], tree height [m], and taper [cm/m] (dbh/taper may be None
+    if they cannot be determined for this realization)."""
     d = np.loadtxt(path)
     if d.ndim == 1:            # guard: a file with a single cylinder row
         d = d.reshape(1, -1)
     r = d[:, COL_RADIUS]
     length = d[:, COL_LENGTH]
+    start_z = d[:, COL_START_Z]
     order = d[:, COL_ORDER].astype(int)
+
     vol = np.pi * r ** 2 * length          # volume of each cylinder [m^3]
     total = float(vol.sum())
     stem = float(vol[order == 0].sum())    # BranchOrder 0 = trunk/stem
     branch = float(vol[order >= 1].sum())
-    return total, stem, branch
+
+    base_z = float(start_z.min())
+    order0_rows = list(zip(start_z[order == 0], length[order == 0], r[order == 0]))
+    dbh = stem_diameter_at_height(order0_rows, base_z, TAPER_H_LOWER)
+    d_upper = stem_diameter_at_height(order0_rows, base_z, TAPER_H_UPPER)
+    taper = ((dbh - d_upper) * 100.0 / (TAPER_H_UPPER - TAPER_H_LOWER)
+             if dbh is not None and d_upper is not None else None)
+
+    top_idx = int(np.argmax(start_z))      # topmost cylinder by start_z
+    height = float(start_z[top_idx] + length[top_idx] - base_z)
+
+    return dict(total=total, stem=stem, branch=branch, dbh=dbh, height=height, taper=taper)
+
+
+def mean_ignore_none(values):
+    """Mean of the non-None values, or None if there are none."""
+    vals = [v for v in values if v is not None]
+    return (sum(vals) / len(vals)) if vals else None
 
 
 def summarize(values):
@@ -103,14 +157,17 @@ def summarize(values):
     return mean, std, cv
 
 
-def upsert_result(csv_path, tree, method, total, stem, branch, std):
+def upsert_result(csv_path, tree, method, total, stem, branch, std, dbh=None, height=None, taper=None):
     """Insert/update one (tree, method) row in the shared master results CSV
     (see compare_volumes.py for its format). Reads csv_path if it exists
     (creating it with the header if not), removes any existing row with the
     same tree AND method, appends the new row, and writes the file back -
     so re-running a script overwrites its previous result instead of
-    duplicating it. Numbers are formatted with 6 decimals; None -> "" (blank)."""
-    header = ["tree", "method", "total_m3", "stem_m3", "branch_m3", "std_m3"]
+    duplicating it. Numbers are formatted with 6 decimals; None -> "" (blank).
+    Backward compatible: if csv_path still has the old 6-column header, its
+    rows are read fine and rewritten with the new columns added as blank."""
+    header = ["tree", "method", "total_m3", "stem_m3", "branch_m3", "std_m3",
+              "dbh_m", "height_m", "taper_cm_per_m"]
 
     def fmt(x):
         return "" if x is None else "%.6f" % x
@@ -122,7 +179,8 @@ def upsert_result(csv_path, tree, method, total, stem, branch, std):
 
     rows = [r for r in rows if not (r["tree"] == tree and r["method"] == method)]
     rows.append({"tree": tree, "method": method, "total_m3": fmt(total),
-                 "stem_m3": fmt(stem), "branch_m3": fmt(branch), "std_m3": fmt(std)})
+                 "stem_m3": fmt(stem), "branch_m3": fmt(branch), "std_m3": fmt(std),
+                 "dbh_m": fmt(dbh), "height_m": fmt(height), "taper_cm_per_m": fmt(taper)})
 
     with open(csv_path, "w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=header)
@@ -145,19 +203,22 @@ if not files:
             print("   ", p)
     raise SystemExit
 
-# Compute the three volumes for every realization.
+# Compute the three volumes (+ DBH/height/taper) for every realization.
 totals, stems, branches = [], [], []
+dbhs, heights, tapers = [], [], []
 print("Tree: %s   (%d realization files)\n" % (TREE_PREFIX, len(files)))
-print("%-24s %12s %12s %12s" % ("file", "total m^3", "stem m^3", "branch m^3"))
-print("-" * 64)
+print("%-24s %12s %12s %12s %8s %8s" % ("file", "total m^3", "stem m^3", "branch m^3", "dbh cm", "h m"))
+print("-" * 78)
 for idx, path in files:
-    total, stem, branch = cylinder_volumes(path)
-    totals.append(total); stems.append(stem); branches.append(branch)
-    print("%-24s %12.4f %12.4f %12.4f"
-          % (os.path.basename(path), total, stem, branch))
+    m = cylinder_metrics(path)
+    totals.append(m["total"]); stems.append(m["stem"]); branches.append(m["branch"])
+    dbhs.append(m["dbh"]); heights.append(m["height"]); tapers.append(m["taper"])
+    print("%-24s %12.4f %12.4f %12.4f %8s %8.2f"
+          % (os.path.basename(path), m["total"], m["stem"], m["branch"],
+             ("%.2f" % (m["dbh"] * 100.0)) if m["dbh"] is not None else "-", m["height"]))
 
 # Summary statistics across the realizations.
-print("-" * 64)
+print("-" * 78)
 for label, vals in (("TOTAL", totals), ("STEM", stems), ("BRANCHES", branches)):
     mean, std, cv = summarize(vals)
     print("%-9s mean = %.4f m^3   std = %.4f m^3   CV = %.2f %%   (min %.4f, max %.4f)"
@@ -167,12 +228,21 @@ mean_total = summarize(totals)[0]
 print("\n=> The published QSM volume for this tree is the TOTAL mean above: "
       "%.4f m^3 (%.1f L)." % (mean_total, mean_total * 1000.0))
 
+mean_dbh = mean_ignore_none(dbhs)
+mean_height = mean_ignore_none(heights)
+mean_taper = mean_ignore_none(tapers)
+print("=> Mean DBH = %s   Mean height = %s   Mean taper = %s"
+      % (("%.4f m" % mean_dbh) if mean_dbh is not None else "n/a",
+         ("%.2f m" % mean_height) if mean_height is not None else "n/a",
+         ("%.2f cm/m" % mean_taper) if mean_taper is not None else "n/a"))
+
 # ---- upsert this result into the shared master results CSV -----------------
 std_total = summarize(totals)[1]
 mean_stem = summarize(stems)[0]
 mean_branch = summarize(branches)[0]
 upsert_result(RESULTS_CSV, TREE_PREFIX, METHOD_LABEL,
-              mean_total, mean_stem, mean_branch, std_total)
+              mean_total, mean_stem, mean_branch, std_total,
+              mean_dbh, mean_height, mean_taper)
 
 # Export the per-realization results and summary statistics to CSV.
 if CSV_PATH:

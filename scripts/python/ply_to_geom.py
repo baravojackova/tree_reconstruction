@@ -104,6 +104,11 @@ TREE_NAME = "IND01_054"
 # is True, each generated threshold variant upserts its own row into this CSV
 # so results from all methods live in one place.
 RESULTS_CSV = "volume_results.csv"
+
+# Reference heights [m] used for DBH (lower) and the taper metric (lower/
+# upper). DBH is the stem diameter at TAPER_H_LOWER (1.3 m = breast height).
+TAPER_H_LOWER = 1.3    # lower reference height [m]
+TAPER_H_UPPER = 10.0   # upper reference height [m]
 # =====================================================================
 
 # --- Output file name(s) --------------------------------------------
@@ -338,9 +343,11 @@ def parse_adqsm_params_file(path):
         trunk_len = extract("TrunkLength", line) or 0.0
         branch_len = extract("BranchLength", line) or 0.0
         branches_num = extract("BranchesNum", line) or 0.0
+        tree_height = extract("TreeHeight", line)
         return dict(n=int(branches_num), total_len=trunk_len + branch_len, total_vol=tree_vol,
                     trunk_n=0, trunk_len=trunk_len, trunk_vol=trunk_vol,
-                    branch_n=0, branch_len=branch_len, branch_vol=branch_vol)
+                    branch_n=0, branch_len=branch_len, branch_vol=branch_vol,
+                    height=tree_height)
 
     return None
 
@@ -393,14 +400,17 @@ def volume_stats(lengths, radii, order_arr):
                 branch_n=n - t_n, branch_len=total_len - t_len, branch_vol=total_vol - t_vol)
 
 
-def upsert_result(csv_path, tree, method, total, stem, branch, std):
+def upsert_result(csv_path, tree, method, total, stem, branch, std, dbh=None, height=None, taper=None):
     """Insert/update one (tree, method) row in the shared master results CSV
     (see compare_volumes.py for its format). Reads csv_path if it exists
     (creating it with the header if not), removes any existing row with the
     same tree AND method, appends the new row, and writes the file back -
     so re-running a script overwrites its previous result instead of
-    duplicating it. Numbers are formatted with 6 decimals; None -> "" (blank)."""
-    header = ["tree", "method", "total_m3", "stem_m3", "branch_m3", "std_m3"]
+    duplicating it. Numbers are formatted with 6 decimals; None -> "" (blank).
+    Backward compatible: if csv_path still has the old 6-column header, its
+    rows are read fine and rewritten with the new columns added as blank."""
+    header = ["tree", "method", "total_m3", "stem_m3", "branch_m3", "std_m3",
+              "dbh_m", "height_m", "taper_cm_per_m"]
 
     def fmt(x):
         return "" if x is None else "%.6f" % x
@@ -412,12 +422,52 @@ def upsert_result(csv_path, tree, method, total, stem, branch, std):
 
     rows = [r for r in rows if not (r["tree"] == tree and r["method"] == method)]
     rows.append({"tree": tree, "method": method, "total_m3": fmt(total),
-                 "stem_m3": fmt(stem), "branch_m3": fmt(branch), "std_m3": fmt(std)})
+                 "stem_m3": fmt(stem), "branch_m3": fmt(branch), "std_m3": fmt(std),
+                 "dbh_m": fmt(dbh), "height_m": fmt(height), "taper_cm_per_m": fmt(taper)})
 
     with open(csv_path, "w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=header)
         writer.writeheader()
         writer.writerows(rows)
+
+
+def stem_diameter_at_height(xyz, cyl, cyl_order, z_base, h):
+    """Diameter [m] of the trunk (branch order 0 cylinders) at height h [m]
+    above the tree base z_base. Uses the cylinder whose height span
+    [min(za,zb), max(za,zb)] contains h, falling back to the nearest
+    cylinder for small gaps between spans. Returns None if h is outside the
+    height range actually covered by trunk cylinders (no extrapolation/
+    guessing). Reused for both DBH and the taper metric."""
+    spans = []
+    for (a, b, r, pid), o in zip(cyl, cyl_order):
+        if o != 0:
+            continue
+        za, zb = xyz[a, 2] - z_base, xyz[b, 2] - z_base
+        spans.append((min(za, zb), max(za, zb), r))
+    if not spans:
+        return None
+    lo = min(s[0] for s in spans)
+    hi = max(s[1] for s in spans)
+    if h < lo or h > hi:
+        return None
+    for h_start, h_end, r in spans:
+        if h_start <= h <= h_end:
+            return 2.0 * r
+
+    def dist(span):
+        h_start, h_end, _ = span
+        return h_start - h if h < h_start else h - h_end
+
+    nearest = min(spans, key=dist)
+    return 2.0 * nearest[2]
+
+
+def _fmt_dbh(x):
+    return "%.4f m" % x if x is not None else "n/a"
+
+
+def _fmt_taper(x):
+    return "%.2f cm/m" % x if x is not None else "n/a"
 
 
 def print_volume_stats(label, s):
@@ -688,14 +738,26 @@ if CALIBRATE_RADII:
 print("\n%-12s %-12s %-12s %-12s" % ("threshold", "cylinders", "length [m]", "file"))
 print("Volume verification below is computed from the exact cylinders written to "
       "each geom file (pi * radius^2 * length per cylinder).\n")
+z_base = float(xyz[:, 2].min())   # tree base; DBH/height/taper are measured from here
 multiple_thresholds = len(RADIUS_THRESHOLDS) > 1
 for thr in RADIUS_THRESHOLDS:
     root, cyl, cyl_order = convert(xyz, rad, edges, thr, SEG_LEN_MIN, SEG_LEN_MAX, SEG_LEN_K)
     out = OUTPUT_PATTERN.format(r=int(round(thr * 1000))) if multiple_thresholds else OUTPUT_NAME
 
+    # Height of the pruned model: z-range of the nodes actually used by these
+    # cylinders. Unaffected by radius calibration (geometry doesn't change).
+    node_ids = sorted({idx for a, b, r, pid in cyl for idx in (a, b)})
+    height_m = float(xyz[node_ids, 2].max() - xyz[node_ids, 2].min()) if node_ids else None
+
     if CALIBRATE_RADII:
         orig_lengths, orig_radii = cylinder_metrics(xyz, cyl)
         orig_stats = volume_stats(orig_lengths, orig_radii, np.asarray(cyl_order))
+        # DBH/taper of the UNCALIBRATED (raw AdTree) trunk, before radii are replaced.
+        raw_dbh = stem_diameter_at_height(xyz, cyl, cyl_order, z_base, TAPER_H_LOWER)
+        raw_d_upper = stem_diameter_at_height(xyz, cyl, cyl_order, z_base, TAPER_H_UPPER)
+        raw_taper = ((raw_dbh - raw_d_upper) * 100.0 / (TAPER_H_UPPER - TAPER_H_LOWER)
+                     if raw_dbh is not None and raw_d_upper is not None else None)
+
         new_radii, factors = calibrate_cylinder_radii(
             xyz, cyl, cyl_order, trunk_radius_func, adqsm_median_by_order)
         cyl = [(a, b, float(new_radii[i]), pid) for i, (a, b, r, pid) in enumerate(cyl)]
@@ -712,9 +774,25 @@ for thr in RADIUS_THRESHOLDS:
         cal_lengths, cal_radii = cylinder_metrics(xyz, cyl)
         cal_stats = volume_stats(cal_lengths, cal_radii, np.asarray(cyl_order))
 
-        # ---- upsert this threshold variant's calibrated result into the shared CSV ----
+        # DBH/taper of the CALIBRATED trunk, using the now-replaced radii.
+        cal_dbh = stem_diameter_at_height(xyz, cyl, cyl_order, z_base, TAPER_H_LOWER)
+        cal_d_upper = stem_diameter_at_height(xyz, cyl, cyl_order, z_base, TAPER_H_UPPER)
+        cal_taper = ((cal_dbh - cal_d_upper) * 100.0 / (TAPER_H_UPPER - TAPER_H_LOWER)
+                     if cal_dbh is not None and cal_d_upper is not None else None)
+
+        # ---- upsert both the uncalibrated and calibrated rows for this threshold ----
+        upsert_result(RESULTS_CSV, TREE_NAME, "AdTree raw r%dmm" % round(thr * 1000),
+                      orig_stats["total_vol"], orig_stats["trunk_vol"], orig_stats["branch_vol"], None,
+                      raw_dbh, height_m, raw_taper)
         upsert_result(RESULTS_CSV, TREE_NAME, "AdTree calibrated r%dmm" % round(thr * 1000),
-                      cal_stats["total_vol"], cal_stats["trunk_vol"], cal_stats["branch_vol"], None)
+                      cal_stats["total_vol"], cal_stats["trunk_vol"], cal_stats["branch_vol"], None,
+                      cal_dbh, height_m, cal_taper)
+
+        print("  DBH (at %.1f m)   : raw AdTree = %s   |   calibrated = %s"
+              % (TAPER_H_LOWER, _fmt_dbh(raw_dbh), _fmt_dbh(cal_dbh)))
+        print("  Taper (%.1f-%.1f m): raw AdTree = %s   |   calibrated = %s"
+              % (TAPER_H_LOWER, TAPER_H_UPPER, _fmt_taper(raw_taper), _fmt_taper(cal_taper)))
+        print("  Height (pruned model): %s" % (("%.2f m" % height_m) if height_m is not None else "n/a"))
 
         print("  Volume comparison (a) raw skeleton vs. (b) processed/AdTree vs. (c) processed/calibrated:")
         print_volume_stats("(a) raw skeleton (AdTree)", raw_stats)
@@ -723,6 +801,8 @@ for thr in RADIUS_THRESHOLDS:
         adqsm_ref = parse_adqsm_params_file(ADQSM_PARAMS_FILE)
         if adqsm_ref is not None:
             print_volume_stats("(d) AdQSM reference (TreesParams)", adqsm_ref)
+            if adqsm_ref.get("height") is not None:
+                print("      AdQSM TreeHeight: %.2f m" % adqsm_ref["height"])
     print()
 
     if SHOW_PLOT or SAVE_PLOT_PNG:

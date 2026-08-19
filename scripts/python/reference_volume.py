@@ -56,6 +56,21 @@ INCLUDE_FRACTIONS = {
 # section volume in cm^3. 1 m^3 = 1_000_000 cm^3, so the factor to m^3 is 1e-6.
 # (If a file ever stored litres, use 1e-3; if already m^3, use 1.0.)
 VOLUME_TO_M3 = 1e-6
+
+# Unit of the "Db"/"De" columns (section-base/section-end diameter) in the
+# source file. The de Tanago convention is centimetres; the raw Db of the
+# first stem section is printed at runtime so you can verify this against
+# the field notes. Change to 1e-3 if your file uses millimetres instead.
+DIAMETER_TO_M = 1e-2
+
+# Unit of the "L" column (section length). Same convention as the other
+# linear measurements in the table (normally also centimetres).
+LENGTH_TO_M = 1e-2
+
+# Reference heights [m] used for DBH (lower) and the taper metric (lower/
+# upper). DBH is the stem diameter at TAPER_H_LOWER (1.3 m = breast height).
+TAPER_H_LOWER = 1.3    # lower reference height [m]
+TAPER_H_UPPER = 10.0   # upper reference height [m]
 # =====================================================================
 
 
@@ -73,14 +88,40 @@ def to_float(text):
         return None
 
 
-def upsert_result(csv_path, tree, method, total, stem, branch, std):
+def stem_diameter_at_height(stem_sections, h):
+    """Stem diameter [m] at height h [m] above the tree base, from the
+    'stem' fraction's sections (in file order). Walks the sections,
+    accumulating height as the running sum of L, and linearly interpolates
+    between Db and De inside the section that spans h. Returns None if h
+    falls outside the height actually covered by the stem sections (no
+    extrapolation/guessing). Reused for both DBH and the taper metric.
+    """
+    running_h = 0.0
+    for r in stem_sections:
+        db, de, length = to_float(r["Db"]), to_float(r["De"]), to_float(r["L"])
+        if db is None or de is None or length is None:
+            continue
+        length_m = length * LENGTH_TO_M
+        h_start, h_end = running_h, running_h + length_m
+        if h_start <= h <= h_end and length_m > 0:
+            t = (h - h_start) / length_m
+            diameter_m = (db + t * (de - db)) * DIAMETER_TO_M
+            return diameter_m
+        running_h = h_end
+    return None
+
+
+def upsert_result(csv_path, tree, method, total, stem, branch, std, dbh=None, height=None, taper=None):
     """Insert/update one (tree, method) row in the shared master results CSV
     (see compare_volumes.py for its format). Reads csv_path if it exists
     (creating it with the header if not), removes any existing row with the
     same tree AND method, appends the new row, and writes the file back -
     so re-running a script overwrites its previous result instead of
-    duplicating it. Numbers are formatted with 6 decimals; None -> "" (blank)."""
-    header = ["tree", "method", "total_m3", "stem_m3", "branch_m3", "std_m3"]
+    duplicating it. Numbers are formatted with 6 decimals; None -> "" (blank).
+    Backward compatible: if csv_path still has the old 6-column header, its
+    rows are read fine and rewritten with the new columns added as blank."""
+    header = ["tree", "method", "total_m3", "stem_m3", "branch_m3", "std_m3",
+              "dbh_m", "height_m", "taper_cm_per_m"]
 
     def fmt(x):
         return "" if x is None else "%.6f" % x
@@ -92,7 +133,8 @@ def upsert_result(csv_path, tree, method, total, stem, branch, std):
 
     rows = [r for r in rows if not (r["tree"] == tree and r["method"] == method)]
     rows.append({"tree": tree, "method": method, "total_m3": fmt(total),
-                 "stem_m3": fmt(stem), "branch_m3": fmt(branch), "std_m3": fmt(std)})
+                 "stem_m3": fmt(stem), "branch_m3": fmt(branch), "std_m3": fmt(std),
+                 "dbh_m": fmt(dbh), "height_m": fmt(height), "taper_cm_per_m": fmt(taper)})
 
     with open(csv_path, "w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=header)
@@ -158,8 +200,30 @@ print("SELECTED TOTAL VOLUME: %.4f m^3  (%.1f L)"
 full_total_m3 = sum(volume_by_fraction.values()) * VOLUME_TO_M3
 print("(all fractions combined would be: %.4f m^3)" % full_total_m3)
 
+# ---- DBH / height / taper from the 'stem' fraction's sections --------------
+stem_sections = [r for r in tree_rows if r["Fraction"] == "stem"]
+if stem_sections:
+    print("\nRaw Db of the first stem section: %r  (verify unit; DIAMETER_TO_M = %g)"
+          % (stem_sections[0]["Db"], DIAMETER_TO_M))
+
+d_lower = stem_diameter_at_height(stem_sections, TAPER_H_LOWER) if stem_sections else None
+d_upper = stem_diameter_at_height(stem_sections, TAPER_H_UPPER) if stem_sections else None
+dbh_m = d_lower
+# The source table has no independent total-height measurement; do not guess it.
+height_m = None
+taper_cm_per_m = None
+if d_lower is not None and d_upper is not None:
+    taper_cm_per_m = (d_lower - d_upper) * 100.0 / (TAPER_H_UPPER - TAPER_H_LOWER)
+
+print("DBH (stem diameter at %.1f m)   : %s"
+      % (TAPER_H_LOWER, ("%.4f m" % dbh_m) if dbh_m is not None else "not resolved"))
+print("Taper (%.1f-%.1f m)             : %s"
+      % (TAPER_H_LOWER, TAPER_H_UPPER,
+         ("%.2f cm/m" % taper_cm_per_m) if taper_cm_per_m is not None else "not resolved"))
+
 # ---- upsert this result into the shared master results CSV -----------------
 stem_included = INCLUDE_FRACTIONS.get("stem", False) and "stem" in volume_by_fraction
 stem_m3 = (volume_by_fraction["stem"] * VOLUME_TO_M3) if stem_included else None
 branch_m3 = (selected_total_m3 - stem_m3) if stem_m3 is not None else None
-upsert_result(RESULTS_CSV, TREE_ID, METHOD_LABEL, selected_total_m3, stem_m3, branch_m3, None)
+upsert_result(RESULTS_CSV, TREE_ID, METHOD_LABEL, selected_total_m3, stem_m3, branch_m3, None,
+              dbh_m, height_m, taper_cm_per_m)
