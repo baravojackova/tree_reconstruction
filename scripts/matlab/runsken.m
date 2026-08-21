@@ -491,6 +491,62 @@ fprintf(fid, '%.6f', QSM_opt.treedata.TreeHeight);   % tree height [m]
 fprintf('Height exported to %s\n', h_file);
 fclose(fid);
 %
+% ---- export TAPER (stem narrowing) for the shared results table ----
+% taper_cm_per_m = (diameter_at_1.3m - diameter_at_10.0m) * 100 / (10.0 - 1.3)
+%
+% 1.3 m and 10.0 m are NOT arbitrary here - they are exactly TAPER_H_LOWER/
+% TAPER_H_UPPER, the same two reference heights every OTHER method in this
+% pipeline uses for its own taper_cm_per_m (see adtree_reconstruct_compare.py's
+% raw_taper/cal_taper, and TAPER_H_LOWER/TAPER_H_UPPER in
+% import_matlab_results.py) - using the same two heights here is what makes
+% this number directly comparable to theirs in volume_results.csv, instead
+% of being a taper measured over a different (and therefore not comparable)
+% span of the trunk.
+%
+% Diameter at each height is found the SAME way QSM_opt.treedata.DBHqsm
+% itself is computed (see dbh_cylinder() in main_steps/tree_data.m): walk
+% the TRUNK cylinders in order from the base upward, add up their lengths,
+% and take the diameter of the first cylinder whose running total reaches
+% the target height. That original code walks the raw trunk point cloud
+% (no longer available here, this far into the script) - but section 17b
+% above already has the exact same trunk cylinder radii/lengths in scope
+% (r_cyl, L_cyl, is_stem), in the same base-to-tip order, so we can repeat
+% the identical "which cylinder is at height h" logic using THOSE arrays
+% instead, just evaluated at two heights (1.3 m and 10.0 m) rather than one.
+trunk_len_cyl = L_cyl(is_stem);     % trunk-only cylinder lengths, base -> tip order
+trunk_rad_cyl = r_cyl(is_stem);     % trunk-only cylinder radii, same order
+cum_h = cumsum(trunk_len_cyl);      % running height from the base, one value per trunk cylinder
+
+idx_13 = find(cum_h >= 1.3,  1, 'first');   % index of the first trunk cylinder reaching 1.3 m
+idx_10 = find(cum_h >= 10.0, 1, 'first');   % index of the first trunk cylinder reaching 10.0 m
+
+taper_file = ['taper_' tree_id '_' run_tag '.txt'];
+fid = fopen(taper_file, 'w');
+if ~isempty(idx_13) && ~isempty(idx_10)
+    d_13 = 2 * trunk_rad_cyl(idx_13);   % stem diameter [m] at 1.3 m
+    d_10 = 2 * trunk_rad_cyl(idx_10);   % stem diameter [m] at 10.0 m
+    taper_cm_per_m = (d_13 - d_10) * 100.0 / (10.0 - 1.3);
+    fprintf(fid, '%.6f', taper_cm_per_m);
+    fprintf('Taper exported to %s (%.2f cm/m)\n', taper_file, taper_cm_per_m);
+    % Sanity check only (not written to file): d_13 should equal
+    % QSM_opt.treedata.DBHqsm, since it's the exact same walking algorithm
+    % applied to the exact same trunk cylinders - if these two numbers
+    % don't (nearly) match when you run this, the array order assumption
+    % above is wrong for this tree and the taper value should not be trusted.
+    fprintf('  (check: diameter at 1.3 m = %.4f m, vs. treedata.DBHqsm = %.4f m)\n', ...
+        d_13, QSM_opt.treedata.DBHqsm);
+else
+    % The trunk model doesn't reach 10.0 m (short tree, or the trunk
+    % cylinders stop earlier than that) - write an EMPTY file rather than
+    % extrapolating or guessing a number. import_matlab_results.py's
+    % read_single_number() already treats an empty/unparseable file as
+    % "value not available" (None), exactly like every other optional
+    % field in this pipeline (DBH/height/trunk-length/branch-length).
+    fprintf(fid, '');
+    fprintf('Taper NOT exported - trunk model does not reach 10.0 m (empty %s written)\n', taper_file);
+end
+fclose(fid);
+%
 % ---- export trunk/branch length for the shared results table ----
 % QSM_opt.treedata.TrunkLength/BranchLength are set in tree_data.m as
 % sum(Len(Trunk)) / sum(Len(~Trunk)) - i.e. the exact same cylinder length

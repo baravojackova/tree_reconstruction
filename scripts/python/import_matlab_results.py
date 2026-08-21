@@ -51,9 +51,15 @@ TREE_NAME_MAP = {
 
 # Reference heights [m] used for DBH (lower) and the taper metric (lower/
 # upper). DBH is the stem diameter at TAPER_H_LOWER (1.3 m = breast height).
-# Not used directly here (MATLAB doesn't export a diameter profile), but kept
-# for consistency with the other scripts and to label what the optional
-# height_<tree>_<run>.txt / dbh_<tree>_<run>.txt files are measured at.
+# These two constants are NOT used directly in this script's own calculation
+# (taper is computed by runsken.m in MATLAB, using these exact same two
+# heights, and just read in below) - they're kept here to document what the
+# height_<tree>_<run>.txt / dbh_<tree>_<run>.txt / taper_<tree>_<run>.txt
+# files are measured at, and so this file's numbers stay comparable with
+# every OTHER method in volume_results.csv, which all use these same two
+# reference heights for their own taper_cm_per_m (see
+# adtree_reconstruct_compare.py's raw_taper/cal_taper for the other side of
+# that same convention).
 TAPER_H_LOWER = 1.3    # lower reference height [m]
 TAPER_H_UPPER = 10.0   # upper reference height [m]
 # =====================================================================
@@ -173,14 +179,24 @@ for path in files:
     tree = TREE_NAME_MAP.get(tree_raw, tree_raw)      # map short id -> full id
     method = "TreeQSM mine (%s, %s)" % (run, IMPORT_GROUP)
 
-    # Optional DBH/height, read from "dbh_<tree>_<run>.txt" / "height_<tree>_<run>.txt"
-    # next to the volumes table (single number each, in metres). The MATLAB
-    # volumes_*.csv tables don't export a diameter profile, so taper cannot be
-    # derived here and is always left as None.
+    # Optional DBH/height/taper, read from "dbh_<tree>_<run>.txt" /
+    # "height_<tree>_<run>.txt" / "taper_<tree>_<run>.txt" next to the
+    # volumes table (single number each: metres for dbh/height, cm/m for
+    # taper). All three are exported by runsken.m section 18 using the SAME
+    # TAPER_H_LOWER/TAPER_H_UPPER reference heights defined above, which is
+    # what makes taper here comparable to taper_cm_per_m for every other
+    # method in volume_results.csv.
+    #
+    # taper has no "_filtered" counterpart (unlike trunk/branch LENGTH just
+    # below): it's the diameter narrowing of the STEM between 1.3 m and
+    # 10.0 m, and the stem at breast height is essentially always thicker
+    # than the 10 cm cut-off anyway - same reason DBH/height don't get a
+    # filtered variant either. So taper is read the same way regardless of
+    # branch_filter (computed further down).
     table_dir = os.path.dirname(path)
     dbh = read_single_number(os.path.join(table_dir, "dbh_%s_%s.txt" % (tree, run)))
     height = read_single_number(os.path.join(table_dir, "height_%s_%s.txt" % (tree, run)))
-    taper = None
+    taper = read_single_number(os.path.join(table_dir, "taper_%s_%s.txt" % (tree, run)))
 
     # branch_filter: "10cm" for any group whose NAME says it's restricted to
     # branches >= 10 cm diameter (currently only IMPORT_GROUP = "Filtered
