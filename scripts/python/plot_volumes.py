@@ -122,35 +122,43 @@ def save_and_report(fig, filename):
 def build_method_color_map(methods, reference_method):
     """Return a {method: color} dict for the given list of methods.
 
-    Non-reference methods are coloured with a smooth, muted gradient that
-    runs green -> gray -> yellow -> orange (built by hand from those four
-    hex stops via LinearSegmentedColormap, rather than using one of
-    matplotlib's stock qualitative palettes) - a continuous, low-saturation
-    gradient like this stays readable even with a dozen+ methods in one
-    chart, unlike matplotlib's default bright/saturated color cycle, which
-    starts visually clashing once you have more than ~5 categories.
+    Non-reference methods are coloured with a smooth, muted MINT/TEAL
+    gradient - soft mint green through turquoise to a deeper teal (built by
+    hand from those four hex stops via LinearSegmentedColormap, rather than
+    using one of matplotlib's stock qualitative palettes) - a continuous,
+    pastel, low-saturation gradient like this stays readable even with a
+    dozen+ methods in one chart, unlike matplotlib's default bright/
+    saturated color cycle, which starts visually clashing once you have more
+    than ~5 categories. (This was previously a green -> gray -> yellow ->
+    orange gradient; replaced with this mint/teal family on request - the
+    reference highlight colour below changed too, since a "tab:blue"
+    highlight would visually blend into an all-cool mint/teal palette much
+    more than it did against the old warm-toned gradient.)
 
     `reference_method` (the method this chart is comparing everything else
     against - REFERENCE_METHOD for the destructive-reference mode, or
     REFERENCE_METHOD_NONE for the AdQSM-as-yardstick mode) is deliberately
     EXCLUDED from that gradient and instead gets a single fixed highlight
-    colour ("tab:blue") - this guarantees the reference can never
-    accidentally land on the same shade as one of the gradient-coloured
-    methods (which could happen with the old "reference = hard-coded
-    tab:orange, everything else = matplotlib's automatic cycle" approach,
-    since that cycle's orange could still coincide with the explicit one -
-    see the tree_overview color-collision bug fixed earlier in this file's
-    history). Excluding it from the gradient also means its position never
-    shifts the other methods' shades depending on where in the method list
-    it happens to sit.
+    colour ("coral" - a warm, high-contrast tone chosen specifically because
+    the gradient above is entirely cool-toned mint/teal, so a warm highlight
+    stands out at a glance instead of reading as "just another teal shade").
+    This guarantees the reference can never accidentally land on the same
+    shade as one of the gradient-coloured methods (which could happen with
+    the old "reference = hard-coded tab:orange, everything else =
+    matplotlib's automatic cycle" approach, since that cycle's orange could
+    still coincide with the explicit one - see the tree_overview
+    color-collision bug fixed earlier in this file's history). Excluding it
+    from the gradient also means its position never shifts the other
+    methods' shades depending on where in the method list it happens to sit.
     """
     import matplotlib.colors as mcolors
 
-    # Hand-picked, muted stops (not fully saturated matplotlib primaries) so
-    # the gradient stays easy on the eye across many bars/boxes at once.
+    # Hand-picked, pastel mint/turquoise stops (not fully saturated) so the
+    # gradient stays easy on the eye across many bars/boxes at once, while
+    # still spanning a visibly distinct light-mint-to-deep-teal range.
     gradient = mcolors.LinearSegmentedColormap.from_list(
         "method_gradient",
-        ["#4daf4a", "#999999", "#dfc27d", "#d95f02"],  # green -> gray -> yellow -> orange
+        ["#d3f5ec", "#8fe0cf", "#4fbfae", "#2f8f8a"],  # light mint -> mint -> turquoise -> deep teal
     )
 
     non_ref_methods = [m for m in methods if m != reference_method]
@@ -158,13 +166,13 @@ def build_method_color_map(methods, reference_method):
     color_of = {}
     for i, m in enumerate(non_ref_methods):
         # Spread methods evenly across the gradient's full 0..1 range. With
-        # only one non-reference method, t=0.5 (the middle, gray-ish part of
-        # the gradient) is used instead of dividing by (n - 1) = 0.
+        # only one non-reference method, t=0.5 (the middle, turquoise part
+        # of the gradient) is used instead of dividing by (n - 1) = 0.
         t = (i / (n - 1)) if n > 1 else 0.5
         color_of[m] = gradient(t)
 
     if reference_method in methods:
-        color_of[reference_method] = "tab:blue"
+        color_of[reference_method] = "coral"
 
     return color_of
 
@@ -257,7 +265,19 @@ def plot_tree_overview(rows, tree, branch_filter, color_map):
     # One row dict per method, for quick lookups below (assumes at most one
     # row per (tree, method) pair, which is how upsert_result() keeps the CSV).
     row_of = {r["method"]: r for r in tree_rows}
-    ref_row = row_of.get(REFERENCE_METHOD)   # None if this tree has no reference row
+
+    # WHICH method is "the reference" depends on branch_filter, same as
+    # everywhere else in this file: the destructive field reference
+    # (REFERENCE_METHOD) only ever has "10cm" rows, so it can never be found
+    # in "none"-mode data - AdQSM (REFERENCE_METHOD_NONE) plays that role
+    # there instead. Before this fix, this line was hard-coded to
+    # REFERENCE_METHOD, which meant ref_row was ALWAYS None in "none" mode
+    # (since that method never appears there) - so the percent-difference
+    # annotations further down were silently never drawn for "none" mode
+    # charts, even though AdQSM WAS present and perfectly usable as a
+    # yardstick. Computing the right reference per-mode here fixes that.
+    reference_method = REFERENCE_METHOD if branch_filter == "10cm" else REFERENCE_METHOD_NONE
+    ref_row = row_of.get(reference_method)   # None if this tree has no row for that reference
 
     # color_of is just an alias into the shared color_map here (rather than
     # `color_map` directly) so the rest of this function's code below didn't
@@ -313,9 +333,13 @@ def plot_tree_overview(rows, tree, branch_filter, color_map):
 
         # Percent-difference label above every non-reference bar, using the
         # same pct_diff() calculation compare_volumes.py uses for its table.
+        # Compared against `reference_method` (REFERENCE_METHOD for "10cm",
+        # REFERENCE_METHOD_NONE for "none" - see the comment where that
+        # variable is set above), NOT a hard-coded REFERENCE_METHOD, so this
+        # annotation now actually appears in "none"-mode charts too.
         ref_value = ref_row[field_key] if ref_row is not None else None
         for xi, m in zip(x_positions, present_methods):
-            if m == REFERENCE_METHOD:
+            if m == reference_method:
                 continue
             d_pct = pct_diff(row_of[m][field_key], ref_value)
             if d_pct is None:   # no reference value to compare against - leave blank
@@ -331,20 +355,46 @@ def plot_tree_overview(rows, tree, branch_filter, color_map):
                      else "diameter >= 10 cm only, branch_filter='10cm'")
     fig.suptitle("Tree overview: %s  (%s)" % (tree, filter_label), fontsize=14)
 
+    # ONLY for the "10cm" mode: a clearly-visible warning that AdQSM's
+    # numbers in this filtered subset may not be trustworthy. WHY: AdQSM's
+    # BranchStructure.txt has no reliable per-branch volume of its own for
+    # this - its "volume(...)" column is off by orders of magnitude from
+    # AdQSM's own official totals (see report_adqsm_thin_branch() in
+    # tree_geom_utils.py), so any ">=10cm" AdQSM volume has to be
+    # approximated as simple constant-radius cylinders, which measurably
+    # over-estimates volume for tapering branches. This warning does NOT
+    # apply to "none" mode, since that mode uses AdQSM's own official,
+    # un-filtered TreesParams.txt totals directly - no cylinder
+    # approximation involved there. Drawn as fig.text() (a separate, coloured
+    # line - NOT folded into the small suptitle above) with a light
+    # background box, specifically so it can't be mistaken for a routine
+    # subtitle and skimmed past.
+    if branch_filter == "10cm":
+        fig.text(0.5, 0.955,
+                 "NOTE: AdQSM values in this >=10cm subset are approximate - "
+                 "AdQSM has no reliable per-branch volume source for this cut-off "
+                 "(see BranchStructure.txt volume(...) column discussion).",
+                 ha="center", va="top", fontsize=9, color="firebrick", fontweight="bold",
+                 bbox=dict(boxstyle="round,pad=0.3", facecolor="#fff3cd", edgecolor="firebrick"))
+
     # ONE legend for the whole figure (not one per subplot, which would just
     # repeat the same method names 4 times) - built from coloured squares
     # ("patches") rather than real bar handles, since not every method has a
-    # bar in every subplot.
+    # bar in every subplot. "(reference)" is tagged onto whichever method is
+    # THIS mode's reference_method (see where that's computed above), not a
+    # hard-coded REFERENCE_METHOD, so AdQSM correctly gets tagged in "none" mode.
     legend_handles = [
         mpatches.Patch(color=color_of[m],
-                       label=m + (" (reference)" if m == REFERENCE_METHOD else ""))
+                       label=m + (" (reference)" if m == reference_method else ""))
         for m in methods
     ]
     fig.legend(handles=legend_handles, loc="lower center",
                ncol=min(3, len(methods)), fontsize=8, bbox_to_anchor=(0.5, -0.02))
 
-    # rect leaves room at the top for suptitle and at the bottom for the legend.
-    fig.tight_layout(rect=(0, 0.06, 1, 0.96))
+    # rect leaves room at the top for suptitle (+ the AdQSM warning line, when
+    # present, in "10cm" mode) and at the bottom for the legend.
+    top_margin = 0.90 if branch_filter == "10cm" else 0.96
+    fig.tight_layout(rect=(0, 0.06, 1, top_margin))
     save_and_report(fig, "tree_overview_%s_%s.png" % (tree, branch_filter))
 
 
@@ -444,14 +494,14 @@ def plot_error_metrics_bar(rows, branch_filter, reference_method, color_map):
     # for Bias/MAE/RMSE), so a single "one colour per method" mapping
     # (color_map) doesn't fit the same way it does in the other three charts
     # (there, each bar/box IS one method). Instead, the three metrics
-    # themselves are drawn in fixed colours sampled from the SAME green ->
-    # gray -> yellow -> orange family used everywhere else (so this chart
-    # still belongs visually to the same set), and each method's x-axis tick
-    # label is tinted with its color_map colour below - that's how this
-    # chart still shows "this method = this colour", consistent with the rest.
-    ax.bar([xi - width for xi in x], bias, width=width, label="Bias", color="#4daf4a")   # green (gradient start)
-    ax.bar(x,                        mae,  width=width, label="MAE",  color="#999999")   # gray (gradient middle)
-    ax.bar([xi + width for xi in x], rmse, width=width, label="RMSE", color="#d95f02")   # orange (gradient end)
+    # themselves are drawn in fixed colours sampled from the SAME mint/teal
+    # family used everywhere else (so this chart still belongs visually to
+    # the same set), and each method's x-axis tick label is tinted with its
+    # color_map colour below - that's how this chart still shows "this
+    # method = this colour", consistent with the rest.
+    ax.bar([xi - width for xi in x], bias, width=width, label="Bias", color="#8fe0cf")   # mint (gradient start)
+    ax.bar(x,                        mae,  width=width, label="MAE",  color="#4fbfae")   # turquoise (gradient middle)
+    ax.bar([xi + width for xi in x], rmse, width=width, label="RMSE", color="#2f8f8a")   # deep teal (gradient end)
     ax.axhline(0.0, color="gray", linestyle="-", linewidth=0.8)
     ax.set_xticks(x)
     ax.set_xticklabels(methods, rotation=30, ha="right")
