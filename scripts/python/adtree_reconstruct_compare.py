@@ -356,6 +356,17 @@ for variant_label, taper_file, branch_file, params_file in ADQSM_VARIANT_LIST:
             raw_taper = ((raw_dbh - raw_d_upper) * 100.0 / (TAPER_H_UPPER - TAPER_H_LOWER)
                          if raw_dbh is not None and raw_d_upper is not None else None)
 
+            # ---- thin-branch diagnostic on the RAW (uncalibrated) cylinders ----
+            # Computed here (BEFORE `cyl`'s radii get overwritten by
+            # calibrate_cylinder_radii() below) since orig_lengths/orig_radii
+            # are only valid for the CURRENT (raw AdTree) radii at this point.
+            # source_label="AdTree raw" makes this printout visually distinct
+            # from the calibrated one further below (same function, same cut_cm,
+            # different cylinder set) - see report_thin_branch_volume()'s
+            # docstring in tree_geom_utils.py for why the label exists.
+            orig_thin = report_thin_branch_volume(orig_lengths, orig_radii, cyl_order,
+                                                   cut_cm=THIN_BRANCH_CUT_CM, source_label="AdTree raw")
+
             new_radii, factors = calibrate_cylinder_radii(
                 xyz, cyl, cyl_order, trunk_radius_func, adqsm_median_by_order)
             cyl = [(a, b, float(new_radii[i]), pid) for i, (a, b, r, pid) in enumerate(cyl)]
@@ -472,6 +483,24 @@ for variant_label, taper_file, branch_file, params_file in ADQSM_VARIANT_LIST:
                               cal_thin["total_vol_kept"], cal_thin["trunk_vol_kept"],
                               cal_thin["branch_vol_kept"], None,
                               cal_dbh, height_m, cal_taper,
+                              branch_filter="10cm")
+
+                # Same idea as the THIRD row above, but for the RAW (uncalibrated)
+                # cylinders instead of the calibrated ones - uses orig_thin
+                # (computed earlier from orig_lengths/orig_radii, BEFORE
+                # calibrate_cylinder_radii() replaced `cyl`'s radii) rather
+                # than cal_thin. This row does NOT depend on which AdQSM
+                # variant is active (raw AdTree radii never touch AdQSM at
+                # all - same reasoning as the plain "AdTree raw" row above),
+                # so it gets no variant suffix either. DBH/taper reuse
+                # raw_dbh/raw_taper (the UNCALIBRATED trunk's own values),
+                # not cal_dbh/cal_taper, to stay consistent with "this row
+                # describes the raw model, not the calibrated one."
+                upsert_result(RESULTS_CSV, TREE_NAME,
+                              "AdTree raw r%dmm (>=%.0fcm only)" % (round(thr * 1000), THIN_BRANCH_CUT_CM),
+                              orig_thin["total_vol_kept"], orig_thin["trunk_vol_kept"],
+                              orig_thin["branch_vol_kept"], None,
+                              raw_dbh, height_m, raw_taper,
                               branch_filter="10cm")
 
             print("  DBH (at %.1f m)   : raw AdTree = %s   |   calibrated = %s"

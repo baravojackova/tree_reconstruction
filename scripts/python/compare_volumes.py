@@ -75,6 +75,16 @@ SELECT_TREE = "ALL"
 # The method used as the "truth" that everything is compared against. Must
 # match a value in the 'method' column exactly.
 REFERENCE_METHOD = "Reference (destructive)"
+
+# The "reference" for MODE B (branch_filter == "none", methods compared to
+# EACH OTHER - see the header comment above). The destructive field
+# reference can never appear in that mode (it only ever has a "10cm" row),
+# so there is no absolute "truth" to compare against there - instead we pick
+# AdQSM's own reported numbers as a common yardstick, purely so the
+# Bias/MAE/RMSE/field-error tables have SOME baseline to express every other
+# method's difference against. This is NOT an accuracy claim about AdQSM -
+# it's just "how far is each method from AdQSM", nothing more.
+REFERENCE_METHOD_NONE = "AdQSM (TreesParams)"
 # =====================================================================
 
 
@@ -206,15 +216,23 @@ def print_tree_block(tree, rows, no_reference_note=None):
     print()
 
 
-def compute_error_metrics(rows):
+def compute_error_metrics(rows, reference_method):
     """Same Bias/MAE/RMSE/CV-RMSE calculation as error_metrics() below, but
     RETURNS the numbers instead of printing them (one dict per method), so
     other scripts (e.g. plot_volumes.py) can reuse this exact calculation
     instead of duplicating the math and risking the two going out of sync.
-    Only trees where BOTH that method and the reference exist are used."""
+    Only trees where BOTH that method and the reference exist are used.
+
+    `reference_method` is now a REQUIRED parameter (previously this function
+    always used the global REFERENCE_METHOD) so the SAME calculation can
+    serve both comparison modes further down this file: MODE A passes
+    REFERENCE_METHOD (the destructive field reference, branch_filter=="10cm"),
+    MODE B passes REFERENCE_METHOD_NONE (AdQSM, branch_filter=="none") -
+    without this parameter the two modes would need two near-duplicate
+    copies of this function, one per hard-coded reference."""
     trees = sorted({r["tree"] for r in rows})
     methods = [m for m in dict.fromkeys(r["method"] for r in rows)
-               if m != REFERENCE_METHOD]
+               if m != reference_method]
 
     # quick lookup: (tree, method) -> total
     total_of = {(r["tree"], r["method"]): r["total"] for r in rows}
@@ -224,7 +242,7 @@ def compute_error_metrics(rows):
         pairs = []
         for t in trees:
             est = total_of.get((t, m))
-            ref = total_of.get((t, REFERENCE_METHOD))
+            ref = total_of.get((t, reference_method))
             if est is not None and ref is not None:
                 pairs.append((est, ref))
         if not pairs:
@@ -240,13 +258,19 @@ def compute_error_metrics(rows):
     return results
 
 
-def error_metrics(rows):
+def error_metrics(rows, reference_method):
     """Across all trees, compute (via compute_error_metrics) and PRINT
-    Bias/MAE/RMSE/CV-RMSE of each method vs the reference."""
-    results = compute_error_metrics(rows)
+    Bias/MAE/RMSE/CV-RMSE of each method vs `reference_method`.
+
+    `reference_method` is REQUIRED (see compute_error_metrics() above for
+    why) - it also appears literally in the printed header line, so MODE B's
+    call (reference_method=REFERENCE_METHOD_NONE) automatically prints
+    "Error metrics vs 'AdQSM (TreesParams)'" instead of the destructive
+    reference's name, with no separate wording needed."""
+    results = compute_error_metrics(rows, reference_method)
 
     print("=" * 78)
-    print("Error metrics vs '%s'  (total volume, across trees)" % REFERENCE_METHOD)
+    print("Error metrics vs '%s'  (total volume, across trees)" % reference_method)
     print("-" * 78)
     print("%-28s %5s %9s %9s %9s %9s" %
           ("method", "n", "Bias", "MAE", "RMSE", "CV-RMSE%"))
@@ -260,21 +284,29 @@ def error_metrics(rows):
     print()
 
 
-def field_error_summary(rows, key, label):
-    """Print one short line per method: its mean percent error vs. the
-    reference for a single field (dbh/height/taper), across all trees where
-    both values are known. Kept OUT of the volume RMSE metrics block above
-    by design - these fields are not volumes."""
+def field_error_summary(rows, key, label, reference_method):
+    """Print one short line per method: its mean percent error vs.
+    `reference_method` for a single field (dbh/height/taper/trunk_len/
+    branch_len), across all trees where both values are known. Kept OUT of
+    the volume RMSE metrics block above by design - these fields are not
+    volumes.
+
+    `reference_method` is REQUIRED for the same reason as in
+    compute_error_metrics()/error_metrics() above: this one function now
+    serves both MODE A (vs. the destructive reference) and MODE B (vs.
+    AdQSM) - the caller decides which by passing the right reference_method,
+    and the printed header line ("... error vs '<reference_method>':")
+    reflects whichever one was actually used."""
     trees = sorted({r["tree"] for r in rows})
-    methods = [m for m in dict.fromkeys(r["method"] for r in rows) if m != REFERENCE_METHOD]
+    methods = [m for m in dict.fromkeys(r["method"] for r in rows) if m != reference_method]
     value_of = {(r["tree"], r["method"]): r[key] for r in rows}
 
-    print("%s error vs '%s':" % (label, REFERENCE_METHOD))
+    print("%s error vs '%s':" % (label, reference_method))
     printed_any = False
     for m in methods:
         diffs = []
         for t in trees:
-            d = pct_diff(value_of.get((t, m)), value_of.get((t, REFERENCE_METHOD)))
+            d = pct_diff(value_of.get((t, m)), value_of.get((t, reference_method)))
             if d is not None:
                 diffs.append(d)
         if not diffs:
@@ -331,13 +363,15 @@ if __name__ == "__main__":
               % (SELECT_TREE, ", ".join(trees_10cm)))
 
     # Error metrics make sense whenever a reference exists (works for 1 or many trees).
-    error_metrics(rows_10cm)
+    # reference_method=REFERENCE_METHOD: this is MODE A, so the yardstick is
+    # the destructive field reference (the fair, "same 10cm cut-off" comparison).
+    error_metrics(rows_10cm, REFERENCE_METHOD)
 
     # DBH/height/taper are not volumes, so their error is reported separately
     # instead of folding them into the RMSE metrics block above.
-    field_error_summary(rows_10cm, "dbh", "DBH")
-    field_error_summary(rows_10cm, "height", "Height")
-    field_error_summary(rows_10cm, "taper", "Taper")
+    field_error_summary(rows_10cm, "dbh", "DBH", REFERENCE_METHOD)
+    field_error_summary(rows_10cm, "height", "Height", REFERENCE_METHOD)
+    field_error_summary(rows_10cm, "taper", "Taper", REFERENCE_METHOD)
 
     # Trunk/branch LENGTH (not volume) - same "one line per method" summary
     # as DBH/height/taper above, not squeezed into print_tree_block()'s
@@ -346,8 +380,8 @@ if __name__ == "__main__":
     # a normal terminal). Lets you tell apart "shorter/less-complete branch
     # structure" (length is off) from "same length, different radii" (length
     # matches, volume doesn't) - see the header comment at the top of this file.
-    field_error_summary(rows_10cm, "trunk_len", "Trunk length")
-    field_error_summary(rows_10cm, "branch_len", "Branch length")
+    field_error_summary(rows_10cm, "trunk_len", "Trunk length", REFERENCE_METHOD)
+    field_error_summary(rows_10cm, "branch_len", "Branch length", REFERENCE_METHOD)
 
     # ====================================================================
     # MODE B: methods COMPARED TO EACH OTHER - only branch_filter == "none"
@@ -355,9 +389,16 @@ if __name__ == "__main__":
     # destructive reference NEVER appears here (it methodologically can't -
     # it only ever has a "10cm" row), so print_tree_block always finds no
     # reference for this mode; a custom note explains that's expected, not
-    # a data problem. error_metrics/field_error_summary are SKIPPED here on
-    # purpose - with no reference there's nothing to compute Bias/RMSE/%
-    # error against, and printing an empty/all-zero table would be noise.
+    # a data problem.
+    #
+    # error_metrics/field_error_summary are NOW ALSO printed here (this used
+    # to be skipped entirely, since the destructive reference can't appear in
+    # this mode) - but using REFERENCE_METHOD_NONE (AdQSM) as the yardstick
+    # instead of the destructive reference. This is NOT an accuracy
+    # evaluation (AdQSM is just another reconstruction, not ground truth) -
+    # it only tells you how far each OTHER method's full/unfiltered
+    # reconstruction sits from AdQSM's, which is still a useful cross-check
+    # even without a "true" reference in this mode.
     # ====================================================================
     print()
     print("#" * 118)
@@ -379,3 +420,14 @@ if __name__ == "__main__":
     else:
         print("Tree '%s' not found among branch_filter='none' rows. Available: %s"
               % (SELECT_TREE, ", ".join(trees_none)))
+
+    # Same error-metrics/field-error blocks as MODE A above, just pointed at
+    # REFERENCE_METHOD_NONE (AdQSM) instead of REFERENCE_METHOD (the
+    # destructive reference) - reusing the exact same functions, so the
+    # calculation can never silently drift between the two modes.
+    error_metrics(rows_none, REFERENCE_METHOD_NONE)
+    field_error_summary(rows_none, "dbh", "DBH", REFERENCE_METHOD_NONE)
+    field_error_summary(rows_none, "height", "Height", REFERENCE_METHOD_NONE)
+    field_error_summary(rows_none, "taper", "Taper", REFERENCE_METHOD_NONE)
+    field_error_summary(rows_none, "trunk_len", "Trunk length", REFERENCE_METHOD_NONE)
+    field_error_summary(rows_none, "branch_len", "Branch length", REFERENCE_METHOD_NONE)

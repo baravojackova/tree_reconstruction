@@ -4,46 +4,66 @@
 #  master results table produced by ply_to_geom.py, qsm_volume_mean.py,
 #  reference_volume.py, ... and printed in detail by compare_volumes.py).
 # ---------------------------------------------------------------------
-#  This script makes several PNG charts every time you run it:
+#  Like compare_volumes.py, this script works in TWO separate comparison
+#  MODES (see that file's header comment for the full "why"):
+#    - branch_filter == "10cm": vs. the destructive field reference
+#      (REFERENCE_METHOD) - the fair, apples-to-apples accuracy check.
+#    - branch_filter == "none": methods vs. EACH OTHER, using AdQSM
+#      (REFERENCE_METHOD_NONE) as a common yardstick, since the destructive
+#      reference can never appear in this mode.
+#  Charts that compare "vs. a reference" are drawn ONCE PER MODE (so you get
+#  two separate PNGs, one per mode, never mixed together in one chart).
+#
+#  This script makes the following PNG charts every time you run it:
 #
 #   a) total_volume_by_tree.png
 #        Bar chart of total_m3 per method, with one GROUP of bars per tree.
 #        The reference method's bar is drawn in a different colour and
-#        labelled "(reference)" in the legend, so it's easy to spot.
-#        Always drawn, no matter how many trees are in the CSV.
+#        labelled "(reference)" in the legend, so it's easy to spot. Only
+#        drawn for the "10cm" mode (see plot_total_volume_by_tree()'s
+#        comment for why). Always drawn, no matter how many trees are in the CSV.
 #
-#   b) error_boxplot.png
-#        Box plot of the percentage error of each method's total_m3 vs. the
-#        reference, one box per method, built from the SAME trees used for
-#        that method's box (percent error computed the same way as
+#   b) error_boxplot_10cm.png / error_boxplot_none.png
+#        Box plot of the percentage error of each method's total_m3 vs. that
+#        mode's reference, one box per method, built from the SAME trees
+#        used for that method's box (percent error computed the same way as
 #        pct_diff() in compare_volumes.py - imported from there, not
-#        re-implemented). Needs at least 2 trees to say anything meaningful
-#        (comparing across trees is the whole point) - with fewer, the RUN
-#        section below skips it and prints why, instead of drawing something
-#        misleading.
+#        re-implemented). Needs at least 2 trees (in THAT mode) to say
+#        anything meaningful (comparing across trees is the whole point) -
+#        with fewer, the RUN section below skips that mode's chart and
+#        prints why, instead of drawing something misleading.
 #
-#   c) error_metrics_bar.png
+#   c) error_metrics_bar_10cm.png / error_metrics_bar_none.png
 #        Bar chart of Bias / MAE / RMSE per method, using the exact same
 #        calculation as compare_volumes.py's error_metrics() table
 #        (via compute_error_metrics(), imported from compare_volumes.py -
 #        so the numbers here can never drift out of sync with the printed
-#        table). Same "needs >=2 trees" rule as (b), for the same reason.
+#        table). Same "needs >=2 trees (in that mode)" rule as (b).
 #
-#   d) tree_overview_<tree>.png (one file PER tree in the CSV)
-#        A single figure with a 2x2 grid of bar charts for ONE tree: total
-#        volume, DBH, height and taper - one bar per method in each subplot.
-#        Unlike (b)/(c), this makes sense even with just ONE tree in the
-#        CSV (it doesn't compare across trees, only across methods for the
-#        SAME tree), so it is always drawn for every tree found in the CSV.
+#   d) tree_overview_<tree>_10cm.png / tree_overview_<tree>_none.png (one
+#      pair PER tree in the CSV)
+#        A single figure with a 2x3 grid of bar charts for ONE tree AND ONE
+#        mode: total volume, DBH, height, taper, trunk length, branch length
+#        - one bar per method in each subplot. Unlike (b)/(c), this makes
+#        sense even with just ONE tree in the CSV (it doesn't compare across
+#        trees, only across methods for the SAME tree), so both mode's PNGs
+#        are always drawn for every tree found in the CSV.
 #
 #  All PNGs are written into a "plots" subfolder next to this script
 #  (created automatically if it doesn't exist yet). The path of each saved
 #  file is printed to the console.
 #
+#  Colour scheme: every chart above shares ONE {method: colour} mapping per
+#  mode (see build_method_color_map()), so the same method is always the
+#  same colour across every chart in that mode - the reference method always
+#  gets a fixed highlight colour, every other method is spread across a
+#  smooth green -> gray -> yellow -> orange gradient.
+#
 #  Dependencies: matplotlib   (install: pip install matplotlib)
 #  This script also IMPORTS a few things from compare_volumes.py, which
 #  must live in the same folder:
-#     RESULTS_CSV, REFERENCE_METHOD, load_results, pct_diff, compute_error_metrics
+#     RESULTS_CSV, REFERENCE_METHOD, REFERENCE_METHOD_NONE, load_results,
+#     pct_diff, compute_error_metrics, filter_by_branch_filter
 # =====================================================================
 
 import os
@@ -53,6 +73,7 @@ import matplotlib.patches as mpatches   # used to build the shared legend in plo
 from compare_volumes import (
     RESULTS_CSV,
     REFERENCE_METHOD,
+    REFERENCE_METHOD_NONE,
     load_results,
     pct_diff,
     compute_error_metrics,
@@ -83,9 +104,75 @@ def save_and_report(fig, filename):
 
 
 # ----------------------------------------------------------------------
+# Shared colour scheme, used by EVERY chart in this file (plot_tree_overview,
+# plot_total_volume_by_tree, plot_error_boxplot, plot_error_metrics_bar).
+#
+# WHY a single shared function: before this change, each chart picked its
+# own colours independently (plot_tree_overview built its own ad-hoc
+# palette, plot_total_volume_by_tree hard-coded "tab:orange" for the
+# reference and left everything else to matplotlib's default cycle,
+# plot_error_boxplot/plot_error_metrics_bar didn't colour by method at all).
+# That meant the SAME method (e.g. "AdQSM (TreesParams)") could show up in a
+# different colour in each chart, making it harder to visually track one
+# method across the whole set of PNGs. This function is now the ONE place
+# that decides "method -> colour", called once per branch_filter mode in the
+# RUN section below and threaded into every chart that needs it, so the
+# mapping is guaranteed identical everywhere it's used.
+# ----------------------------------------------------------------------
+def build_method_color_map(methods, reference_method):
+    """Return a {method: color} dict for the given list of methods.
+
+    Non-reference methods are coloured with a smooth, muted gradient that
+    runs green -> gray -> yellow -> orange (built by hand from those four
+    hex stops via LinearSegmentedColormap, rather than using one of
+    matplotlib's stock qualitative palettes) - a continuous, low-saturation
+    gradient like this stays readable even with a dozen+ methods in one
+    chart, unlike matplotlib's default bright/saturated color cycle, which
+    starts visually clashing once you have more than ~5 categories.
+
+    `reference_method` (the method this chart is comparing everything else
+    against - REFERENCE_METHOD for the destructive-reference mode, or
+    REFERENCE_METHOD_NONE for the AdQSM-as-yardstick mode) is deliberately
+    EXCLUDED from that gradient and instead gets a single fixed highlight
+    colour ("tab:blue") - this guarantees the reference can never
+    accidentally land on the same shade as one of the gradient-coloured
+    methods (which could happen with the old "reference = hard-coded
+    tab:orange, everything else = matplotlib's automatic cycle" approach,
+    since that cycle's orange could still coincide with the explicit one -
+    see the tree_overview color-collision bug fixed earlier in this file's
+    history). Excluding it from the gradient also means its position never
+    shifts the other methods' shades depending on where in the method list
+    it happens to sit.
+    """
+    import matplotlib.colors as mcolors
+
+    # Hand-picked, muted stops (not fully saturated matplotlib primaries) so
+    # the gradient stays easy on the eye across many bars/boxes at once.
+    gradient = mcolors.LinearSegmentedColormap.from_list(
+        "method_gradient",
+        ["#4daf4a", "#999999", "#dfc27d", "#d95f02"],  # green -> gray -> yellow -> orange
+    )
+
+    non_ref_methods = [m for m in methods if m != reference_method]
+    n = len(non_ref_methods)
+    color_of = {}
+    for i, m in enumerate(non_ref_methods):
+        # Spread methods evenly across the gradient's full 0..1 range. With
+        # only one non-reference method, t=0.5 (the middle, gray-ish part of
+        # the gradient) is used instead of dividing by (n - 1) = 0.
+        t = (i / (n - 1)) if n > 1 else 0.5
+        color_of[m] = gradient(t)
+
+    if reference_method in methods:
+        color_of[reference_method] = "tab:blue"
+
+    return color_of
+
+
+# ----------------------------------------------------------------------
 # a) Bar chart: total_m3 per method, grouped by tree.
 # ----------------------------------------------------------------------
-def plot_total_volume_by_tree(rows):
+def plot_total_volume_by_tree(rows, color_map):
     # Only branch_filter == "10cm" rows: this chart draws the REFERENCE
     # method's bar highlighted, so it's implicitly a "vs. reference" chart -
     # mixing in "none" (full/unfiltered) rows here would compare some
@@ -116,8 +203,12 @@ def plot_total_volume_by_tree(rows):
         # x position of this method's bar within each tree's group
         x = [tree_idx + i * bar_width for tree_idx in range(len(trees))]
         is_ref = (method == REFERENCE_METHOD)
+        # color_map (built once in the RUN section via build_method_color_map(),
+        # shared across every chart) replaces the old hard-coded "tab:orange" -
+        # this guarantees the reference bar here uses the EXACT same highlight
+        # colour as every other chart's reference bar/box.
         ax.bar(x, heights, width=bar_width,
-               color="tab:orange" if is_ref else None,
+               color=color_map.get(method),
                label=method + (" (reference)" if is_ref else ""))
 
     # Put the x-axis tick for each tree in the middle of its group of bars.
@@ -146,7 +237,7 @@ def plot_total_volume_by_tree(rows):
 #    different branch_len scale especially - see compare_volumes.py's
 #    header comment for why they're kept apart everywhere else too).
 # ----------------------------------------------------------------------
-def plot_tree_overview(rows, tree, branch_filter):
+def plot_tree_overview(rows, tree, branch_filter, color_map):
     # Filter to THIS tree AND THIS branch_filter before anything else, so
     # every method/color/field computed below only ever sees rows from one
     # consistent methodology.
@@ -158,32 +249,20 @@ def plot_tree_overview(rows, tree, branch_filter):
 
     # Methods in the order they first appear for THIS tree (dict.fromkeys()
     # trick again, see plot_total_volume_by_tree). Keeping a stable order
-    # means each method gets the same colour every time you re-run this.
+    # only matters for the legend's row order now - the actual COLOUR per
+    # method comes from `color_map` (built once in the RUN section via
+    # build_method_color_map(), shared across every chart in this file), not
+    # from an ad-hoc palette built locally here as before this change.
     methods = list(dict.fromkeys(r["method"] for r in tree_rows))
     # One row dict per method, for quick lookups below (assumes at most one
     # row per (tree, method) pair, which is how upsert_result() keeps the CSV).
     row_of = {r["method"]: r for r in tree_rows}
     ref_row = row_of.get(REFERENCE_METHOD)   # None if this tree has no reference row
 
-    # Pick ONE fixed colour per method and reuse it in all 4 subplots AND
-    # the shared legend below, so e.g. "AdQSM" is always the same colour.
-    # The reference method always gets the same highlight colour used in
-    # plot_total_volume_by_tree, for visual consistency between the charts.
-    # matplotlib's default cycle includes an orange that is the same colour
-    # as "tab:orange" (used for the reference highlight below) - compare via
-    # to_rgba() rather than the raw value, since depending on matplotlib
-    # version/theme the cycle may hold hex strings OR (r, g, b) tuples.
-    import matplotlib.colors as mcolors
-    default_colors = [c for c in plt.rcParams["axes.prop_cycle"].by_key()["color"]
-                       if mcolors.to_rgba(c) != mcolors.to_rgba("tab:orange")]
-    color_of = {}
-    next_color_i = 0
-    for m in methods:
-        if m == REFERENCE_METHOD:
-            color_of[m] = "tab:orange"
-        else:
-            color_of[m] = default_colors[next_color_i % len(default_colors)]
-            next_color_i += 1
+    # color_of is just an alias into the shared color_map here (rather than
+    # `color_map` directly) so the rest of this function's code below didn't
+    # need to change when this was refactored to take color_map as a parameter.
+    color_of = color_map
 
     # Which field (as returned by load_results()) goes in which subplot, and
     # what to title that subplot. This list is the ONLY thing you touch to
@@ -271,29 +350,38 @@ def plot_tree_overview(rows, tree, branch_filter):
 
 # ----------------------------------------------------------------------
 # b) Box plot: percentage error vs. reference, per method, across trees.
+#
+#    branch_filter/reference_method are now REQUIRED parameters (instead of
+#    the old hard-coded "10cm"/REFERENCE_METHOD) so this SAME function can
+#    draw BOTH comparison modes from compare_volumes.py:
+#      - branch_filter="10cm",  reference_method=REFERENCE_METHOD      (vs. the destructive reference)
+#      - branch_filter="none",  reference_method=REFERENCE_METHOD_NONE (vs. AdQSM, methods-vs-each-other)
+#    The output filename includes branch_filter (see save_and_report() call
+#    below) so the two modes' PNGs never overwrite each other.
 # ----------------------------------------------------------------------
-def plot_error_boxplot(rows):
-    # Only "10cm" rows - this chart is entirely about error vs. the
-    # reference, which only ever has a "10cm" row (see plot_total_volume_by_tree
-    # above / compare_volumes.py's header comment for why).
-    rows = filter_by_branch_filter(rows, "10cm")
+def plot_error_boxplot(rows, branch_filter, reference_method, color_map):
+    # Restrict to the requested branch_filter mode - same reasoning as
+    # plot_total_volume_by_tree above: mixing "10cm" and "none" rows here
+    # would compute a percent error against a reference method that isn't
+    # even the right one for half the rows.
+    rows = filter_by_branch_filter(rows, branch_filter)
 
     trees = sorted({r["tree"] for r in rows})
-    methods = [m for m in dict.fromkeys(r["method"] for r in rows) if m != REFERENCE_METHOD]
+    methods = [m for m in dict.fromkeys(r["method"] for r in rows) if m != reference_method]
     total_of = {(r["tree"], r["method"]): r["total"] for r in rows}
 
     if len(trees) < 3:
-        print("NOTE: only %d tree(s) currently in %s - a box plot only becomes "
-              "meaningful with 3+ trees (with fewer, each 'box' is really just "
-              "1-2 points). Drawing it anyway so you can see the layout."
-              % (len(trees), RESULTS_CSV))
+        print("NOTE: only %d tree(s) currently in %s (branch_filter='%s') - a box plot "
+              "only becomes meaningful with 3+ trees (with fewer, each 'box' is really "
+              "just 1-2 points). Drawing it anyway so you can see the layout."
+              % (len(trees), RESULTS_CSV, branch_filter))
 
     data = []     # one list of % errors per method (only methods with >=1 value)
     labels = []
     for m in methods:
         errors_pct = []
         for t in trees:
-            d = pct_diff(total_of.get((t, m)), total_of.get((t, REFERENCE_METHOD)))
+            d = pct_diff(total_of.get((t, m)), total_of.get((t, reference_method)))
             if d is not None:
                 errors_pct.append(d)
         if errors_pct:
@@ -301,31 +389,46 @@ def plot_error_boxplot(rows):
             labels.append(m)
 
     if not data:
-        print("No method has both a total_m3 value and a reference value - skipping box plot.")
+        print("No method has both a total_m3 value and a reference value "
+              "(branch_filter='%s') - skipping box plot." % branch_filter)
         return
 
     fig, ax = plt.subplots(figsize=(max(6, 1.2 * len(labels)), 6))
-    ax.boxplot(data, tick_labels=labels)
+    # patch_artist=True turns the boxes into fillable patches (by default
+    # boxplot() draws unfilled outlines only) so each box's facecolor can be
+    # set from color_map below - this is what makes THIS chart's per-method
+    # colours match every other chart's, instead of every box being the
+    # same default matplotlib blue.
+    bplot = ax.boxplot(data, tick_labels=labels, patch_artist=True)
+    for patch, m in zip(bplot["boxes"], labels):
+        patch.set_facecolor(color_map.get(m, "#999999"))
     ax.axhline(0.0, color="gray", linestyle="--", linewidth=1)  # 0% error = perfect match
     ax.set_ylabel("Error vs. reference [%]")
-    ax.set_title("Total-volume error distribution by method (across trees)")
+    ax.set_title("Total-volume error distribution by method (across trees)\n"
+                  "vs. '%s'  (branch_filter='%s')" % (reference_method, branch_filter))
     ax.tick_params(axis="x", rotation=30)
     fig.tight_layout()
-    save_and_report(fig, "error_boxplot.png")
+    # Filename includes branch_filter so the "10cm" and "none" versions of
+    # this chart are two separate files, e.g. error_boxplot_10cm.png /
+    # error_boxplot_none.png, instead of the second run overwriting the first.
+    save_and_report(fig, "error_boxplot_%s.png" % branch_filter)
 
 
 # ----------------------------------------------------------------------
 # c) Bar chart: Bias / MAE / RMSE per method (same numbers as
 #    compare_volumes.py's printed "Error metrics" table).
+#
+#    branch_filter/reference_method - same reasoning as plot_error_boxplot()
+#    above: this one function now draws both comparison modes.
 # ----------------------------------------------------------------------
-def plot_error_metrics_bar(rows):
-    # Only "10cm" rows - same reason as plot_error_boxplot() above: Bias/MAE/
-    # RMSE are computed against the reference, which only ever has a "10cm" row.
-    rows = filter_by_branch_filter(rows, "10cm")
+def plot_error_metrics_bar(rows, branch_filter, reference_method, color_map):
+    # Restrict to the requested branch_filter mode - see plot_error_boxplot().
+    rows = filter_by_branch_filter(rows, branch_filter)
 
-    metrics = compute_error_metrics(rows)   # reuses compare_volumes.py's own calculation
+    metrics = compute_error_metrics(rows, reference_method)   # reuses compare_volumes.py's own calculation
     if not metrics:
-        print("No method could be compared to the reference - skipping error-metrics chart.")
+        print("No method could be compared to '%s' (branch_filter='%s') - "
+              "skipping error-metrics chart." % (reference_method, branch_filter))
         return
 
     methods = [m["method"] for m in metrics]
@@ -337,17 +440,33 @@ def plot_error_metrics_bar(rows):
     width = 0.25   # 3 bars per method (bias, mae, rmse), each this wide
 
     fig, ax = plt.subplots(figsize=(max(6, 1.4 * len(methods)), 6))
-    ax.bar([xi - width for xi in x], bias, width=width, label="Bias")
-    ax.bar(x,                        mae,  width=width, label="MAE")
-    ax.bar([xi + width for xi in x], rmse, width=width, label="RMSE")
+    # NOTE on colour here: this chart groups THREE bars per METHOD (one each
+    # for Bias/MAE/RMSE), so a single "one colour per method" mapping
+    # (color_map) doesn't fit the same way it does in the other three charts
+    # (there, each bar/box IS one method). Instead, the three metrics
+    # themselves are drawn in fixed colours sampled from the SAME green ->
+    # gray -> yellow -> orange family used everywhere else (so this chart
+    # still belongs visually to the same set), and each method's x-axis tick
+    # label is tinted with its color_map colour below - that's how this
+    # chart still shows "this method = this colour", consistent with the rest.
+    ax.bar([xi - width for xi in x], bias, width=width, label="Bias", color="#4daf4a")   # green (gradient start)
+    ax.bar(x,                        mae,  width=width, label="MAE",  color="#999999")   # gray (gradient middle)
+    ax.bar([xi + width for xi in x], rmse, width=width, label="RMSE", color="#d95f02")   # orange (gradient end)
     ax.axhline(0.0, color="gray", linestyle="-", linewidth=0.8)
     ax.set_xticks(x)
     ax.set_xticklabels(methods, rotation=30, ha="right")
+    # Tint each x-axis tick label with that method's shared color_map colour,
+    # so this chart still visually agrees with the other three on "which
+    # colour is which method", even though its BARS are coloured by metric
+    # (Bias/MAE/RMSE) rather than by method - see the comment above.
+    for tick_label, m in zip(ax.get_xticklabels(), methods):
+        tick_label.set_color(color_map.get(m, "#333333"))
     ax.set_ylabel("Volume error [m^3]")
-    ax.set_title("Error metrics vs. reference '%s'" % REFERENCE_METHOD)
+    ax.set_title("Error metrics vs. '%s'  (branch_filter='%s')" % (reference_method, branch_filter))
     ax.legend()
     fig.tight_layout()
-    save_and_report(fig, "error_metrics_bar.png")
+    # Filename includes branch_filter, same reason as plot_error_boxplot() above.
+    save_and_report(fig, "error_metrics_bar_%s.png" % branch_filter)
 
 
 # =========================  RUN  =====================================
@@ -362,14 +481,31 @@ if __name__ == "__main__":
     all_trees = sorted({r["tree"] for r in rows})
 
     # Pre-filtered once here too (mirrors compare_volumes.py's RUN section),
-    # and passed into the three "vs. reference" chart functions below - they
-    # also filter internally (see each function's comment), so this is a
+    # and passed into the "vs. reference" chart functions below - they also
+    # filter internally (see each function's comment), so this is a
     # belt-and-suspenders double-filter: harmless (filtering "10cm" rows by
     # "10cm" again is a no-op) and keeps the RUN section's intent explicit.
     rows_10cm = filter_by_branch_filter(rows, "10cm")
+    rows_none = filter_by_branch_filter(rows, "none")
+
+    # Build the TWO shared colour maps used by every chart below - one per
+    # branch_filter mode, since the "reference" method (and therefore which
+    # method gets the highlight colour, and which methods share the
+    # gradient) differs between modes: REFERENCE_METHOD (the destructive
+    # reference) for "10cm", REFERENCE_METHOD_NONE (AdQSM) for "none". Built
+    # from the FULL set of methods present in each mode (not per-chart
+    # subsets), so a method's colour is guaranteed identical across ALL
+    # charts that draw it in the same mode (plot_total_volume_by_tree,
+    # plot_tree_overview, plot_error_boxplot, plot_error_metrics_bar all
+    # receive the SAME dict for a given mode, instead of each recomputing
+    # its own local mapping that could drift out of sync with the others).
+    methods_10cm = list(dict.fromkeys(r["method"] for r in rows_10cm))
+    methods_none = list(dict.fromkeys(r["method"] for r in rows_none))
+    color_map_10cm = build_method_color_map(methods_10cm, REFERENCE_METHOD)
+    color_map_none = build_method_color_map(methods_none, REFERENCE_METHOD_NONE)
 
     # Always makes sense, regardless of how many trees are in the CSV.
-    plot_total_volume_by_tree(rows_10cm)
+    plot_total_volume_by_tree(rows_10cm, color_map_10cm)
 
     # TWO overview PNGs per tree currently in the CSV - one per branch_filter
     # value, so "10cm" (vs.-reference) and "none" (full reconstruction) rows
@@ -378,20 +514,34 @@ if __name__ == "__main__":
     # rows for one of the two filters, plot_tree_overview() just prints a
     # skip message for that one and moves on - harmless.
     for tree in all_trees:
-        plot_tree_overview(rows, tree, branch_filter="10cm")
-        plot_tree_overview(rows, tree, branch_filter="none")
+        plot_tree_overview(rows, tree, "10cm", color_map_10cm)
+        plot_tree_overview(rows, tree, "none", color_map_none)
 
-    # The boxplot and RMSE/Bias/MAE charts compare methods ACROSS trees vs.
-    # the reference, so what matters is how many trees have a "10cm" row (a
-    # tree could exist in the CSV with ONLY "none" rows, e.g. no destructive
-    # reference measured for it yet) - not the raw tree count.
+    # The boxplot and RMSE/Bias/MAE charts compare methods ACROSS trees vs. a
+    # reference, so what matters for EACH mode is how many trees have a row
+    # in THAT mode (a tree could exist in the CSV with rows in only one of
+    # the two modes) - not the raw tree count, and NOT shared between modes:
+    # a tree with 2+ "10cm" rows but only 1 "none" row should still get the
+    # "10cm" charts, just not the "none" ones (and vice versa).
     trees_10cm = sorted({r["tree"] for r in rows_10cm})
+    trees_none = sorted({r["tree"] for r in rows_none})
+
     if len(trees_10cm) >= 2:
-        plot_error_boxplot(rows_10cm)
-        plot_error_metrics_bar(rows_10cm)
+        plot_error_boxplot(rows_10cm, "10cm", REFERENCE_METHOD, color_map_10cm)
+        plot_error_metrics_bar(rows_10cm, "10cm", REFERENCE_METHOD, color_map_10cm)
     else:
         print("Only %d tree(s) with branch_filter='10cm' rows in %s - skipping "
-              "error_boxplot.png and error_metrics_bar.png (both compare methods "
-              "ACROSS trees vs. the reference, so they need at least 2 such trees "
-              "to be meaningful). Add more trees to the CSV and re-run to get them."
+              "error_boxplot_10cm.png and error_metrics_bar_10cm.png (both compare "
+              "methods ACROSS trees vs. the reference, so they need at least 2 such "
+              "trees to be meaningful). Add more trees to the CSV and re-run to get them."
               % (len(trees_10cm), RESULTS_CSV))
+
+    if len(trees_none) >= 2:
+        plot_error_boxplot(rows_none, "none", REFERENCE_METHOD_NONE, color_map_none)
+        plot_error_metrics_bar(rows_none, "none", REFERENCE_METHOD_NONE, color_map_none)
+    else:
+        print("Only %d tree(s) with branch_filter='none' rows in %s - skipping "
+              "error_boxplot_none.png and error_metrics_bar_none.png (both compare "
+              "methods ACROSS trees vs. AdQSM, so they need at least 2 such trees "
+              "to be meaningful). Add more trees to the CSV and re-run to get them."
+              % (len(trees_none), RESULTS_CSV))

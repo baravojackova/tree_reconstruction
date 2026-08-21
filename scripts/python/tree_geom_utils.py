@@ -466,7 +466,7 @@ def volume_stats(lengths, radii, order_arr):
                 branch_n=n - t_n, branch_len=total_len - t_len, branch_vol=total_vol - t_vol)
 
 
-def report_thin_branch_volume(lengths, radii, order_arr, cut_cm=10.0):
+def report_thin_branch_volume(lengths, radii, order_arr, cut_cm=10.0, source_label="AdTree calibrated"):
     """Diagnostic: how much cylinder volume sits in cylinders THINNER than
     `cut_cm` diameter, split into stem (order 0) and branches (order >= 1).
     Mirrors "Cylinders, cut-off 10 cm" in runsken.m (section 17b) so the two
@@ -478,6 +478,14 @@ def report_thin_branch_volume(lengths, radii, order_arr, cut_cm=10.0):
     ones cylinder_metrics()/volume_stats() use). Returns a dict with the
     kept (>= cut_cm) volumes, so the RUN section can optionally write them
     into RESULTS_CSV as a second, filtered row.
+
+    `source_label` names WHICH cylinder set this call is reporting on, in
+    the printed header only (e.g. "AdTree raw" vs. "AdTree calibrated") -
+    this function is called TWICE per threshold in adtree_reconstruct_compare.py
+    (once on the raw/uncalibrated cylinders, once on the calibrated ones), so
+    without this label the two printouts would be visually indistinguishable
+    in the console output. Defaults to "AdTree calibrated" to match every
+    call site that existed before this parameter was added.
     """
     lengths = np.asarray(lengths)
     radii = np.asarray(radii)
@@ -496,7 +504,7 @@ def report_thin_branch_volume(lengths, radii, order_arr, cut_cm=10.0):
     vol_kept = float(volumes[keep].sum())
     vol_removed = vol_total - vol_kept
 
-    print("\n--- Cylinders, cut-off %.0f cm (AdTree calibrated) ---" % cut_cm)
+    print("\n--- Cylinders, cut-off %.0f cm (%s) ---" % (cut_cm, source_label))
     print("Cylinders total  : %d" % n_total)
     print("Cylinders kept   : %d (%.1f %%)" % (n_kept, (n_kept / n_total * 100.0) if n_total else 0.0))
     print("Volume total     : %.3f m3" % vol_total)
