@@ -23,17 +23,25 @@ import csv
 import os
 
 # =====================  PARAMETERS  ==================================
-# Folder that contains the source measurement file. "." means "the folder
-# this script is run from".
-DATA_DIR = r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\data\IND01_54\exp_tanago"
+# Tree ID for THIS run. This is the ONLY thing you need to change to switch
+# trees - it must match a value in the "treeID" column of the source file
+# exactly (if it doesn't, the script prints the full list of available tree
+# IDs so you can copy the right one), AND it builds DATA_DIR right below it
+# automatically. NOTE: this only works when the data/<tree> folder is named
+# EXACTLY like TREE_NAME (true for IND07_083, but NOT for IND01_054 - its
+# folder is "IND01_54", a shorter form - if you switch back to that tree,
+# set DATA_DIR directly instead of deriving it from TREE_NAME).
+TREE_NAME = "IND07_083"
+
+# Base folder holding every tree's data, one subfolder per tree (normally
+# named exactly like TREE_NAME - see the note above for the one exception).
+DATA_ROOT = r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\data"
+
+# Folder that contains the source measurement file.
+DATA_DIR = os.path.join(DATA_ROOT, TREE_NAME)
 
 # Name of the source measurement file (TAB-separated text), inside DATA_DIR.
 SOURCE_FILE = os.path.join(DATA_DIR, "IND.h.trees.txt")
-
-# Which tree to report. Must match a value in the "treeID" column exactly.
-# If you set it to a name that is not in the file, the script prints the
-# full list of available tree IDs so you can copy the right one.
-TREE_ID = "IND01_054"
 
 # Label used for this method in the shared results table (RESULTS_CSV).
 METHOD_LABEL = "Reference (destructive)"
@@ -49,7 +57,7 @@ RESULTS_CSV = "volume_results.csv"
 INCLUDE_FRACTIONS = {
     "stem":   True,     # main trunk sections
     "branch": True,     # branches
-    "twig":   False,     # finest branches
+    "twig":   False,    # finest branches
     "stump":  False,    # stump (tree base)
     "leaf":   False,    # foliage (not wood)
     "root":   False,    # roots (below ground)
@@ -162,15 +170,15 @@ rows = load_rows(SOURCE_FILE)
 # List of every tree present in the file (sorted), for validation/help.
 all_trees = sorted({r["treeID"] for r in rows})
 
-if TREE_ID not in all_trees:
-    print("Tree '%s' was not found in %s." % (TREE_ID, SOURCE_FILE))
+if TREE_NAME not in all_trees:
+    print("Tree '%s' was not found in %s." % (TREE_NAME, SOURCE_FILE))
     print("Available tree IDs (%d):" % len(all_trees))
     for t in all_trees:
         print("   ", t)
-    raise SystemExit  # stop cleanly so you can fix TREE_ID and re-run
+    raise SystemExit  # stop cleanly so you can fix TREE_NAME and re-run
 
 # Keep only this tree's sections.
-tree_rows = [r for r in rows if r["treeID"] == TREE_ID]
+tree_rows = [r for r in rows if r["treeID"] == TREE_NAME]
 
 # Sum the section volumes per fraction (in the source unit, cm^3), and count
 # how many sections each fraction has. Also sum the section LENGTHS ("L",
@@ -191,7 +199,7 @@ for r in tree_rows:
         length_by_fraction[frac] = length_by_fraction.get(frac, 0.0) + length
 
 # ---- print a per-fraction breakdown, marking which ones are included -------
-print("Tree: %s   (source: %s)" % (TREE_ID, SOURCE_FILE))
+print("Tree: %s   (source: %s)" % (TREE_NAME, SOURCE_FILE))
 print()
 print("%-8s %8s %14s   %s" % ("Fraction", "sections", "volume [m^3]", "included?"))
 print("-" * 48)
@@ -257,5 +265,5 @@ branch_len_m = (selected_total_len_m - trunk_len_m) if trunk_len_m is not None e
 # branch_filter = "10cm": the de Tanago field crew physically only measured
 # sections down to a 10 cm taper diameter (see AdQSM.pdf Appendix A) - this
 # reference NEVER has a "none" (full/unfiltered) version, by methodology.
-upsert_result(RESULTS_CSV, TREE_ID, METHOD_LABEL, selected_total_m3, stem_m3, branch_m3, None,
+upsert_result(RESULTS_CSV, TREE_NAME, METHOD_LABEL, selected_total_m3, stem_m3, branch_m3, None,
               dbh_m, height_m, taper_cm_per_m, trunk_len_m, branch_len_m, branch_filter="10cm")

@@ -30,14 +30,22 @@ import csv
 import numpy as np
 
 # =====================  PARAMETERS  ==================================
-# Folder that contains the realization files. "." means "the folder this
-# script is run from".
-DATA_DIR = r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\data\IND01_54\qsm_tanago"
+# Tree ID for THIS run - this is the ONLY thing you need to change to switch
+# trees. It's the tree ID embedded in the realization file names, e.g. for
+# "cyl_data_IND07_083.txt_0.5_0.55_5_0.025_0.075_3_4_1_t0.txt" ... "..._t19.txt"
+# it's "IND07_083", AND it builds DATA_DIR right below it automatically.
+# NOTE: this only works when the data/<tree> folder is named EXACTLY like
+# TREE_NAME (true for IND07_083, but NOT for IND01_054 - its folder is
+# "IND01_54", a shorter form - if you switch back to that tree, set
+# DATA_DIR directly instead of deriving it from TREE_NAME).
+TREE_NAME = "IND07_083"
 
-# Tree to report. This is the tree ID embedded in the file names, e.g. for
-# "cyl_data_IND01_054.txt_0.5_0.55_5_0.025_0.075_3_4_1_t0.txt" ... "..._t19.txt"
-# use "IND01_054". To report a different tree, just change this to its ID.
-TREE_PREFIX = "IND01_054"
+# Base folder holding every tree's data, one subfolder per tree (normally
+# named exactly like TREE_NAME - see the note above for the one exception).
+DATA_ROOT = r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\data"
+
+# Folder that contains the realization files.
+DATA_DIR = os.path.join(DATA_ROOT, TREE_NAME, "qsm_tanago")
 
 # Column indices inside each cylinder file (0-based), for the TreeQSM
 # cylinder-data format. Change these only if your files use a different layout.
@@ -53,7 +61,7 @@ TAPER_H_UPPER = 10.0   # upper reference height [m]
 
 # Where to write the CSV export (per-realization rows + summary rows).
 # Set to None to skip CSV export.
-CSV_PATH = os.path.join(DATA_DIR, "%s_volume_summary.csv" % TREE_PREFIX)
+CSV_PATH = os.path.join(DATA_DIR, "%s_volume_summary.csv" % TREE_NAME)
 
 # Label used for this method in the shared results table (RESULTS_CSV).
 METHOD_LABEL = "TreeQSM de Tanago (mean)"
@@ -242,10 +250,10 @@ def upsert_result(csv_path, tree, method, total, stem, branch, std, dbh=None, he
 
 
 # =========================  RUN  =====================================
-files = find_realization_files(DATA_DIR, TREE_PREFIX)
+files = find_realization_files(DATA_DIR, TREE_NAME)
 
 if not files:
-    print("No files found for prefix '%s' in folder '%s'." % (TREE_PREFIX, DATA_DIR))
+    print("No files found for prefix '%s' in folder '%s'." % (TREE_NAME, DATA_DIR))
     # Help the user: show which tree prefixes ARE available in the folder.
     name_pattern = re.compile(r"^cyl_data_(.+)\.txt_.*_t\d+\.txt$", re.IGNORECASE)
     prefixes = sorted({name_pattern.match(f).group(1) for f in os.listdir(DATA_DIR)
@@ -264,7 +272,7 @@ trunk_lens, branch_lens = [], []
 totals_10cm, stems_10cm, branches_10cm = [], [], []
 trunk_lens_10cm, branch_lens_10cm = [], []
 n_totals, n_kepts = [], []
-print("Tree: %s   (%d realization files)\n" % (TREE_PREFIX, len(files)))
+print("Tree: %s   (%d realization files)\n" % (TREE_NAME, len(files)))
 print("%-24s %12s %12s %12s %8s %8s" % ("file", "total m^3", "stem m^3", "branch m^3", "dbh cm", "h m"))
 print("-" * 78)
 for idx, path in files:
@@ -352,7 +360,7 @@ std_total = summarize(totals)[1]
 # above, right before the 10cm report)
 # branch_filter = "none": these are the full TreeQSM cylinder realizations,
 # not restricted to any diameter cut-off.
-upsert_result(RESULTS_CSV, TREE_PREFIX, METHOD_LABEL,
+upsert_result(RESULTS_CSV, TREE_NAME, METHOD_LABEL,
               mean_total, mean_stem, mean_branch, std_total,
               mean_dbh, mean_height, mean_taper,
               mean_trunk_len, mean_branch_len, branch_filter="none")
@@ -369,7 +377,7 @@ upsert_result(RESULTS_CSV, TREE_PREFIX, METHOD_LABEL,
 # overall height, so the unfiltered values above are reused as-is, per your
 # instruction not to recompute something a cut-off this coarse wouldn't change.
 std_total_10cm = summarize(totals_10cm)[1]
-upsert_result(RESULTS_CSV, TREE_PREFIX, METHOD_LABEL_10CM,
+upsert_result(RESULTS_CSV, TREE_NAME, METHOD_LABEL_10CM,
               mean_total_10cm, mean_stem_10cm, mean_branch_10cm, std_total_10cm,
               mean_dbh, mean_height, mean_taper,
               mean_trunk_len_10cm, mean_branch_len_10cm,
@@ -381,7 +389,7 @@ if CSV_PATH:
         writer = csv.writer(f)
         writer.writerow(["tree", "file", "total_m3", "stem_m3", "branch_m3"])
         for (idx, path), total, stem, branch in zip(files, totals, stems, branches):
-            writer.writerow([TREE_PREFIX, os.path.basename(path),
+            writer.writerow([TREE_NAME, os.path.basename(path),
                               "%.6f" % total, "%.6f" % stem, "%.6f" % branch])
         writer.writerow([])
         writer.writerow(["stat", "total_m3", "stem_m3", "branch_m3"])

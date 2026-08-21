@@ -55,36 +55,49 @@ from tree_geom_utils import (
 )
 
 # =====================  PARAMETERS  ===================================
+# Tree ID for THIS run. This is the ONLY thing you need to change to switch
+# trees - it names this tree's row in the shared results table (RESULTS_CSV,
+# see upsert_result() calls below) AND builds AdQSM_DIR/AdTree_DIR/INPUT_PLY
+# right below it automatically, so those don't need editing separately.
+TREE_NAME = "IND07_083"
+
+# Base folder holding every tree's data, one subfolder per tree named after
+# TREE_NAME (e.g. ".../data/IND07_083/..."). Change this only if you move the
+# whole "data" folder somewhere else - it does NOT depend on which tree you're
+# processing.
+DATA_ROOT = r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\data"
+
 # Directory holding this tree's source input files (the AdTree skeleton .ply,
-# and the AdQSM taper/branch/params exports). Edit this to point at a
-# different tree's folder; INPUT_PLY and the ADQSM_*_FILE paths below are all
-# resolved relative to it.
+# and the AdQSM taper/branch/params exports) - built from DATA_ROOT + TREE_NAME
+# above. INPUT_PLY and the ADQSM_*_FILE paths below are all resolved relative
+# to these two directories.
 #
 # --- AdQSM variant(s) ---------------------------------------------------
 # AdQSM can be reconstructed several times with different settings, each
-# saved in its own subfolder (e.g. ".../AdQSM/05", ".../AdQSM/08" - the
-# folder name is just whatever you called that reconstruction run). You can
-# either:
+# saved in its own subfolder (e.g. ".../05", ".../08" - the folder name is
+# just whatever you called that reconstruction run). You can either:
 #   (1) point at ONE such folder with AdQSM_DIR (simple, old behaviour), or
 #   (2) list SEVERAL subfolder names in ADQSM_VARIANTS to process all of
 #       them in a single run of this script (similar to how RADIUS_THRESHOLDS
 #       lets you try several radius thresholds in one run).
 #
 # Case (1) - single variant (default, still works exactly as before):
-AdQSM_DIR = r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\data\IND01_54\AdQSM\05"
+AdQSM_DIR = os.path.join(DATA_ROOT, TREE_NAME, "05")
 
 # Case (2) - several variants. Leave ADQSM_VARIANTS empty/None to use only
 # AdQSM_DIR above (case 1). To use several variants instead, set BOTH:
-#   ADQSM_BASE_DIR = r"C:\...\data\IND01_54\AdQSM"
+#   ADQSM_BASE_DIR = os.path.join(DATA_ROOT, TREE_NAME, "AdQSM")
 #   ADQSM_VARIANTS = ["05", "08"]
 # Each name in ADQSM_VARIANTS must be a subfolder of ADQSM_BASE_DIR that
 # contains its own taper.txt, BranchStructure.txt and TreesParams.txt.
 ADQSM_BASE_DIR = None
 ADQSM_VARIANTS = None   # e.g. ["05", "08"]
 
-AdTree_DIR = r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\data\IND01_54"
+AdTree_DIR = os.path.join(DATA_ROOT, TREE_NAME)
 
-INPUT_PLY = os.path.join(AdTree_DIR, "IND01_054 - Cloud_skeleton.ply")   # input skeleton from AdTree
+# input skeleton from AdTree - filename follows the "<TREE_NAME> - Cloud_skeleton.ply"
+# convention used for every tree, so it's derived from TREE_NAME too.
+INPUT_PLY = os.path.join(AdTree_DIR, "%s - Cloud_skeleton.ply" % TREE_NAME)
 
 # Radius threshold (in METERS). You can give several values -> several variants.
 # Example of a single variant:   RADIUS_THRESHOLDS = [0.010]
@@ -163,8 +176,6 @@ PRINT_ADQSM_BRANCH_SAMPLE = True
 # compared directly in compare_volumes.py / plot_volumes.py. Set False to skip.
 WRITE_THIN_BRANCH_FILTERED_ROW = True
 
-# Tree ID used for this tree's rows in the shared results table (RESULTS_CSV).
-TREE_NAME = "IND01_054"
 
 # Shared master results table (see compare_volumes.py). When CALIBRATE_RADII
 # is True, each generated threshold variant upserts its own row into this CSV

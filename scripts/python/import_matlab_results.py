@@ -35,7 +35,7 @@ FILE_PATTERN = "volumes_*.csv"
 # Which Group to import from each table. "Estimated" uses the optimal
 # models plus the second run, so it has the most reliable mean and std.
 # Other valid choices: "Optimal", "All inputs", "Optimal (single)", "Simplified", "Filtered <10cm".
-IMPORT_GROUP = "Filtered <10cm"  # the de Tanago field crew physically only measured sections down to a 10 cm taper diameter (see AdQSM.pdf Appendix A) - this reference NEVER has a "none" (full/unfiltered) version, by methodology.
+IMPORT_GROUP = "Optimal"  # the de Tanago field crew physically only measured sections down to a 10 cm taper diameter (see AdQSM.pdf Appendix A) - this reference NEVER has a "none" (full/unfiltered) version, by methodology.
 
 # Shared master results table (read by compare_volumes.py).
 RESULTS_CSV = "volume_results.csv"
@@ -44,9 +44,9 @@ RESULTS_CSV = "volume_results.csv"
 # scripts use the FULL id (e.g. "IND01_054"). Rows are only comparable when
 # the ids match exactly, so map the short names to the full ones here.
 # Any tree not listed is used unchanged.
-TREE_ID_MAP = {
+TREE_NAME_MAP = {
     "IND01": "IND01_054",
-    # "IND07": "IND07_083",
+    "IND07": "IND07_083",
 }
 
 # Reference heights [m] used for DBH (lower) and the taper metric (lower/
@@ -170,7 +170,7 @@ for path in files:
         continue
 
     tree_raw, run, total, stem, branch, std = found
-    tree = TREE_ID_MAP.get(tree_raw, tree_raw)      # map short id -> full id
+    tree = TREE_NAME_MAP.get(tree_raw, tree_raw)      # map short id -> full id
     method = "TreeQSM mine (%s, %s)" % (run, IMPORT_GROUP)
 
     # Optional DBH/height, read from "dbh_<tree>_<run>.txt" / "height_<tree>_<run>.txt"

@@ -18,8 +18,8 @@ src_dir = 'C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\s
 data_dir = 'C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\scripts\matlab';
 
 % --- tree identification -------------------------------------
-tree_id   = 'IND01_054';           % short name used for ALL output files
-cloud_txt = 'IND01_054.txt';   % input point cloud (text file, 3 columns X Y Z)
+tree_id   = 'IND07_083';           % short name used for ALL output files
+cloud_txt = 'IND07_083.txt';   % input point cloud (text file, 3 columns X Y Z)
 
 % --- number of models ----------------------------------------
 n_models_first = 5;    % models per parameter combination, first (coarse) run
