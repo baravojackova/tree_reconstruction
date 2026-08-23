@@ -9,8 +9,8 @@
 *afun,deg   			!use degrees
 !
 !----------vstupni parametry
-n_sl=9					!pocet sloupcu
-n_rad=6388				!pocet radku vystup z matlab
+n_sl=10					!pocet sloupcu
+n_rad=3567				!pocet radku vystup z matlab
 d_kmen=0.64
 t_ks=2*d_kmen				!tloustka KS
 e_sizetree=0.1
@@ -22,9 +22,9 @@ f_stat=7990
 f_dyn=7990
 alfa=14.2
 !
-!nacteni tabulky s geometrii ze skenu (x,y,z,lenght,radius,xaxis,yaxis,zaxis,parent)
+!nacteni tabulky s geometrii ze skenu (x,y,z,lenght,radius,xaxis,yaxis,zaxis,parent,branchorder)
 *dim,geom,table,n_rad,n_sl,1,poradi,vlast
-*tread,geom,geom_r30_optim,txt
+*tread,geom,geom_1,txt
 !
 !vypocet pozice druhehu bodu strednice valce
 *dim,geom_2,array,n_rad,5,1,poradi,vlast
@@ -50,15 +50,14 @@ alfa=14.2
 !
 *do,i,1,n_rad,1  								
  k,i,geom(i,1),geom(i,2),geom(i,3)
- k,10000+i,geom_2(i,3),geom_2(i,4),geom_2(i,5)											
+ k,10000+i,geom_2(i,3),geom_2(i,4),geom_2(i,5)									
 *enddo
-!
-!----------tvorba linii
 !
 *do,i,1,n_rad,1  								
  l,i,10000+i										
 *enddo
 !
+!----------tvorba linii
 *do,i,1,n_rad,1  
  ksel,s,kp,,i						!vyber kp baze sekce
  ksel,a,kp,,10000+i					!vyber kp top sekce
@@ -170,7 +169,6 @@ nrotat,all
 !
 csys,1
 !***************CE***********
-/eof
 !------svazani vetvi
 !
 *do,i,2,n_rad,1
@@ -251,7 +249,7 @@ densp=1000					!Foucard
 !
 allsel,all
 csys,0
-save,geom_buk1,db
+save,geom_buk,db
 finish
 !!!!!!-----------reseni-------------!!!!!!
 !---------------harmon--------------
