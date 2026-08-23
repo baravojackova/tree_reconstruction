@@ -429,9 +429,11 @@ for variant_label, taper_file, branch_file, params_file in ADQSM_VARIANT_LIST:
         #                  cylinder INDICES, stored as float64 for a uniform
         #                  array; export_geom_ansys.py casts them back to int).
         #   cyl_order     : (n_cyl,) int - branch order per cylinder (0=trunk,
-        #                  >=1=branch) - not needed by write_geom() itself, but
-        #                  kept so nothing is lost if you want to recompute
-        #                  volume_stats()/report_volume() etc. from the .npz later.
+        #                  >=1=branch) - write_geom() now writes this as the
+        #                  11th geom_*.txt column (see tree_geom_utils.py),
+        #                  and it's also kept here so nothing is lost if you
+        #                  want to recompute volume_stats()/report_volume()
+        #                  etc. from the .npz later.
         #   root          : the root node index (scalar) - write_geom() needs
         #                  it to compute the x,y recentring offset.
         #   recenter_xy   : the RECENTER_XY flag used for THIS run (scalar bool).

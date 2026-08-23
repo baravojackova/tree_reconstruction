@@ -766,19 +766,44 @@ def convert(xyz, rad, edges, thr, seg_len_min, seg_len_max, seg_len_k, min_cyl_l
     return root, cyl, cyl_order
 
 
-def write_geom(path, xyz, cyl, root, recenter_xy):
-    """Write the cylinders to geom.txt in the format read by buk.mac."""
+def write_geom(path, xyz, cyl, root, recenter_xy, cyl_order):
+    """Write the cylinders to geom.txt in the format read by buk.mac.
+
+    NEW PARAMETER cyl_order: a list/array of ints, one branch-order value per
+    cylinder in `cyl`, IN THE SAME ORDER as `cyl` (cyl_order[i] belongs to
+    cyl[i]). This is the same list produced by compute_branch_order() /
+    convert() elsewhere in this file. WHY it's added: the MATLAB script
+    myfun.m (function result_ansys) writes an 11th column with the branch
+    order of each cylinder, and geom_*.txt needs to match that format so
+    downstream ANSYS/MATLAB tooling that expects 11 columns keeps working.
+    """
+    # WHY this check: cyl_order must line up 1-to-1 with cyl (same length,
+    # same order). If some caller passes a mismatched list (e.g. from a
+    # different run, or forgets to update it after filtering `cyl`), the
+    # bug would otherwise be silent - each cylinder would silently get the
+    # WRONG branch order instead of an obvious crash. Failing loudly here
+    # makes that mistake easy to spot immediately.
+    if len(cyl_order) != len(cyl):
+        raise ValueError(
+            "write_geom: cyl_order has %d entries but cyl has %d - they must "
+            "be the same length and in the same order." % (len(cyl_order), len(cyl)))
+
     off = np.array([xyz[root, 0], xyz[root, 1], 0.0]) if recenter_xy else np.zeros(3)
     with open(path, "w") as f:
-        # header row with column indices (0 = corner, then 1..9) - required by *TREAD
-        f.write("0\t1\t2\t3\t4\t5\t6\t7\t8\t9\n")
+        # header row with column indices (0 = corner, then 1..9, now also 10
+        # for the new branch-order column) - required by *TREAD
+        f.write("0\t1\t2\t3\t4\t5\t6\t7\t8\t9\t10\n")
         for k, (a, b, r, pid) in enumerate(cyl, start=1):
             s = xyz[a] - off                       # start point
             v = xyz[b] - xyz[a]                     # direction vector
             L = float(np.linalg.norm(v))
             ax = v / L if L > 0 else np.array([0.0, 0.0, 1.0])
-            f.write("%d\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g\t%d\n"
-                    % (k, s[0], s[1], s[2], L, r, ax[0], ax[1], ax[2], pid))
+            # k is 1-based (enumerate(..., start=1)) but cyl_order is a plain
+            # 0-based Python list, so the cylinder written on loop iteration
+            # k corresponds to cyl_order[k - 1], NOT cyl_order[k].
+            order_k = cyl_order[k - 1]
+            f.write("%d\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g\t%d\t%d\n"
+                    % (k, s[0], s[1], s[2], L, r, ax[0], ax[1], ax[2], pid, order_k))
 
 
 def cylinder_metrics(xyz, cyl):
