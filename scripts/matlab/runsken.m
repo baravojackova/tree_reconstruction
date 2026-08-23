@@ -63,6 +63,141 @@ simp_Plot              = 1;
 simp_Disp              = 1;
 
 %% ------------------------------------------------------------
+%  1b) CLEAN START (OPTIONAL) - delete ALL previously generated outputs
+%     WHAT this block does: wipes every file this script has ever produced
+%     in data_dir, for EVERY tree_id and EVERY run_tag at once (not just
+%     the ones set above in section 1) - useful when you want to start
+%     from a completely empty output database instead of accumulating
+%     old runs.
+%     WHY it needs two separate switches and a typed confirmation: this
+%     is a MASS-DELETE of an entire folder's worth of results, and it is
+%     very easy to accidentally run a whole script "cell by cell" and
+%     land on this cell without meaning to. The switches below make sure
+%     that (a) simply reaching this cell does nothing unless you have
+%     deliberately edited clean_start, and (b) even with clean_start
+%     enabled, nothing is actually deleted until you also disable the
+%     dry run AND type a literal confirmation word.
+%  ------------------------------------------------------------
+
+% Switch 1 (master switch): must be hand-edited to true, otherwise this
+% whole cell is a no-op. This is the main safety net against accidentally
+% running this cell - the default (false) guarantees nothing happens.
+clean_start = false;
+
+% Switch 2 (dry run): with clean_start = true, this decides whether files
+% are only LISTED (true, the safe default) or actually DELETED (false).
+% Keep this true the first time you enable clean_start, so you can review
+% exactly what would be removed before committing to it.
+clean_dry_run = true;
+
+if ~clean_start
+    % Master switch is off - do nothing at all, not even list files.
+    % This keeps a normal "run every cell in order" pass completely inert.
+    fprintf('Clean start is disabled (clean_start = false) - skipping.\n');
+else
+    % ---- 1. Build the list of file-name PATTERNS that this script can
+    % ever produce, across ALL tree_id/run_tag combinations (that's why
+    % these use '*' wildcards instead of the specific names built in
+    % section 2 below, which only cover the CURRENT tree_id/run_tag).
+    clean_patterns = { ...
+        '*_res_*.mat', ...              % first AND second run results (both contain '_res_')
+        'volumes_*.mat', ...
+        'volumes_*.csv', ...
+        'dbh_*.txt', ...
+        'height_*.txt', ...
+        'taper_*.txt', ...
+        'trunklen_*.txt', ...
+        'trunklen_filtered_*.txt', ...
+        'branchlen_*.txt', ...
+        'branchlen_filtered_*.txt', ...
+        'geom_*.txt', ...
+        '*.mat', ...                    % catches saved point clouds too, e.g. "IND07_083.mat"
+        };
+
+    % ---- 2. Scan data_dir for every pattern above and collect matches,
+    % skipping duplicates (a file can match more than one pattern, e.g.
+    % '*_res_*.mat' and the broad '*.mat').
+    clean_files = struct('name', {}, 'folder', {}, 'bytes', {});
+    for p = 1:numel(clean_patterns)
+        pattern = clean_patterns{p};
+        matches = dir(fullfile(data_dir, pattern));
+        for m = 1:numel(matches)
+            f = matches(m);
+            if f.isdir
+                continue   % dir() wildcards should only ever hit files here, but skip folders just in case
+            end
+
+            % ---- 3. SAFETY GUARD: never delete anything with "Cloud" in
+            % its name, regardless of which pattern matched it. This is
+            % the protection for raw input point clouds - both the
+            % literal cloud_txt input file (e.g. "IND07_083 - Cloud_
+            % branchbase_03.txt") and any hypothetical .mat file that
+            % might one day be named similarly. Case-insensitive so
+            % "cloud", "Cloud", "CLOUD" etc. are all protected the same way.
+            if ~isempty(regexpi(f.name, 'Cloud', 'once'))
+                continue
+            end
+
+            % Skip if this exact file (by name+folder) is already in the list.
+            already_listed = false;
+            for e = 1:numel(clean_files)
+                if strcmp(clean_files(e).name, f.name) && strcmp(clean_files(e).folder, f.folder)
+                    already_listed = true;
+                    break
+                end
+            end
+            if ~already_listed
+                % Assign field-by-field (not "clean_files(end+1) = f") because
+                % dir() structs carry more fields (date, datenum, isdir, ...)
+                % than the 3-field placeholder clean_files was initialized
+                % with above - a whole-struct assignment between structs with
+                % different fields errors out ("dissimilar structures").
+                idx = numel(clean_files) + 1;
+                clean_files(idx).name   = f.name;   %#ok<SAGROW>  % small list, growth cost is irrelevant here
+                clean_files(idx).folder = f.folder;
+                clean_files(idx).bytes  = f.bytes;
+            end
+        end
+    end
+
+    % ---- 4. Always print the full list of what would be (or was) deleted,
+    % in both dry-run and real-delete mode, so the user can see exactly
+    % what happened either way.
+    fprintf('Clean start: %d matching file(s) found in %s\n', numel(clean_files), data_dir);
+    total_bytes = 0;
+    for i = 1:numel(clean_files)
+        fprintf('  %-50s %10.1f KB\n', clean_files(i).name, clean_files(i).bytes / 1024);
+        total_bytes = total_bytes + clean_files(i).bytes;
+    end
+    fprintf('Total: %d file(s), %.2f MB\n', numel(clean_files), total_bytes / (1024*1024));
+
+    if clean_dry_run
+        % ---- 5a. Dry run - list only, never touch the disk.
+        fprintf('DRY RUN - nothing deleted. Set clean_dry_run = false to actually delete.\n');
+    else
+        % ---- 5b. Real delete - require a typed confirmation first, so a
+        % stray re-run of this cell (e.g. Ctrl+Enter twice) cannot delete
+        % anything without the user explicitly typing the word again.
+        confirmation = input('Type SMAZAT (all caps) to permanently delete the files listed above: ', 's');
+        if ~strcmp(confirmation, 'SMAZAT')
+            fprintf('Confirmation not received - deletion cancelled, nothing was deleted.\n');
+        else
+            for i = 1:numel(clean_files)
+                file_path = fullfile(clean_files(i).folder, clean_files(i).name);
+                try
+                    delete(file_path);
+                    fprintf('Deleted: %s\n', file_path);
+                catch ME
+                    % try/catch per file so one locked/missing file cannot
+                    % abort deletion of the rest of the list.
+                    fprintf('FAILED to delete %s (%s)\n', file_path, ME.message);
+                end
+            end
+        end
+    end
+end
+
+%% ------------------------------------------------------------
 %  2) DERIVED NAMES - built automatically from tree_id + run_tag
 %     Normally you do NOT edit this block
 %  ------------------------------------------------------------
