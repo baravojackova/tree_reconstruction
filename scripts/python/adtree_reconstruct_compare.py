@@ -82,7 +82,7 @@ DATA_ROOT = r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstructio
 #       lets you try several radius thresholds in one run).
 #
 # Case (1) - single variant (default, still works exactly as before):
-AdQSM_DIR = os.path.join(DATA_ROOT, TREE_NAME, "05")
+AdQSM_DIR = os.path.join(DATA_ROOT, TREE_NAME, "05_base")
 
 # Case (2) - several variants. Leave ADQSM_VARIANTS empty/None to use only
 # AdQSM_DIR above (case 1). To use several variants instead, set BOTH:
@@ -113,6 +113,32 @@ RADIUS_THRESHOLDS = [0.005]        # 0.030 m = 30 mm radius (60 mm diameter)
 SEG_LEN_MIN = 0.01                # shortest allowed segment (m), for thin twigs
 SEG_LEN_MAX = 0.3                # longest allowed segment (m), for the trunk
 SEG_LEN_K = 0.5                   # target length = SEG_LEN_K * local_radius
+
+# --- Build a short suffix identifying THIS resampling configuration -----
+# WHY THIS EXISTS: SEG_LEN_MIN/MAX/K (just above) control how densely the
+# skeleton gets resampled, so changing any of them produces a DIFFERENT
+# final cylinder model for the same tree/threshold/AdQSM variant. Without
+# tagging results with which resampling setting produced them, re-running
+# this script after tweaking SEG_LEN_* would silently OVERWRITE the
+# previous run's row in RESULTS_CSV (upsert_result() replaces any existing
+# row with the same tree+method - see tree_geom_utils.py) and its .npz file
+# on disk - even though the two runs describe genuinely different
+# geometries, not a correction of the same one. SEG_VARIANT_SUFFIX is
+# appended to every AdTree method name AND output filename further down, so
+# different resampling settings coexist side by side instead of clobbering
+# each other.
+#
+# Format: "_seg{min_mm}-{max_mm}-k{k*100}". Millimetres (not metres) and
+# k*100 (not the raw 0..1 fraction) are used purely to keep the suffix a
+# short string of whole numbers with no decimal points, which would
+# otherwise need extra escaping to stay safe inside both filenames and CSV
+# cells. Example: SEG_LEN_MIN=0.01, SEG_LEN_MAX=0.3, SEG_LEN_K=0.5 (the
+# current values above) -> "_seg10-300-k50".
+SEG_VARIANT_SUFFIX = "_seg%d-%d-k%d" % (
+    round(SEG_LEN_MIN * 1000),   # metres -> whole millimetres
+    round(SEG_LEN_MAX * 1000),   # metres -> whole millimetres
+    round(SEG_LEN_K * 100),      # e.g. 0.5 -> 50
+)
 
 # Shortest permissible cylinder (in METERS). Shorter ones (e.g. at branch
 # points) are not created, to avoid degenerate zero-length beams in ANSYS.
@@ -336,11 +362,20 @@ for variant_label, taper_file, branch_file, params_file in ADQSM_VARIANT_LIST:
         # eventually write - computed here (once, alongside the threshold/
         # variant it belongs to) and carried inside the .npz below.
         out = OUTPUT_PATTERN.format(r=int(round(thr * 1000))) if multiple_thresholds else OUTPUT_NAME
-        if variant_suffix:
-            # insert the variant tag just before the file extension, e.g.
-            # "geom_r30_optim.txt" -> "geom_r30_optim_adqsm05.txt"
-            name_part, ext_part = os.path.splitext(out)
-            out = name_part + variant_suffix + ext_part
+        # Insert variant_suffix (only when an AdQSM variant is active) AND
+        # SEG_VARIANT_SUFFIX (always) just before the file extension, e.g.
+        # "geom_r30_optim.txt" -> "geom_r30_optim_adqsm05_seg10-300-k50.txt".
+        # SEG_VARIANT_SUFFIX is added UNCONDITIONALLY here (unlike
+        # variant_suffix, which is "" unless ADQSM_VARIANTS is set) because
+        # it's always non-empty by construction - it's built directly from
+        # SEG_LEN_MIN/MAX/K above, which always have SOME value. This keeps
+        # the eventual geom_*.txt name in sync with the same suffix already
+        # added to npz_name and every AdTree method name further down: a
+        # different SEG_LEN_* setting must never silently overwrite a
+        # previous run's exported geometry (see SEG_VARIANT_SUFFIX's own
+        # definition, next to SEG_LEN_MIN/MAX/K, for the full "why").
+        name_part, ext_part = os.path.splitext(out)
+        out = name_part + variant_suffix + SEG_VARIANT_SUFFIX + ext_part
 
         # Height of the pruned model: z-range of the nodes actually used by these
         # cylinders. Unaffected by radius calibration (geometry doesn't change).
@@ -406,7 +441,11 @@ for variant_label, taper_file, branch_file, params_file in ADQSM_VARIANT_LIST:
         #                  OUTPUT_NAME/OUTPUT_PATTERN/variant-suffix logic.
         #   tree_name, variant_label, threshold_m : just metadata, so you can
         #                  tell which run produced a given .npz file later.
-        npz_name = "calib_%s_r%dmm%s.npz" % (TREE_NAME, round(thr * 1000), variant_suffix)
+        # SEG_VARIANT_SUFFIX added here too (after variant_suffix, same "end
+        # of the name" placement as the method names above) - a run with
+        # different SEG_LEN_MIN/MAX/K settings now writes a DIFFERENT .npz
+        # file on disk instead of silently overwriting the previous run's one.
+        npz_name = "calib_%s_r%dmm%s%s.npz" % (TREE_NAME, round(thr * 1000), variant_suffix, SEG_VARIANT_SUFFIX)
         cyl_array = np.array([(a, b, r, pid) for a, b, r, pid in cyl], dtype=np.float64)
         np.savez(npz_name,
                  xyz=xyz,
@@ -446,7 +485,12 @@ for variant_label, taper_file, branch_file, params_file in ADQSM_VARIANT_LIST:
             # variant, which is harmless since upsert_result overwrites by
             # (tree, method), not duplicates.
             # branch_filter = "none": raw AdTree radii, no diameter cut-off applied.
-            upsert_result(RESULTS_CSV, TREE_NAME, "AdTree raw r%dmm" % round(thr * 1000),
+            # SEG_VARIANT_SUFFIX appended at the very end of the method name
+            # (see where it's built, next to SEG_LEN_MIN/MAX/K above) - keeps
+            # results from a different resampling setting as a SEPARATE row
+            # instead of overwriting this one.
+            upsert_result(RESULTS_CSV, TREE_NAME,
+                          "AdTree raw r%dmm%s" % (round(thr * 1000), SEG_VARIANT_SUFFIX),
                           orig_stats["total_vol"], orig_stats["trunk_vol"], orig_stats["branch_vol"], None,
                           raw_dbh, height_m, raw_taper,
                           # trunk_len/branch_len: already in this dict (volume_stats()
@@ -461,8 +505,14 @@ for variant_label, taper_file, branch_file, params_file in ADQSM_VARIANT_LIST:
             # branch_filter = "none": calibrated radii, but still the full
             # reconstruction - no diameter cut-off applied (see the THIRD row
             # right below for the "10cm"-filtered counterpart of this one).
+            # SEG_VARIANT_SUFFIX appended AFTER variant_method_suffix (i.e. at
+            # the true end of the name, same rule as every other method name
+            # touched in this step) - so e.g. "AdTree calibrated r5mm (AdQSM
+            # 05)_seg10-300-k50" stays sortable/filterable by resampling
+            # setting regardless of whether an AdQSM variant tag is present.
             upsert_result(RESULTS_CSV, TREE_NAME,
-                          "AdTree calibrated r%dmm%s" % (round(thr * 1000), variant_method_suffix),
+                          "AdTree calibrated r%dmm%s%s"
+                          % (round(thr * 1000), variant_method_suffix, SEG_VARIANT_SUFFIX),
                           cal_stats["total_vol"], cal_stats["trunk_vol"], cal_stats["branch_vol"], None,
                           cal_dbh, height_m, cal_taper,
                           cal_stats["trunk_len"], cal_stats["branch_len"],
@@ -477,9 +527,10 @@ for variant_label, taper_file, branch_file, params_file in ADQSM_VARIANT_LIST:
                 # are left as None here since report_thin_branch_volume() doesn't
                 # currently track filtered LENGTH, only filtered volume (see the
                 # summary from when this row was added).
+                # SEG_VARIANT_SUFFIX at the very end again, same rule as above.
                 upsert_result(RESULTS_CSV, TREE_NAME,
-                              "AdTree calibrated r%dmm%s (>=%.0fcm only)"
-                              % (round(thr * 1000), variant_method_suffix, THIN_BRANCH_CUT_CM),
+                              "AdTree calibrated r%dmm%s (>=%.0fcm only)%s"
+                              % (round(thr * 1000), variant_method_suffix, THIN_BRANCH_CUT_CM, SEG_VARIANT_SUFFIX),
                               cal_thin["total_vol_kept"], cal_thin["trunk_vol_kept"],
                               cal_thin["branch_vol_kept"], None,
                               cal_dbh, height_m, cal_taper,
@@ -496,8 +547,10 @@ for variant_label, taper_file, branch_file, params_file in ADQSM_VARIANT_LIST:
                 # raw_dbh/raw_taper (the UNCALIBRATED trunk's own values),
                 # not cal_dbh/cal_taper, to stay consistent with "this row
                 # describes the raw model, not the calibrated one."
+                # SEG_VARIANT_SUFFIX at the very end again, same rule as above.
                 upsert_result(RESULTS_CSV, TREE_NAME,
-                              "AdTree raw r%dmm (>=%.0fcm only)" % (round(thr * 1000), THIN_BRANCH_CUT_CM),
+                              "AdTree raw r%dmm (>=%.0fcm only)%s"
+                              % (round(thr * 1000), THIN_BRANCH_CUT_CM, SEG_VARIANT_SUFFIX),
                               orig_thin["total_vol_kept"], orig_thin["trunk_vol_kept"],
                               orig_thin["branch_vol_kept"], None,
                               raw_dbh, height_m, raw_taper,

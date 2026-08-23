@@ -9,7 +9,7 @@ clc
 %% ------------------------------------------------------------
 %  1) USER SETTINGS - this is the ONLY block you need to edit
 %  ------------------------------------------------------------
-run_tag = 'v2manual';    % change for every new settings variant
+run_tag = 'v3manual';    % change for every new settings variant
 
 % Folder with the TreeQSM source code (contains treeqsm.m, +myfun, ...)
 src_dir = 'C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\scripts\matlab';
@@ -19,7 +19,7 @@ data_dir = 'C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\
 
 % --- tree identification -------------------------------------
 tree_id   = 'IND07_083';           % short name used for ALL output files
-cloud_txt = 'IND07_083.txt';   % input point cloud (text file, 3 columns X Y Z)
+cloud_txt = 'IND07_083 - Cloud_branchbase_03.txt';   % input point cloud (text file, 3 columns X Y Z)
 
 % --- number of models ----------------------------------------
 n_models_first = 5;    % models per parameter combination, first (coarse) run

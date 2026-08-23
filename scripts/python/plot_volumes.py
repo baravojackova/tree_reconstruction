@@ -67,7 +67,9 @@
 # =====================================================================
 
 import os
+import random   # used in plot_error_boxplot() to jitter the individual-tree scatter points sideways
 import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors     # used in _darken_color() and build_method_color_map()
 import matplotlib.patches as mpatches   # used to build the shared legend in plot_tree_overview()
 
 from compare_volumes import (
@@ -151,8 +153,6 @@ def build_method_color_map(methods, reference_method):
     from the gradient also means its position never shifts the other
     methods' shades depending on where in the method list it happens to sit.
     """
-    import matplotlib.colors as mcolors
-
     # Hand-picked, pastel mint/turquoise stops (not fully saturated) so the
     # gradient stays easy on the eye across many bars/boxes at once, while
     # still spanning a visibly distinct light-mint-to-deep-teal range.
@@ -175,6 +175,28 @@ def build_method_color_map(methods, reference_method):
         color_of[reference_method] = "coral"
 
     return color_of
+
+
+def _darken_color(color, factor=0.6):
+    """Return a DARKER version of `color` (same hue, just scaled toward
+    black) - used ONLY by plot_error_boxplot()'s per-tree scatter dots.
+
+    WHY darker-same-color instead of a flat gray for the dots: the whole
+    point of build_method_color_map() is "one consistent colour per method,
+    everywhere in this file" - using plain gray dots for every method would
+    throw that identity away right where it matters most (the individual
+    observations you're overlaying so you can see per-tree spread, not just
+    the summary box). A darker shade of the SAME colour keeps "which method
+    is this" recognisable at a glance, while still reading as clearly
+    different from the (lighter, semi-transparent) box fill underneath it.
+
+    `factor` (0..1) is how much of the original colour to keep - 0.6 means
+    "60% of the original brightness", which is dark enough to stand out
+    against the box fill without going all the way to black (which would
+    make every method's dots look identical again, defeating the purpose).
+    """
+    r, g, b = mcolors.to_rgb(color)   # to_rgb() accepts hex strings, named colours, AND RGBA tuples alike
+    return (r * factor, g * factor, b * factor)
 
 
 # ----------------------------------------------------------------------
@@ -289,20 +311,17 @@ def plot_tree_overview(rows, tree, branch_filter, color_map):
     # add/remove/reorder subplots - the loop below draws one subplot per
     # entry, so adding a field is a one-line change here, not a copy-pasted
     # block of plotting code. Just keep the subplot COUNT matching the grid
-    # shape passed to plt.subplots() right below (2x3 = 6 slots here).
+    # shape passed to plt.subplots() right below.
     #
-    # 6 of 8 possible fields were chosen (load_results() also has "stem" and
-    # "branch" volume): total volume, DBH, height and taper were already
-    # shown before this change; trunk_len/branch_len are the two ADDED here.
-    # stem/branch volume were left OUT to keep this at 2x3 - trunk_len and
-    # branch_len already answer the "shorter/less-complete structure vs.
-    # different radii" question stem_m3/branch_m3 would only answer at a
-    # coarser level, and they mirror exactly the fields compare_volumes.py's
-    # field_error_summary() already reports separately (dbh/height/taper/
-    # trunk_len/branch_len) - so this chart's 6 fields line up 1:1 with that
-    # console report instead of introducing a 7th/8th thing to track.
+    # ALL 8 fields load_results() provides are now shown (previously 6 - the
+    # "stem"/"branch" volume panels below are NEW, added because you asked to
+    # see per-method stem/branch volume side by side with everything else,
+    # not just the combined total). Order groups the three VOLUME fields
+    # first (total, stem, branch), then the rest in the same order as before.
     fields = [
         ("total",      "Total volume [m^3]"),
+        ("stem",       "Stem volume [m^3]"),
+        ("branch",     "Branch volume [m^3]"),
         ("dbh",        "DBH [m]"),
         ("height",     "Height [m]"),
         ("taper",      "Taper [cm/m]"),
@@ -310,7 +329,14 @@ def plot_tree_overview(rows, tree, branch_filter, color_map):
         ("branch_len", "Branch length [m]"),
     ]
 
-    fig, axes = plt.subplots(2, 3, figsize=(16, 9))
+    # GRID SIZE CHOICE: 2x4 (8 slots), not 3x3 (9 slots, 1 always empty).
+    # With exactly 8 fields above, 2x4 fills the grid perfectly - no empty
+    # panel to explain away, and it only requires widening the figure
+    # (16 -> 21, keeping each panel roughly the same width as before: 16/3
+    # cols =~5.3 per panel before, 21/4 cols =~5.25 per panel now) rather
+    # than also changing the row count / height, which would touch more of
+    # the layout code below (suptitle/legend vertical spacing) than necessary.
+    fig, axes = plt.subplots(2, 4, figsize=(21, 9))
 
     for ax, (field_key, subplot_title) in zip(axes.flat, fields):
         # Skip methods with no value (None) for THIS field entirely, instead
@@ -451,8 +477,42 @@ def plot_error_boxplot(rows, branch_filter, reference_method, color_map):
     # same default matplotlib blue.
     bplot = ax.boxplot(data, tick_labels=labels, patch_artist=True)
     for patch, m in zip(bplot["boxes"], labels):
-        patch.set_facecolor(color_map.get(m, "#999999"))
+        # facecolor gets an ALPHA of 0.55 (via to_rgba, not patch.set_alpha())
+        # specifically so only the FILL becomes semi-transparent - this is
+        # what lets the individual-tree scatter dots (added further below)
+        # show through the box clearly instead of being hidden underneath a
+        # fully opaque one. Using to_rgba(..., alpha=...) instead of
+        # patch.set_alpha() keeps the outline's own colour/opacity
+        # independent of this, so setting the outline colour next isn't
+        # also accidentally faded by the same alpha.
+        patch.set_facecolor(mcolors.to_rgba(color_map.get(m, "#999999"), alpha=0.55))
+        # Outline was matplotlib's default (black) - lightened to a soft gray
+        # so it reads as a subtle boundary rather than a heavy border now
+        # that the box interior is also busy with overlaid scatter points.
+        patch.set_edgecolor("#888888")
     ax.axhline(0.0, color="gray", linestyle="--", linewidth=1)  # 0% error = perfect match
+
+    # ---- overlay each tree's individual % error as a small dot ----------
+    # WHY: with only 1-2 trees right now, the box itself is a degenerate
+    # (near-meaningless) summary - showing the actual observations makes the
+    # real data visible underneath the statistic, and stays useful later too
+    # once more trees are added (you can see spread AND the box summary at
+    # the same time, instead of choosing one or the other).
+    #
+    # boxplot() places method i's box at x = i + 1 (1-based, left to right in
+    # `labels` order) - `data`/`labels` are already in that same order (built
+    # together in the loop above), so zip()-ing them here lines up each
+    # method's dots with its own box automatically.
+    jitter_width = 0.08   # small horizontal spread, in the same x units as the boxes (box width = 0.5 by default)
+    for i, (m, errors_pct) in enumerate(zip(labels, data)):
+        # random.uniform() jitters each point sideways by a small random
+        # amount so points with the same (or very close) y-value don't all
+        # stack up in one indistinguishable vertical line - purely a visual
+        # spread, it does NOT change any actual data value being plotted.
+        x_jittered = [(i + 1) + random.uniform(-jitter_width, jitter_width) for _ in errors_pct]
+        dot_color = _darken_color(color_map.get(m, "#999999"), factor=0.6)
+        ax.plot(x_jittered, errors_pct, "o", color=dot_color, markersize=5,
+                markeredgewidth=0, alpha=0.9, zorder=3)   # zorder=3: draw dots ON TOP of the (semi-transparent) boxes
     ax.set_ylabel("Error vs. reference [%]")
     ax.set_title("Total-volume error distribution by method (across trees)\n"
                   "vs. '%s'  (branch_filter='%s')" % (reference_method, branch_filter))

@@ -147,7 +147,12 @@ def parse_adqsm_taper_file(path):
     """Parse an AdQSM taper.txt file: rows of 'height[m] <TAB> diameter[m]'.
     Robust to non-UTF8 (Chinese) headers, blank lines, and several
     concatenated blocks (the file may repeat the same export multiple times)
-    - only the FIRST block of numeric rows is used, per AdQSM convention."""
+    - only the FIRST block of numeric rows is used, per AdQSM convention.
+
+    Isolated "spike" rows (a single row with an implausibly large diameter
+    compared to both its neighbours) are dropped before returning - see
+    _reject_taper_spikes() below for why this is necessary and how it
+    decides what counts as a spike."""
     heights, diameters = [], []
     collecting = False
     with open(path, "r", encoding="latin-1") as f:
@@ -168,7 +173,56 @@ def parse_adqsm_taper_file(path):
     if not heights:
         raise ValueError("No numeric height/diameter rows found in %s" % path)
     idx = np.argsort(heights)
-    return np.asarray(heights)[idx], np.asarray(diameters)[idx]
+    heights = np.asarray(heights)[idx]
+    diameters = np.asarray(diameters)[idx]
+    return _reject_taper_spikes(heights, diameters, path)
+
+
+def _reject_taper_spikes(heights, diameters, path, factor=2.0):
+    """Drop isolated "spike" rows from an AdQSM taper curve before it's used
+    for radius calibration.
+
+    WHY THIS EXISTS: a tree trunk's diameter should change fairly smoothly
+    with height - it should never jump to several times the diameter of the
+    rows immediately above AND below it. In practice, AdQSM's own taper.txt
+    export CAN contain an isolated garbage row (observed for real, in
+    data/IND07_083/05/taper.txt: height 26.6 m reports diameter 4.43 m,
+    sandwiched between 0.55 m and 0.49 m at the neighbouring heights -
+    clearly an export/fitting artifact, not a real 4+ metre-thick trunk).
+
+    If a spike like that is left in, make_trunk_radius_func()'s linear
+    interpolation draws a straight line up to it and back down, so ANY
+    AdTree trunk cylinder whose height happens to fall near the spike gets
+    assigned a hugely inflated radius - which can multiply the CALIBRATED
+    stem volume several-fold, even though DBH and taper_cm_per_m (measured
+    at 1.3 m / 10.0 m, usually nowhere near a spike further up the trunk)
+    come out looking completely normal. That mismatch - "calibrated stem
+    volume way too high, but DBH/taper look fine" - is exactly the symptom
+    this function prevents.
+
+    An interior row i (never the very first or last row - there's no
+    "neighbour on both sides" to compare those against) is dropped only if
+    its diameter is more than `factor` times BOTH of its immediate
+    neighbours' diameters, i.e. it stands out as a spike relative to what's
+    on EITHER side, not merely part of an ordinary gentle taper (a real
+    trunk can widen slightly lower down before tapering - e.g. a root
+    flare - so this check deliberately only fires on an isolated,
+    much-larger-than-both-neighbours point, never on a normal small
+    increase). Never silent: prints exactly which row(s) were dropped,
+    since losing a row changes the calibration result and that should be
+    visible, not a silent correction.
+    """
+    keep = np.ones(len(diameters), dtype=bool)
+    for i in range(1, len(diameters) - 1):
+        left, right = diameters[i - 1], diameters[i + 1]
+        neighbor_max = max(left, right)
+        if neighbor_max > 0 and diameters[i] > factor * neighbor_max:
+            keep[i] = False
+            print("  WARNING: dropping implausible taper.txt row at height %.2f m "
+                  "(diameter %.4f m vs. neighbouring rows %.4f m / %.4f m) from %s "
+                  "- looks like an AdQSM export artifact, not real trunk data."
+                  % (heights[i], diameters[i], left, right, path))
+    return heights[keep], diameters[keep]
 
 
 def make_trunk_radius_func(taper_heights, taper_diameters, field_dbh=None):
