@@ -59,7 +59,7 @@ from tree_geom_utils import (
 # trees - it names this tree's row in the shared results table (RESULTS_CSV,
 # see upsert_result() calls below) AND builds AdQSM_DIR/AdTree_DIR/INPUT_PLY
 # right below it automatically, so those don't need editing separately.
-TREE_NAME = "IND07_083"
+TREE_NAME = "IND01_054"
 
 # Base folder holding every tree's data, one subfolder per tree named after
 # TREE_NAME (e.g. ".../data/IND07_083/..."). Change this only if you move the
@@ -82,7 +82,7 @@ DATA_ROOT = r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstructio
 #       lets you try several radius thresholds in one run).
 #
 # Case (1) - single variant (default, still works exactly as before):
-AdQSM_DIR = os.path.join(DATA_ROOT, TREE_NAME, "05_base")
+AdQSM_DIR = os.path.join(DATA_ROOT, TREE_NAME, "05")
 
 # Case (2) - several variants. Leave ADQSM_VARIANTS empty/None to use only
 # AdQSM_DIR above (case 1). To use several variants instead, set BOTH:

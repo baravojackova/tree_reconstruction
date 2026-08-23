@@ -5,63 +5,15 @@
 %  ============================================================
 clear
 clc
-
 %% ------------------------------------------------------------
-%  1) USER SETTINGS - this is the ONLY block you need to edit
+%  1) USER SETTINGS - directory
 %  ------------------------------------------------------------
-run_tag = 'v3manual';    % change for every new settings variant
-
 % Folder with the TreeQSM source code (contains treeqsm.m, +myfun, ...)
 src_dir = 'C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\scripts\matlab';
 
 % Folder with the point clouds and where all results will be written
 data_dir = 'C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\scripts\matlab';
-
-% --- tree identification -------------------------------------
-tree_id   = 'IND07_083';           % short name used for ALL output files
-cloud_txt = 'IND07_083 - Cloud_branchbase_03.txt';   % input point cloud (text file, 3 columns X Y Z)
-
-% --- number of models ----------------------------------------
-n_models_first = 5;    % models per parameter combination, first (coarse) run
-n_models_opt   = 25;   % models with the optimal inputs, second run
-
-% --- parallel computing --------------------------------------
-use_parallel = true;   % true  = make_models_parallel
-                       % false = make_models (single core, fallback)
-n_workers = 0;         % 0 = derive automatically from the number of tasks
-
-% --- parameter ranges for define_input -----------------------
-% define_input(P, nPD1, nPD2Min, nPD2Max) = how many values are tested
-% for each of the three patch-diameter parameters
-% !!! if manual input nPD = 1
-nPD1    = 1;
-nPD2Min = 1;
-nPD2Max = 1;
-
-% --- MANUAL PatchDiam (see section 9) ------------------------
-manual_patchdiam = true;   % false = keep everything from define_input
-
-% PatchDiam1 (rought first cover) has to be t ≥ PatchDiam2Max (gentle cover)
-
-man_PD1    = 0.08;   % PatchDiam1     - AdQSM paper, Indonesian site 0,08
-man_PD2Min = 0.02;   % PatchDiam2Min
-man_PD2Max = 0.07;   % PatchDiam2Max
-man_MinCylRad = 0.0025; % MinCylRad
-
-% --- which model is simplified and exported ------------------
-use_optimal = true;    % true  = use the optimal model from select_optimum
-                       % false = use res.QSMs(model_index)
-model_index = 1;       % used only when use_optimal = false
-
-plot_optimal = true;   % true = plot the optimal QSM before simplification
-
-% --- simplification settings ---------------------------------
-simp_MaxOrder          = 10;
-simp_SmallRadii        = 0.05;
-simp_ReplaceIterations = 1;
-simp_Plot              = 1;
-simp_Disp              = 1;
-
+%
 %% ------------------------------------------------------------
 %  1b) CLEAN START (OPTIONAL) - delete ALL previously generated outputs
 %     WHAT this block does: wipes every file this script has ever produced
@@ -82,13 +34,13 @@ simp_Disp              = 1;
 % Switch 1 (master switch): must be hand-edited to true, otherwise this
 % whole cell is a no-op. This is the main safety net against accidentally
 % running this cell - the default (false) guarantees nothing happens.
-clean_start = false;
+clean_start = true;
 
 % Switch 2 (dry run): with clean_start = true, this decides whether files
 % are only LISTED (true, the safe default) or actually DELETED (false).
 % Keep this true the first time you enable clean_start, so you can review
 % exactly what would be removed before committing to it.
-clean_dry_run = true;
+clean_dry_run = false;
 
 if ~clean_start
     % Master switch is off - do nothing at all, not even list files.
@@ -114,48 +66,67 @@ else
         '*.mat', ...                    % catches saved point clouds too, e.g. "IND07_083.mat"
         };
 
-    % ---- 2. Scan data_dir for every pattern above and collect matches,
-    % skipping duplicates (a file can match more than one pattern, e.g.
-    % '*_res_*.mat' and the broad '*.mat').
+    % ---- 2. Scan for every pattern above and collect matches, skipping
+    % duplicates (a file can match more than one pattern, e.g. '*_res_*.mat'
+    % and the broad '*.mat').
+    %
+    % WHY two search folders: make_models()/make_models_parallel() (the
+    % TreeQSM functions called in section 12/15 below) do NOT save the
+    % '*_res_*.mat' result files directly into data_dir - they hard-code a
+    % "results" SUBFOLDER relative to the current directory (see
+    % make_models.m / make_models_parallel.m: str = ['results/', savename]).
+    % Since this script does cd(data_dir) in section 2, that means the
+    % res_*.mat files actually live in [data_dir '\results'], not in
+    % data_dir itself. Without also scanning that subfolder, this clean-up
+    % section would silently miss every result file and report success
+    % while leaving them all behind.
+    clean_search_dirs = {data_dir, fullfile(data_dir, 'results')};
+
     clean_files = struct('name', {}, 'folder', {}, 'bytes', {});
-    for p = 1:numel(clean_patterns)
-        pattern = clean_patterns{p};
-        matches = dir(fullfile(data_dir, pattern));
-        for m = 1:numel(matches)
-            f = matches(m);
-            if f.isdir
-                continue   % dir() wildcards should only ever hit files here, but skip folders just in case
-            end
-
-            % ---- 3. SAFETY GUARD: never delete anything with "Cloud" in
-            % its name, regardless of which pattern matched it. This is
-            % the protection for raw input point clouds - both the
-            % literal cloud_txt input file (e.g. "IND07_083 - Cloud_
-            % branchbase_03.txt") and any hypothetical .mat file that
-            % might one day be named similarly. Case-insensitive so
-            % "cloud", "Cloud", "CLOUD" etc. are all protected the same way.
-            if ~isempty(regexpi(f.name, 'Cloud', 'once'))
-                continue
-            end
-
-            % Skip if this exact file (by name+folder) is already in the list.
-            already_listed = false;
-            for e = 1:numel(clean_files)
-                if strcmp(clean_files(e).name, f.name) && strcmp(clean_files(e).folder, f.folder)
-                    already_listed = true;
-                    break
+    for d = 1:numel(clean_search_dirs)
+        search_dir = clean_search_dirs{d};
+        if ~isfolder(search_dir)
+            continue   % e.g. no "results" subfolder yet - nothing to scan there
+        end
+        for p = 1:numel(clean_patterns)
+            pattern = clean_patterns{p};
+            matches = dir(fullfile(search_dir, pattern));
+            for m = 1:numel(matches)
+                f = matches(m);
+                if f.isdir
+                    continue   % dir() wildcards should only ever hit files here, but skip folders just in case
                 end
-            end
-            if ~already_listed
-                % Assign field-by-field (not "clean_files(end+1) = f") because
-                % dir() structs carry more fields (date, datenum, isdir, ...)
-                % than the 3-field placeholder clean_files was initialized
-                % with above - a whole-struct assignment between structs with
-                % different fields errors out ("dissimilar structures").
-                idx = numel(clean_files) + 1;
-                clean_files(idx).name   = f.name;   %#ok<SAGROW>  % small list, growth cost is irrelevant here
-                clean_files(idx).folder = f.folder;
-                clean_files(idx).bytes  = f.bytes;
+
+                % ---- 3. SAFETY GUARD: never delete anything with "Cloud" in
+                % its name, regardless of which pattern matched it. This is
+                % the protection for raw input point clouds - both the
+                % literal cloud_txt input file (e.g. "IND07_083 - Cloud_
+                % branchbase_03.txt") and any hypothetical .mat file that
+                % might one day be named similarly. Case-insensitive so
+                % "cloud", "Cloud", "CLOUD" etc. are all protected the same way.
+                if ~isempty(regexpi(f.name, 'Cloud', 'once'))
+                    continue
+                end
+
+                % Skip if this exact file (by name+folder) is already in the list.
+                already_listed = false;
+                for e = 1:numel(clean_files)
+                    if strcmp(clean_files(e).name, f.name) && strcmp(clean_files(e).folder, f.folder)
+                        already_listed = true;
+                        break
+                    end
+                end
+                if ~already_listed
+                    % Assign field-by-field (not "clean_files(end+1) = f") because
+                    % dir() structs carry more fields (date, datenum, isdir, ...)
+                    % than the 3-field placeholder clean_files was initialized
+                    % with above - a whole-struct assignment between structs with
+                    % different fields errors out ("dissimilar structures").
+                    idx = numel(clean_files) + 1;
+                    clean_files(idx).name   = f.name;   %#ok<SAGROW>  % small list, growth cost is irrelevant here
+                    clean_files(idx).folder = f.folder;
+                    clean_files(idx).bytes  = f.bytes;
+                end
             end
         end
     end
@@ -196,6 +167,48 @@ else
         end
     end
 end
+%% ------------------------------------------------------------
+%  1c) USER SETTINGS - all manual setting
+%  ------------------------------------------------------------
+%
+run_tag = 'v1manual';    % change for every new settings variant
+% --- tree identification -------------------------------------
+tree_id   = 'IND01_054';           % short name used for ALL output files
+cloud_txt = 'IND01_054.txt';   % input point cloud (text file, 3 columns X Y Z)
+
+% --- number of models ----------------------------------------
+n_models_first = 5;    % models per parameter combination, first (coarse) run
+n_models_opt   = 25;   % models with the optimal inputs, second run
+
+% --- parallel computing --------------------------------------
+use_parallel = true;   % true  = make_models_parallel
+                       % false = make_models (single core, fallback)
+n_workers = 0;         % 0 = derive automatically from the number of tasks
+
+% --- parameter ranges for define_input -----------------------
+% define_input(P, nPD1, nPD2Min, nPD2Max) = how many values are tested
+% for each of the three patch-diameter parameters
+% !!! if manual input nPD = 1
+nPD1    = 1;
+nPD2Min = 1;
+nPD2Max = 1;
+
+% --- MANUAL PatchDiam (see section 9) ------------------------
+manual_patchdiam = true;   % false = keep everything from define_input
+
+% PatchDiam1 (rought first cover) has to be t ≥ PatchDiam2Max (gentle cover)
+
+man_PD1    = 0.08;   % PatchDiam1     - AdQSM paper, Indonesian site 0,08
+man_PD2Min = 0.02;   % PatchDiam2Min
+man_PD2Max = 0.07;   % PatchDiam2Max
+man_MinCylRad = 0.0025; % MinCylRad
+
+% --- which model is simplified and exported ------------------
+use_optimal = true;    % true  = use the optimal model from select_optimum
+                       % false = use res.QSMs(model_index)
+model_index = 1;       % used only when use_optimal = false
+
+plot_optimal = true;   % true = plot the optimal QSM before simplification
 
 %% ------------------------------------------------------------
 %  2) DERIVED NAMES - built automatically from tree_id + run_tag
@@ -432,6 +445,13 @@ fprintf('Loaded %d models from %s\n', numel(res_new.QSMs), res_new_file);
 % ReplaceIterations Number of iterations for replacing two concecutive
 %                     cylinders inside one branch with one longer cylinder
 %
+% --- simplification settings ---------------------------------
+simp_MaxOrder          = 8;
+simp_SmallRadii        = 0.005;
+simp_ReplaceIterations = 2;
+simp_Plot              = 1;
+simp_Disp              = 1;
+%-------------------------------------------------------------
 if iscell(OptModels)
     idx     = double(OptModels{1}(:))';
     idx_rep = double(OptModels{2}(1));
@@ -745,7 +765,7 @@ time_sum(1,2) = time_sum./60;         % total time in hours
 % --- choose the SOURCE model ------------------------------------
 % 'simplified' = QSM_simple (after simplify_qsm, section 16)
 % 'optimal'    = QSM_opt    (before simplification, section 16, output of select_optimum)
-ansys_source = 'optimal';   % <-- change to 'simplified' when you want the simplified export
+ansys_source = 'simplified';   % <-- change to 'simplified' when you want the simplified export
 
 switch ansys_source
     case 'simplified'
