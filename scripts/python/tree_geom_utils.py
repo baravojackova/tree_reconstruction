@@ -566,7 +566,11 @@ def report_thin_branch_volume(lengths, radii, order_arr, cut_cm=10.0, source_lab
     print("Volume removed   : %.3f m3 (%.1f %%)"
           % (vol_removed, (vol_removed / vol_total * 100.0) if vol_total else 0.0))
 
-    result = dict(total_vol=vol_total, total_vol_kept=vol_kept)
+    # n_cyl_kept: count of cylinders that passed the diameter filter (Task B) -
+    # reuses n_kept, which is already int(keep.sum()) computed above, so the
+    # count and the vol_kept/len_kept values below all come from the exact
+    # same "keep" mask instead of being recomputed separately.
+    result = dict(total_vol=vol_total, total_vol_kept=vol_kept, n_cyl_kept=n_kept)
     for label, key, mask in (("Stem", "trunk", is_stem), ("Branch", "branch", is_branch)):
         v_total = float(volumes[mask].sum())
         v_kept = float(volumes[mask & keep].sum())
@@ -594,7 +598,7 @@ def report_thin_branch_volume(lengths, radii, order_arr, cut_cm=10.0, source_lab
 
 
 def upsert_result(csv_path, tree, method, total, stem, branch, std, dbh=None, height=None, taper=None,
-                   trunk_len=None, branch_len=None, branch_filter="none"):
+                   trunk_len=None, branch_len=None, branch_filter="none", n_cylinders=None):
     """Insert/update one (tree, method) row in the shared master results CSV
     (see compare_volumes.py for its format). Reads csv_path if it exists
     (creating it with the header if not), removes any existing row with the
@@ -609,12 +613,22 @@ def upsert_result(csv_path, tree, method, total, stem, branch, std, dbh=None, he
     = trunk/branches restricted to diameter >= 10 cm (matching how the
     destructive reference was physically measured - see compare_volumes.py's
     header comment for why this distinction matters)."""
+    # n_cylinders is the LAST column (Task A), added after branch_filter so
+    # every existing column keeps its position - old rows/readers relying
+    # on column position elsewhere are unaffected.
     header = ["tree", "method", "total_m3", "stem_m3", "branch_m3", "std_m3",
               "dbh_m", "height_m", "taper_cm_per_m", "trunk_len_m", "branch_len_m",
-              "branch_filter"]
+              "branch_filter", "n_cylinders"]
 
     def fmt(x):
         return "" if x is None else "%.6f" % x
+
+    def fmt_int(x):
+        # Cylinder count is always a whole number (not a measured float
+        # like the other columns), so use "%d" instead of fmt()'s "%.6f" -
+        # still blank ("") when n_cylinders is None, same missing-value
+        # convention as every other optional column here.
+        return "" if x is None else "%d" % int(x)
 
     rows = []
     if os.path.exists(csv_path):
@@ -626,7 +640,7 @@ def upsert_result(csv_path, tree, method, total, stem, branch, std, dbh=None, he
                  "stem_m3": fmt(stem), "branch_m3": fmt(branch), "std_m3": fmt(std),
                  "dbh_m": fmt(dbh), "height_m": fmt(height), "taper_cm_per_m": fmt(taper),
                  "trunk_len_m": fmt(trunk_len), "branch_len_m": fmt(branch_len),
-                 "branch_filter": branch_filter})
+                 "branch_filter": branch_filter, "n_cylinders": fmt_int(n_cylinders)})
 
     with open(csv_path, "w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=header)

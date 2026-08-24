@@ -103,7 +103,7 @@ def extract_group(rows, group):
 
 
 def upsert_result(csv_path, tree, method, total, stem, branch, std, dbh=None, height=None, taper=None,
-                   trunk_len=None, branch_len=None, branch_filter="none"):
+                   trunk_len=None, branch_len=None, branch_filter="none", n_cylinders=None):
     """Insert/update one (tree, method) row in the shared master results CSV.
     Re-running overwrites the previous row instead of duplicating it.
     Backward compatible: if csv_path still has an older/shorter header, its
@@ -114,12 +114,21 @@ def upsert_result(csv_path, tree, method, total, stem, branch, std, dbh=None, he
     = trunk/branches restricted to diameter >= 10 cm (matching how the
     destructive reference was physically measured - see compare_volumes.py's
     header comment for why this distinction matters)."""
+    # n_cylinders is the LAST column (Task A) - kept in sync with
+    # tree_geom_utils.py's upsert_result() so both writers produce the
+    # exact same header/column order for the one shared CSV.
     header = ["tree", "method", "total_m3", "stem_m3", "branch_m3", "std_m3",
               "dbh_m", "height_m", "taper_cm_per_m", "trunk_len_m", "branch_len_m",
-              "branch_filter"]
+              "branch_filter", "n_cylinders"]
 
     def fmt(x):
         return "" if x is None else "%.6f" % x
+
+    def fmt_int(x):
+        # Cylinder count is a whole number, not a measured float, so use
+        # "%d" here instead of fmt()'s "%.6f" - still blank ("") when
+        # n_cylinders is None, same convention as every other optional column.
+        return "" if x is None else "%d" % int(x)
 
     rows = []
     if os.path.exists(csv_path):
@@ -131,7 +140,7 @@ def upsert_result(csv_path, tree, method, total, stem, branch, std, dbh=None, he
                  "stem_m3": fmt(stem), "branch_m3": fmt(branch), "std_m3": fmt(std),
                  "dbh_m": fmt(dbh), "height_m": fmt(height), "taper_cm_per_m": fmt(taper),
                  "trunk_len_m": fmt(trunk_len), "branch_len_m": fmt(branch_len),
-                 "branch_filter": branch_filter})
+                 "branch_filter": branch_filter, "n_cylinders": fmt_int(n_cylinders)})
 
     with open(csv_path, "w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=header)

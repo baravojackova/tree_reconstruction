@@ -95,15 +95,18 @@ REFERENCE_METHOD_NONE = "AdQSM (TreesParams)"
 # for the destructive reference (it can only ever be that), "none" for
 # everything else here (none of these starter rows are a "Filtered"/
 # "(>=10cm only)" variant).
+# n_cylinders (Task A) added as the LAST column, same as the real
+# upsert_result() writers - starter rows predate it too, so it's left
+# blank ("") here, same pattern already used for trunk_len_m/branch_len_m.
 STARTER_ROWS = [
     ["tree", "method", "total_m3", "stem_m3", "branch_m3", "std_m3",
-     "dbh_m", "height_m", "taper_cm_per_m", "trunk_len_m", "branch_len_m", "branch_filter"],
-    ["IND01_054", "Reference (destructive)", "1.7169", "1.2557", "0.4612", "", "", "", "", "", "", "10cm"],
-    ["IND01_054", "AdQSM (TreesParams)",     "1.6905", "1.1302", "0.5603", "", "", "", "", "", "", "none"],
-    ["IND01_054", "AdTree calibrated",       "1.9240", "1.3020", "0.6220", "", "", "", "", "", "", "none"],
-    ["IND01_054", "TreeQSM de Tanago (mean 20)", "3.0838", "1.8383", "1.2455", "0.3113", "", "", "", "", "", "none"],
-    ["IND01_054", "TreeQSM mine v1",         "3.6806", "1.5317", "2.1488", "0.1915", "", "", "", "", "", "none"],
-    ["IND01_054", "TreeQSM mine v2",         "3.9744", "1.5737", "2.4007", "0.1923", "", "", "", "", "", "none"],
+     "dbh_m", "height_m", "taper_cm_per_m", "trunk_len_m", "branch_len_m", "branch_filter", "n_cylinders"],
+    ["IND01_054", "Reference (destructive)", "1.7169", "1.2557", "0.4612", "", "", "", "", "", "", "10cm", ""],
+    ["IND01_054", "AdQSM (TreesParams)",     "1.6905", "1.1302", "0.5603", "", "", "", "", "", "", "none", ""],
+    ["IND01_054", "AdTree calibrated",       "1.9240", "1.3020", "0.6220", "", "", "", "", "", "", "none", ""],
+    ["IND01_054", "TreeQSM de Tanago (mean 20)", "3.0838", "1.8383", "1.2455", "0.3113", "", "", "", "", "", "none", ""],
+    ["IND01_054", "TreeQSM mine v1",         "3.6806", "1.5317", "2.1488", "0.1915", "", "", "", "", "", "none", ""],
+    ["IND01_054", "TreeQSM mine v2",         "3.9744", "1.5737", "2.4007", "0.1923", "", "", "", "", "", "none", ""],
 ]
 
 
@@ -136,6 +139,10 @@ def load_results(path):
                 # (an older row, from before this column existed) both fall
                 # back to "none" - the "or" chain handles both None and "".
                 "branch_filter": (r.get("branch_filter") or "").strip() or "none",
+                # n_cylinders (Task A): same to_float() helper as every other
+                # numeric column - already returns None for blank/missing
+                # cells (e.g. rows from before this column existed).
+                "n_cylinders": to_float(r.get("n_cylinders")),
             })
     return rows
 

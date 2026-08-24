@@ -735,20 +735,39 @@ V_filtered = [Vtotal_filt, Vstem_filt, Vbranch_filt];
 fprintf('Check: stem+branch total = %.3f m3 (should equal %.3f m3)\n', ...
     Vstem_total + Vbranch_total, sum(V_cyl));
 %
+% ncyl(QA): companion to vols() above - returns an n-by-1 vector with the
+% number of cylinders in each model of QA (one count per model, same row
+% order as vols(QA)). Used to build the new "n_cylinders" column of
+% VolumeTable below (Task C): every model in a group gets its cylinder
+% count averaged into that group's row, the same way vols() values get
+% averaged into Mean_m3 - so cylinder count is tracked "for all models",
+% not just a single representative one.
+ncyl = @(QA) arrayfun(@(Q) numel(Q.cylinder.radius), QA(:));
+
 % --- collect the groups --------------------------------------
 V_all  = vols(res.QSMs);              % whole parameter grid
 V_opt  = vols(res.QSMs(idx));         % winning combination
 V_rep  = vols(res.QSMs(idx_rep));     % the single model that gets simplified
 V_simp = vols(QSM_simple(end));       % simplified model
 
-groups = {'All inputs',       V_all;
-          'Optimal',          V_opt;
-          'Optimal (single)', V_rep};
+% Ncyl_* vectors mirror V_* above, row-for-row (same models, same order) -
+% this is what lets the table-build loop just do mean(Ncyl_*) the same
+% way it already does mean(V_*).
+Ncyl_all = ncyl(res.QSMs);
+Ncyl_opt = ncyl(res.QSMs(idx));
+Ncyl_rep = ncyl(res.QSMs(idx_rep));
+
+% groups now has a THIRD column: the per-model cylinder-count vector
+% matching that row's V_matrix (Task C). Column order stays {name, V, Ncyl}.
+groups = {'All inputs',       V_all,  Ncyl_all;
+          'Optimal',          V_opt,  Ncyl_opt;
+          'Optimal (single)', V_rep,  Ncyl_rep};
 
 % Estimated = optimal group + second run, for a better std estimate
 if exist('res_new', 'var')
     V_est = [V_opt; vols(res_new.QSMs)];
-    groups(end+1,:) = {'Estimated', V_est};
+    Ncyl_est = [Ncyl_opt; ncyl(res_new.QSMs)];   % same concatenation as V_est, so rows still line up
+    groups(end+1,:) = {'Estimated', V_est, Ncyl_est};
     fprintf('Estimated group: %d models.\n', size(V_est,1));
 else
     warning('res_new not found - run steps 13 and 14 to get the Estimated row.');
@@ -756,7 +775,8 @@ end
 
 % Keep 'Simplified' (uncleaned QSM_simple) as-is for side-by-side
 % comparison against the cleaned version added right below.
-groups(end+1,:) = {'Simplified', V_simp};
+Ncyl_simp = ncyl(QSM_simple(end));
+groups(end+1,:) = {'Simplified', V_simp, Ncyl_simp};
 
 % QSM_simple_clean only exists if section 15c actually removed islands
 % (it is NOT run/created when island_groups was empty - see its comment
@@ -765,7 +785,8 @@ groups(end+1,:) = {'Simplified', V_simp};
 % both are kept side by side in VolumeTable/volumes_*.csv for comparison.
 if exist('QSM_simple_clean', 'var')
     V_simp_clean = vols(QSM_simple_clean(end));   % same vols() helper used for V_simp above
-    groups(end+1,:) = {'Simplified (no islands)', V_simp_clean};
+    Ncyl_simp_clean = ncyl(QSM_simple_clean(end));
+    groups(end+1,:) = {'Simplified (no islands)', V_simp_clean, Ncyl_simp_clean};
 else
     fprintf('QSM_simple_clean not found - skipping "Simplified (no islands)" group (no islands detected, or section not run).\n');
 end
@@ -774,7 +795,13 @@ end
 % (set in section 1c). This is the switch itself: if it's false, this row
 % is simply never appended to `groups`, so it never reaches VolumeTable.
 if export_filtered_10cm
-    groups(end+1,:) = {'Filtered <10cm', V_filtered};
+    % This group has no separate QSM struct of its own - it's just QSM_opt's
+    % cylinders restricted by the "keep" mask (built earlier in this same
+    % section, diameter >= cut_cm). So its cylinder count is simply how
+    % many entries in "keep" are true, i.e. sum(keep) - already the exact
+    % same count used for Cylinders kept/Vtotal_filt above.
+    Ncyl_filtered = sum(keep);
+    groups(end+1,:) = {'Filtered <10cm', V_filtered, Ncyl_filtered};
 end
 
 % --- build the table -----------------------------------------
@@ -782,6 +809,7 @@ attr = ["Total"; "Stem"; "Branches"];
 
 Group = strings(0,1); Attribute = strings(0,1);
 N = []; Mean_m3 = []; Std_m3 = []; CV_pct = [];
+N_cylinders = [];   % Task C: new column, average cylinder count for this group
 
 for g = 1:size(groups,1)
     V = groups{g,2};
@@ -794,19 +822,32 @@ for g = 1:size(groups,1)
     end
     cv = s ./ m .* 100;            % coefficient of variation [%]
 
+    % Average cylinder count across every model in this group, same idea
+    % as mean(V,1) above but for Ncyl - round() because a cylinder count
+    % is always a whole number, and averaging several models' counts can
+    % otherwise land on a fraction (e.g. 5 models with 100/101 cylinders).
+    ncyl_mean = round(mean(groups{g,3}));
+
     for a = 1:3
-        Group(end+1,1)     = groups{g,1};
-        Attribute(end+1,1) = attr(a);
-        N(end+1,1)         = n;
-        Mean_m3(end+1,1)   = m(a);
-        Std_m3(end+1,1)    = s(a);
-        CV_pct(end+1,1)    = cv(a);
+        Group(end+1,1)       = groups{g,1};
+        Attribute(end+1,1)   = attr(a);
+        N(end+1,1)           = n;
+        Mean_m3(end+1,1)     = m(a);
+        Std_m3(end+1,1)      = s(a);
+        CV_pct(end+1,1)      = cv(a);
+        % Same value repeated for all 3 attribute rows of this group - a
+        % cylinder count belongs to the whole model, not to one specific
+        % attribute (Total/Stem/Branches), same pattern already used for N.
+        N_cylinders(end+1,1) = ncyl_mean;
     end
 end
 
 Tree = repmat(string(tree_id), height(Group), 1);
 Run  = repmat(string(run_tag), height(Group), 1);
-VolumeTable = table(Tree, Run, Group, Attribute, N, Mean_m3, Std_m3, CV_pct);
+% N_cylinders added as the LAST column (Task C) - existing columns/order
+% (Tree..CV_pct) are unchanged so any code still expecting the old shape
+% keeps working, it just also gets this one extra column now.
+VolumeTable = table(Tree, Run, Group, Attribute, N, Mean_m3, Std_m3, CV_pct, N_cylinders);
 VolumeTable.Properties.Description = tree_id;
 disp(VolumeTable);
 

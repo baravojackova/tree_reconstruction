@@ -495,7 +495,14 @@ for variant_label, taper_file, branch_file, params_file in ADQSM_VARIANT_LIST:
                           # trunk_len/branch_len: already in this dict (volume_stats()
                           # computes them the same way as trunk_vol/branch_vol).
                           orig_stats["trunk_len"], orig_stats["branch_len"],
-                          branch_filter="none")
+                          branch_filter="none",
+                          # n_cylinders (Task B): total cylinder count for this
+                          # threshold's reconstruction. Raw and calibrated share
+                          # the exact same count (see the calibrated call below) -
+                          # calibration only replaces radii, it never adds,
+                          # removes, or splits cylinders, so len(cyl) here is
+                          # identical to len(cyl) at the calibrated row.
+                          n_cylinders=len(cyl))
             # "AdTree calibrated" DOES depend on which AdQSM variant it was
             # calibrated against, so it gets the variant suffix (when set).
             # NOTE: radius calibration only rescales/replaces RADII, never the
@@ -515,7 +522,13 @@ for variant_label, taper_file, branch_file, params_file in ADQSM_VARIANT_LIST:
                           cal_stats["total_vol"], cal_stats["trunk_vol"], cal_stats["branch_vol"], None,
                           cal_dbh, height_m, cal_taper,
                           cal_stats["trunk_len"], cal_stats["branch_len"],
-                          branch_filter="none")
+                          branch_filter="none",
+                          # n_cylinders (Task B): same count as the "AdTree raw"
+                          # row above - calibration only rescales/replaces radii
+                          # (see line 404's cyl reassignment), it never adds,
+                          # removes, or splits cylinders, so the two rows sharing
+                          # this exact count is expected, not a bug.
+                          n_cylinders=len(cyl))
             # Optional THIRD row: same tree/DBH/height/taper, but total/stem/branch
             # volume restricted to cylinders >= THIN_BRANCH_CUT_CM (like TreeQSM's
             # "...Filtered..." rows) - lets compare_volumes.py/plot_volumes.py show
@@ -523,9 +536,9 @@ for variant_label, taper_file, branch_file, params_file in ADQSM_VARIANT_LIST:
             if WRITE_THIN_BRANCH_FILTERED_ROW:
                 # branch_filter = "10cm": this row IS the diameter-cut-off variant
                 # (its name already says "(>=10cm only)") - trunk_len/branch_len
-                # are left as None here since report_thin_branch_volume() doesn't
-                # currently track filtered LENGTH, only filtered volume (see the
-                # summary from when this row was added).
+                # AND n_cylinders below all come from report_thin_branch_volume(),
+                # which tracks filtered length/volume/count together (see its
+                # "..._len_kept"/"n_cyl_kept" keys).
                 # SEG_VARIANT_SUFFIX at the very end again, same rule as above.
                 upsert_result(RESULTS_CSV, TREE_NAME,
                               "AdTree calibrated r%dmm%s (>=%.0fcm only)%s"
@@ -540,7 +553,12 @@ for variant_label, taper_file, branch_file, params_file in ADQSM_VARIANT_LIST:
                               # "(>=10cm only)" row finally gets trunk_len_m/branch_len_m
                               # filled in instead of being left blank.
                               cal_thin["trunk_len_kept"], cal_thin["branch_len_kept"],
-                              branch_filter="10cm")
+                              branch_filter="10cm",
+                              # n_cylinders (Task B): count of cylinders that passed
+                              # the >=10cm diameter filter, from report_thin_branch_volume()'s
+                              # new "n_cyl_kept" key (same "keep" mask used for
+                              # the vol_kept/len_kept values above).
+                              n_cylinders=cal_thin["n_cyl_kept"])
 
                 # Same idea as the THIRD row above, but for the RAW (uncalibrated)
                 # cylinders instead of the calibrated ones - uses orig_thin
@@ -563,7 +581,11 @@ for variant_label, taper_file, branch_file, params_file in ADQSM_VARIANT_LIST:
                               # Same fix as the calibrated row above, using the "raw"
                               # (uncalibrated) cylinder set's kept lengths instead.
                               orig_thin["trunk_len_kept"], orig_thin["branch_len_kept"],
-                              branch_filter="10cm")
+                              branch_filter="10cm",
+                              # n_cylinders (Task B): same idea as the calibrated
+                              # row above, using orig_thin's "n_cyl_kept" (the raw/
+                              # uncalibrated cylinder set's filtered count) instead.
+                              n_cylinders=orig_thin["n_cyl_kept"])
 
             print("  DBH (at %.1f m)   : raw AdTree = %s   |   calibrated = %s"
                   % (TAPER_H_LOWER, _fmt_dbh(raw_dbh), _fmt_dbh(cal_dbh)))
