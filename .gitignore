@@ -16,6 +16,8 @@
 !scripts/python/reference_volume.py
 !scripts/python/tree_geom_utils.py
 !scripts/python/volume_results.py
+!scripts/python/visualize_pointcloud_region.py
+!scripts/python/adqsm_thin_branch_length_share.py
 
 !scripts/matlab/
 !scripts/matlab/runsken.m
