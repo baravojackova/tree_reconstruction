@@ -978,23 +978,23 @@ end
 %% ------------------------------------------------------------
 %  19) EXPORT - table with the input parameters of each model
 %  ------------------------------------------------------------
-n = length(QSM_simple);
-info = table('Size', [n 7], ...
-    'VariableTypes', {'string','double','double','double','double','double','double'}, ...
-    'VariableNames', {'Name','tree','model','PD1','PD2Min','PD2Max','Time'});
-
-for i = 1:n
-    info.Name(i)   = QSM_simple(i).rundata.inputs.name;
-    info.tree(i)   = QSM_simple(i).rundata.inputs.tree;
-    info.model(i)  = QSM_simple(i).rundata.inputs.model;
-    info.PD1(i)    = QSM_simple(i).rundata.inputs.PatchDiam1;
-    info.PD2Min(i) = QSM_simple(i).rundata.inputs.PatchDiam2Min;
-    info.PD2Max(i) = QSM_simple(i).rundata.inputs.PatchDiam2Max;
-    info.Time(i)   = QSM_simple(i).rundata.time(end,1)./60;   % minutes
-end
-
-time_sum      = sum(info.Time);       % total time in minutes
-time_sum(1,2) = time_sum./60;         % total time in hours
+% n = length(QSM_simple);
+% info = table('Size', [n 7], ...
+%     'VariableTypes', {'string','double','double','double','double','double','double'}, ...
+%     'VariableNames', {'Name','tree','model','PD1','PD2Min','PD2Max','Time'});
+% 
+% for i = 1:n
+%     info.Name(i)   = QSM_simple(i).rundata.inputs.name;
+%     info.tree(i)   = QSM_simple(i).rundata.inputs.tree;
+%     info.model(i)  = QSM_simple(i).rundata.inputs.model;
+%     info.PD1(i)    = QSM_simple(i).rundata.inputs.PatchDiam1;
+%     info.PD2Min(i) = QSM_simple(i).rundata.inputs.PatchDiam2Min;
+%     info.PD2Max(i) = QSM_simple(i).rundata.inputs.PatchDiam2Max;
+%     info.Time(i)   = QSM_simple(i).rundata.time(end,1)./60;   % minutes
+% end
+% 
+% time_sum      = sum(info.Time);       % total time in minutes
+% time_sum(1,2) = time_sum./60;         % total time in hours
 
 %% ------------------------------------------------------------
 %  20) EXPORT geometry for ANSYS

@@ -209,7 +209,7 @@ def summarize(values):
 
 
 def upsert_result(csv_path, tree, method, total, stem, branch, std, dbh=None, height=None, taper=None,
-                   trunk_len=None, branch_len=None, branch_filter="none"):
+                   trunk_len=None, branch_len=None, branch_filter="none", n_cylinders=None):
     """Insert/update one (tree, method) row in the shared master results CSV
     (see compare_volumes.py for its format). Reads csv_path if it exists
     (creating it with the header if not), removes any existing row with the
@@ -223,13 +223,29 @@ def upsert_result(csv_path, tree, method, total, stem, branch, std, dbh=None, he
     (no fmt()): "none" = full/unfiltered reconstruction (the default), "10cm"
     = trunk/branches restricted to diameter >= 10 cm (matching how the
     destructive reference was physically measured - see compare_volumes.py's
-    header comment for why this distinction matters)."""
+    header comment for why this distinction matters).
+
+    n_cylinders defaults to None (-> blank cell) so other/future callers in
+    this file that don't have a cylinder count stay blank rather than
+    wrongly writing 0 - but the two calls actually used below DO pass a
+    real value (mean_n_total / mean_n_kept, already computed from each
+    realization file's cylinder count)."""
+    # n_cylinders is the LAST column - kept in sync with the header used by
+    # every other upsert_result() copy (tree_geom_utils.py,
+    # import_matlab_results.py, reference_volume.py) so they all write/read
+    # the SAME shared volume_results.csv without column mismatches.
     header = ["tree", "method", "total_m3", "stem_m3", "branch_m3", "std_m3",
               "dbh_m", "height_m", "taper_cm_per_m", "trunk_len_m", "branch_len_m",
-              "branch_filter"]
+              "branch_filter", "n_cylinders"]
 
     def fmt(x):
         return "" if x is None else "%.6f" % x
+
+    def fmt_int(x):
+        # Cylinder count is a whole number, not a measured float, so use
+        # "%d" here instead of fmt()'s "%.6f" - still blank ("") when
+        # n_cylinders is None, same convention as every other optional column.
+        return "" if x is None else "%d" % int(x)
 
     rows = []
     if os.path.exists(csv_path):
@@ -241,7 +257,7 @@ def upsert_result(csv_path, tree, method, total, stem, branch, std, dbh=None, he
                  "stem_m3": fmt(stem), "branch_m3": fmt(branch), "std_m3": fmt(std),
                  "dbh_m": fmt(dbh), "height_m": fmt(height), "taper_cm_per_m": fmt(taper),
                  "trunk_len_m": fmt(trunk_len), "branch_len_m": fmt(branch_len),
-                 "branch_filter": branch_filter})
+                 "branch_filter": branch_filter, "n_cylinders": fmt_int(n_cylinders)})
 
     with open(csv_path, "w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=header)
@@ -363,7 +379,12 @@ std_total = summarize(totals)[1]
 upsert_result(RESULTS_CSV, TREE_NAME, METHOD_LABEL,
               mean_total, mean_stem, mean_branch, std_total,
               mean_dbh, mean_height, mean_taper,
-              mean_trunk_len, mean_branch_len, branch_filter="none")
+              mean_trunk_len, mean_branch_len, branch_filter="none",
+              # n_cylinders: mean_n_total (already computed above from
+              # n_totals, one count per realization file) rounded to the
+              # nearest whole number - a cylinder count can't be fractional,
+              # same reasoning as runsken.m's round(mean(...)) for N_cylinders.
+              n_cylinders=round(mean_n_total))
 
 # ---- SECOND row: same realizations, but with the 10 cm cut-off applied ----
 # total/stem/branch = the FILTERED mean/std computed above (summarize(), the
@@ -381,7 +402,12 @@ upsert_result(RESULTS_CSV, TREE_NAME, METHOD_LABEL_10CM,
               mean_total_10cm, mean_stem_10cm, mean_branch_10cm, std_total_10cm,
               mean_dbh, mean_height, mean_taper,
               mean_trunk_len_10cm, mean_branch_len_10cm,
-              branch_filter="10cm")
+              branch_filter="10cm",
+              # n_cylinders: mean_n_kept (already computed above from
+              # n_kepts) - the count of cylinders that passed the >=10cm
+              # filter, mirroring "n_cyl_kept" in tree_geom_utils.py's
+              # report_thin_branch_volume() for the same filtered-row idea.
+              n_cylinders=round(mean_n_kept))
 
 # Export the per-realization results and summary statistics to CSV.
 if CSV_PATH:

@@ -35,7 +35,7 @@ FILE_PATTERN = "volumes_*.csv"
 # Which Group to import from each table. "Estimated" uses the optimal
 # models plus the second run, so it has the most reliable mean and std.
 # Other valid choices: "Optimal", "All inputs", "Optimal (single)", "Simplified", "Filtered <10cm", "Simplified (no islands)".
-IMPORT_GROUP = "Simplified (no islands)"  # the de Tanago field crew physically only measured sections down to a 10 cm taper diameter (see AdQSM.pdf Appendix A) - this reference NEVER has a "none" (full/unfiltered) version, by methodology.
+IMPORT_GROUP = "Optimal (single)"  # the de Tanago field crew physically only measured sections down to a 10 cm taper diameter (see AdQSM.pdf Appendix A) - this reference NEVER has a "none" (full/unfiltered) version, by methodology.
 
 # Shared master results table (read by compare_volumes.py).
 RESULTS_CSV = "volume_results.csv"
@@ -82,7 +82,8 @@ def read_matlab_table(path):
 
 def extract_group(rows, group):
     """From one MATLAB table, pull the Total/Stem/Branches values of one Group.
-    Returns (tree, run, total, stem, branch, std_of_total) or None if missing."""
+    Returns (tree, run, total, stem, branch, std_of_total, n_cylinders) or
+    None if missing."""
     picked = [r for r in rows if r["Group"].strip() == group]
     if not picked:
         return None
@@ -99,7 +100,16 @@ def extract_group(rows, group):
     total, std_total = by_attr.get("Total", (None, None))
     stem = by_attr.get("Stem", (None, None))[0]
     branch = by_attr.get("Branches", (None, None))[0]
-    return tree, run, total, stem, branch, std_total
+
+    # N_cylinders (runsken.m section 17, Task C): ONE value per group, the
+    # same on all 3 of that group's Attribute rows (Total/Stem/Branches) -
+    # so any picked row has it, picked[0] is fine. r.get(...) (not r[...])
+    # + to_float(...) keeps this working on OLDER volumes_*.csv files
+    # written before this column existed (to_float() already returns None
+    # for a missing/blank cell, same as every other optional field here).
+    n_cylinders = to_float(picked[0].get("N_cylinders"))
+
+    return tree, run, total, stem, branch, std_total, n_cylinders
 
 
 def upsert_result(csv_path, tree, method, total, stem, branch, std, dbh=None, height=None, taper=None,
@@ -183,7 +193,7 @@ for path in files:
               % (os.path.basename(path), IMPORT_GROUP))
         continue
 
-    tree_raw, run, total, stem, branch, std = found
+    tree_raw, run, total, stem, branch, std, n_cylinders = found
     tree = TREE_NAME_MAP.get(tree_raw, tree_raw)      # map short id -> full id
     method = "TreeQSM mine (%s, %s)" % (run, IMPORT_GROUP)
 
@@ -244,7 +254,12 @@ for path in files:
               % (tree, run, trunk_len_file, branch_len_file))
 
     upsert_result(RESULTS_CSV, tree, method, total, stem, branch, std, dbh, height, taper,
-                  trunk_len, branch_len, branch_filter=branch_filter)
+                  trunk_len, branch_len, branch_filter=branch_filter,
+                  # n_cylinders: read straight from VolumeTable's own
+                  # N_cylinders column (runsken.m section 17, Task C) via
+                  # extract_group() above - None (-> blank) on an older
+                  # volumes_*.csv written before that column existed.
+                  n_cylinders=n_cylinders)
     imported += 1
 
     def show(x):

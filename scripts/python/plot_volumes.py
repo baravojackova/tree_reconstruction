@@ -327,16 +327,23 @@ def plot_tree_overview(rows, tree, branch_filter, color_map):
         ("taper",      "Taper [cm/m]"),
         ("trunk_len",  "Trunk length [m]"),
         ("branch_len", "Branch length [m]"),
+        # n_cylinders: was in volume_results.csv/load_results() already
+        # (Task A), just never shown in any chart - added here as a 9th
+        # panel so you can see, per method, how many cylinders its
+        # reconstruction used (methods with no count, e.g. the destructive
+        # reference, are simply skipped in this panel like any other
+        # missing value - see the "present_methods" filter below).
+        ("n_cylinders", "Number of cylinders"),
     ]
 
-    # GRID SIZE CHOICE: 2x4 (8 slots), not 3x3 (9 slots, 1 always empty).
-    # With exactly 8 fields above, 2x4 fills the grid perfectly - no empty
-    # panel to explain away, and it only requires widening the figure
-    # (16 -> 21, keeping each panel roughly the same width as before: 16/3
-    # cols =~5.3 per panel before, 21/4 cols =~5.25 per panel now) rather
-    # than also changing the row count / height, which would touch more of
-    # the layout code below (suptitle/legend vertical spacing) than necessary.
-    fig, axes = plt.subplots(2, 4, figsize=(21, 9))
+    # GRID SIZE CHOICE: 3x3 (9 slots), matches the 9 fields above exactly -
+    # no empty panel to explain away. (Previously 2x4/8 fields fit its own
+    # grid perfectly too, for the same reason - adding n_cylinders as a 9th
+    # field made 3x3 the new perfect fit instead of leaving an empty slot
+    # in a 2x5 grid.) figsize scaled to keep each panel roughly the same
+    # size as before (21/4 =~5.25 wide, 9/2 =~4.5 tall per panel before ->
+    # 3*5.25 =~16 wide, 3*4.5 =~13.5 tall now).
+    fig, axes = plt.subplots(3, 3, figsize=(16, 13.5))
 
     for ax, (field_key, subplot_title) in zip(axes.flat, fields):
         # Skip methods with no value (None) for THIS field entirely, instead

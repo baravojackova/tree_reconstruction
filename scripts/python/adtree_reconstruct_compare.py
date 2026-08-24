@@ -103,7 +103,7 @@ INPUT_PLY = os.path.join(AdTree_DIR, "%s - Cloud_skeleton.ply" % TREE_NAME)
 # Remove all branches whose radius is below this threshold. The trunk (branch order 0) is never removed, even if its radius is below the threshold.
 # Example of a single variant:   RADIUS_THRESHOLDS = [0.010]
 # Example of several variants:   RADIUS_THRESHOLDS = [0.010, 0.020, 0.030]
-RADIUS_THRESHOLDS = [0.01]        # 0.030 m = 30 mm radius (60 mm diameter)
+RADIUS_THRESHOLDS = [0.005]        # 0.030 m = 30 mm radius (60 mm diameter)
 
 # Adaptive segment length used for resampling (in METERS). The target length at
 # a given point is SEG_LEN_K * local_radius, clamped to [SEG_LEN_MIN, SEG_LEN_MAX]:

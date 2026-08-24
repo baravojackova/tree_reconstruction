@@ -124,7 +124,7 @@ def stem_diameter_at_height(stem_sections, h):
 
 
 def upsert_result(csv_path, tree, method, total, stem, branch, std, dbh=None, height=None, taper=None,
-                   trunk_len=None, branch_len=None, branch_filter="none"):
+                   trunk_len=None, branch_len=None, branch_filter="none", n_cylinders=None):
     """Insert/update one (tree, method) row in the shared master results CSV
     (see compare_volumes.py for its format). Reads csv_path if it exists
     (creating it with the header if not), removes any existing row with the
@@ -138,13 +138,28 @@ def upsert_result(csv_path, tree, method, total, stem, branch, std, dbh=None, he
     (no fmt()): "none" = full/unfiltered reconstruction (the default), "10cm"
     = trunk/branches restricted to diameter >= 10 cm (matching how the
     destructive reference was physically measured - see compare_volumes.py's
-    header comment for why this distinction matters)."""
+    header comment for why this distinction matters).
+
+    n_cylinders is left as None (-> blank cell) by every call in THIS file:
+    the destructive field reference has no reconstructed cylinder model at
+    all, so there is no cylinder count to report - blank is the correct
+    value here, not 0 (0 would wrongly imply "a model with zero cylinders")."""
+    # n_cylinders is the LAST column - kept in sync with the header used by
+    # every other upsert_result() copy (tree_geom_utils.py,
+    # import_matlab_results.py, qsm_volume_mean.py) so they all write/read
+    # the SAME shared volume_results.csv without column mismatches.
     header = ["tree", "method", "total_m3", "stem_m3", "branch_m3", "std_m3",
               "dbh_m", "height_m", "taper_cm_per_m", "trunk_len_m", "branch_len_m",
-              "branch_filter"]
+              "branch_filter", "n_cylinders"]
 
     def fmt(x):
         return "" if x is None else "%.6f" % x
+
+    def fmt_int(x):
+        # Cylinder count is a whole number, not a measured float, so use
+        # "%d" here instead of fmt()'s "%.6f" - still blank ("") when
+        # n_cylinders is None, same convention as every other optional column.
+        return "" if x is None else "%d" % int(x)
 
     rows = []
     if os.path.exists(csv_path):
@@ -156,7 +171,7 @@ def upsert_result(csv_path, tree, method, total, stem, branch, std, dbh=None, he
                  "stem_m3": fmt(stem), "branch_m3": fmt(branch), "std_m3": fmt(std),
                  "dbh_m": fmt(dbh), "height_m": fmt(height), "taper_cm_per_m": fmt(taper),
                  "trunk_len_m": fmt(trunk_len), "branch_len_m": fmt(branch_len),
-                 "branch_filter": branch_filter})
+                 "branch_filter": branch_filter, "n_cylinders": fmt_int(n_cylinders)})
 
     with open(csv_path, "w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=header)
