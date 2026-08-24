@@ -210,6 +210,16 @@ model_index = 1;       % used only when use_optimal = false
 
 plot_optimal = true;   % true = plot the optimal QSM before simplification
 
+% Export the "Filtered <10cm" group (branches/trunk restricted to
+% diameter >= 10 cm, matching how the destructive field reference was
+% physically measured) into VolumeTable and into the
+% trunklen_filtered_/branchlen_filtered_ text files. Set to false to
+% skip this export entirely (e.g. when you don't need a same-cutoff
+% comparison against the destructive reference for this run) - the
+% diagnostic cylinder/volume printout in the console still runs either
+% way, only the CSV/text-file EXPORT is affected.
+export_filtered_10cm = true;
+
 %% ------------------------------------------------------------
 %  2) DERIVED NAMES - built automatically from tree_id + run_tag
 %     Normally you do NOT edit this block
@@ -586,7 +596,13 @@ else
 end
 
 groups(end+1,:) = {'Simplified', V_simp};
-groups(end+1,:) = {'Filtered <10cm', V_filtered};
+
+% Only add the "Filtered <10cm" group when export_filtered_10cm is true
+% (set in section 1c). This is the switch itself: if it's false, this row
+% is simply never appended to `groups`, so it never reaches VolumeTable.
+if export_filtered_10cm
+    groups(end+1,:) = {'Filtered <10cm', V_filtered};
+end
 
 % --- build the table -----------------------------------------
 attr = ["Total"; "Stem"; "Branches"];
@@ -727,17 +743,24 @@ fclose(fid);
 % the "Filtered <10cm" group specifically - different filename so neither
 % overwrites the other, and import_matlab_results.py picks the right one
 % based on which group it's importing.
-trunklen_filtered_file = ['trunklen_filtered_' tree_id '_' run_tag '.txt'];
-fid = fopen(trunklen_filtered_file, 'w');
-fprintf(fid, '%.6f', Lstem_filt);   % filtered trunk/stem length [m]
-fprintf('Filtered trunk length exported to %s\n', trunklen_filtered_file);
-fclose(fid);
-%
-branchlen_filtered_file = ['branchlen_filtered_' tree_id '_' run_tag '.txt'];
-fid = fopen(branchlen_filtered_file, 'w');
-fprintf(fid, '%.6f', Lbranch_filt);   % filtered branch length [m]
-fprintf('Filtered branch length exported to %s\n', branchlen_filtered_file);
-fclose(fid);
+% Same switch as the "Filtered <10cm" VolumeTable row above (section 1c):
+% when export_filtered_10cm is false, skip writing these two text files
+% entirely, instead of writing files nobody asked for on this run.
+if export_filtered_10cm
+    trunklen_filtered_file = ['trunklen_filtered_' tree_id '_' run_tag '.txt'];
+    fid = fopen(trunklen_filtered_file, 'w');
+    fprintf(fid, '%.6f', Lstem_filt);   % filtered trunk/stem length [m]
+    fprintf('Filtered trunk length exported to %s\n', trunklen_filtered_file);
+    fclose(fid);
+    %
+    branchlen_filtered_file = ['branchlen_filtered_' tree_id '_' run_tag '.txt'];
+    fid = fopen(branchlen_filtered_file, 'w');
+    fprintf(fid, '%.6f', Lbranch_filt);   % filtered branch length [m]
+    fprintf('Filtered branch length exported to %s\n', branchlen_filtered_file);
+    fclose(fid);
+else
+    fprintf('export_filtered_10cm = false - skipping trunklen_filtered_*.txt and branchlen_filtered_*.txt\n');
+end
 %% ------------------------------------------------------------
 %  19) EXPORT - table with the input parameters of each model
 %  ------------------------------------------------------------

@@ -278,7 +278,7 @@ def error_metrics(rows, reference_method):
 
     for r in results:
         print("%-28s %5d %9.3f %9.3f %9.3f %9.1f" %
-              (r["method"][:28], r["n"], r["bias"], r["mae"], r["rmse"], r["cv_rmse"]))
+              (r["method"][:35], r["n"], r["bias"], r["mae"], r["rmse"], r["cv_rmse"]))
     print("(Bias/MAE/RMSE in m^3. n = number of trees compared. With one tree,")
     print(" MAE = RMSE = |error| and CV-RMSE is that error relative to the reference.)")
     print()
