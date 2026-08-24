@@ -10,7 +10,7 @@
 !
 !----------vstupni parametry
 n_sl=10					!pocet sloupcu
-n_rad=2668				!number of rows - keep the same number without first row (0)
+n_rad=4079				!number of rows - keep the same number without first row (0)
 d_kmen=0.64
 t_ks=2*d_kmen				!tloustka KS
 e_sizetree=0.1
@@ -24,7 +24,7 @@ alfa=14.2
 !
 !nacteni tabulky s geometrii ze skenu (x,y,z,lenght,radius,xaxis,yaxis,zaxis,parent,branchorder)
 *dim,geom,table,n_rad,n_sl,1,poradi,vlast
-*tread,geom,geom_IND01_054_v1manual_1,txt
+*tread,geom,geom_IND01_054_r10mm_seg100-500-k50,txt
 !
 !vypocet pozice druhehu bodu strednice valce
 *dim,geom_2,array,n_rad,5,1,poradi,vlast
@@ -260,7 +260,6 @@ finish
 !
 !---------------static solution a postpr. k buk babice [m,N,Pa,kg/m3]
 /sol
-/eof
 antype,0,
 nlgeom,off
 !                                                                                                       
@@ -291,7 +290,6 @@ finish
 !
 /post1
 SET,LAST
-/eof
 rsys,12
 nsel,s,loc,x,0
 nsel,r,loc,z,0

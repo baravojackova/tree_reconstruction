@@ -34,8 +34,8 @@ FILE_PATTERN = "volumes_*.csv"
 
 # Which Group to import from each table. "Estimated" uses the optimal
 # models plus the second run, so it has the most reliable mean and std.
-# Other valid choices: "Optimal", "All inputs", "Optimal (single)", "Simplified", "Filtered <10cm".
-IMPORT_GROUP = "Optimal (single)"  # the de Tanago field crew physically only measured sections down to a 10 cm taper diameter (see AdQSM.pdf Appendix A) - this reference NEVER has a "none" (full/unfiltered) version, by methodology.
+# Other valid choices: "Optimal", "All inputs", "Optimal (single)", "Simplified", "Filtered <10cm", "Simplified (no islands)".
+IMPORT_GROUP = "Simplified (no islands)"  # the de Tanago field crew physically only measured sections down to a 10 cm taper diameter (see AdQSM.pdf Appendix A) - this reference NEVER has a "none" (full/unfiltered) version, by methodology.
 
 # Shared master results table (read by compare_volumes.py).
 RESULTS_CSV = "volume_results.csv"

@@ -484,6 +484,17 @@ else
     fprintf('Source model: res.QSMs(%d).\n', model_index);
 end
 
+% QSM_opt is kept EXACTLY as produced by select_optimum/estimate_precision,
+% with no island cleaning applied - it is only a raw, unfiltered REFERENCE
+% value used later (section 17, 'Optimal'/'Optimal (single)' rows) so you
+% can compare against the model you actually work with. The model you
+% actually use going forward (islands detected/removed, ANSYS export,
+% etc.) is always QSM_simple, built below and cleaned in sections
+% 15b/15c further down (moved there so island cleaning runs on the
+% SIMPLIFIED model, which is what matters for the real workflow).
+QSM_simple = simplify_qsm(QSM_opt, simp_MaxOrder, ...
+    simp_SmallRadii, simp_ReplaceIterations, simp_Plot, simp_Disp);
+
 %% ------------------------------------------------------------
 %  15b) DETECT DISCONNECTED BRANCH ISLANDS - REVIEW BEFORE REMOVING
 % This section only DETECTS and PLOTS potential disconnected branch
@@ -492,6 +503,12 @@ end
 % drawn in red on top of the tree in gray. Only run the NEXT section
 % (15c) if you decide, after reviewing the plot, that these really
 % are broken/noise fragments that should be removed.
+% MOVED here (after simplify_qsm) and now reads from QSM_simple(end)
+% instead of QSM_opt: the user's actual working model is the simplified
+% one (fewer cylinders, used for ANSYS), so island cleaning should run on
+% THAT model, not on the raw pre-simplification one. QSM_simple(end) is
+% the same "the simplified model" choice already used elsewhere in this
+% script (e.g. V_simp = vols(QSM_simple(end)) in section 17 below).
 %  ------------------------------------------------------------
 
 % cylinder.parent(k) is the row index (into the SAME cylinder table) of
@@ -503,10 +520,10 @@ end
 % disconnected from the main structure. These usually come from noisy or
 % incomplete point-cloud data and typically represent little volume, but
 % should be reviewed visually (not blindly deleted) before removal.
-parent_arr = QSM_opt.cylinder.parent;
-radius_arr = QSM_opt.cylinder.radius;
-length_arr = QSM_opt.cylinder.length;
-start_arr  = QSM_opt.cylinder.start;      % (n_cyl,3) xyz of each cylinder's base
+parent_arr = QSM_simple(end).cylinder.parent;
+radius_arr = QSM_simple(end).cylinder.radius;
+length_arr = QSM_simple(end).cylinder.length;
+start_arr  = QSM_simple(end).cylinder.start;   % (n_cyl,3) xyz of each cylinder's base
 total_tree_volume = sum(pi .* radius_arr.^2 .* length_arr);
 
 % find_disconnected_islands() is the local function defined at the very
@@ -534,6 +551,18 @@ for oi = 1:numel(island_groups)
     all_island_indices = [all_island_indices, island_idx];
 end
 
+% Report the TOTAL volume across all islands combined (not just per
+% island above), so you can see at a glance how much volume removing
+% every island would cost - guarded with isempty() so sum() over an
+% empty all_island_indices (zero islands found) does not run/print at all.
+if ~isempty(island_groups)
+    total_island_vol = sum(pi .* radius_arr(all_island_indices).^2 .* ...
+        length_arr(all_island_indices));
+    total_island_pct = total_island_vol / total_tree_volume * 100;
+    fprintf('Total island volume: %.5f m3 (%.2f %% of tree)\n', ...
+        total_island_vol, total_island_pct);
+end
+
 if isempty(island_groups)
     fprintf('No disconnected islands found.\n');
 else
@@ -556,14 +585,16 @@ end
 
 %% ------------------------------------------------------------
 %  15c) REMOVE DISCONNECTED ISLANDS (run manually, only after reviewing the plot above)
-% Creates QSM_opt_clean - a COPY of QSM_opt with the island cylinders
-% removed and every remaining cylinder's "parent" index remapped to
-% the new (shifted) row numbers. QSM_opt itself is left untouched, so
-% re-running earlier sections is unaffected.
+% Creates QSM_simple_clean - a COPY of QSM_simple(end) with the island
+% cylinders removed and every remaining cylinder's "parent" index
+% remapped to the new (shifted) row numbers. QSM_simple itself is left
+% untouched, so re-running earlier sections is unaffected. Renamed from
+% the former QSM_opt_clean, since this now cleans the SIMPLIFIED model,
+% not the raw optimal one.
 %  ------------------------------------------------------------
 
 if isempty(island_groups)
-    fprintf('No islands to remove - QSM_opt_clean not created.\n');
+    fprintf('No islands to remove - QSM_simple_clean not created.\n');
 else
     n_cyl_total = numel(parent_arr);
     keep_mask = true(n_cyl_total, 1);
@@ -577,29 +608,29 @@ else
     old_to_new = zeros(n_cyl_total, 1);
     old_to_new(keep_mask) = 1:sum(keep_mask);
 
-    QSM_opt_clean = QSM_opt;
-    cyl_fields = fieldnames(QSM_opt_clean.cylinder);
+    QSM_simple_clean = QSM_simple(end);   % start from the simplified model, not QSM_opt
+    cyl_fields = fieldnames(QSM_simple_clean.cylinder);
     for f = 1:numel(cyl_fields)
         field_name = cyl_fields{f};
-        field_val = QSM_opt_clean.cylinder.(field_name);
+        field_val = QSM_simple_clean.cylinder.(field_name);
         % Only touch fields that have one ROW per cylinder (size along
         % dim 1 equal to n_cyl_total) - e.g. radius/length/parent/start.
         % Anything else (a scalar setting, etc.) is left untouched.
         if size(field_val, 1) == n_cyl_total
-            QSM_opt_clean.cylinder.(field_name) = field_val(keep_mask, :);
+            QSM_simple_clean.cylinder.(field_name) = field_val(keep_mask, :);
         end
     end
 
     % Remap parent indices: any parent > 0 (i.e. not itself a root) must
     % now point at the NEW row number of that same parent cylinder.
-    new_parent = QSM_opt_clean.cylinder.parent;
+    new_parent = QSM_simple_clean.cylinder.parent;
     nonzero = new_parent > 0;
     new_parent(nonzero) = old_to_new(new_parent(nonzero));
-    QSM_opt_clean.cylinder.parent = new_parent;
+    QSM_simple_clean.cylinder.parent = new_parent;
 
-    r_c = QSM_opt_clean.cylinder.radius;
-    L_c = QSM_opt_clean.cylinder.length;
-    order_c = QSM_opt_clean.cylinder.BranchOrder;
+    r_c = QSM_simple_clean.cylinder.radius;
+    L_c = QSM_simple_clean.cylinder.length;
+    order_c = QSM_simple_clean.cylinder.BranchOrder;
     V_cyl_c = pi .* r_c.^2 .* L_c;
 
     total_vol_clean  = sum(V_cyl_c);
@@ -607,21 +638,21 @@ else
     branch_vol_clean = sum(V_cyl_c(order_c >= 1));
     V_rep_clean = [total_vol_clean, stem_vol_clean, branch_vol_clean];
 
-    fprintf('QSM_opt_clean created: %d cylinders (was %d), removed %.5f m3 (%.2f %%).\n', ...
+    fprintf('QSM_simple_clean created: %d cylinders (was %d), removed %.5f m3 (%.2f %%).\n', ...
         sum(keep_mask), n_cyl_total, total_tree_volume - total_vol_clean, ...
         (total_tree_volume - total_vol_clean)/total_tree_volume*100);
 end
 
-QSM_simple = simplify_qsm(QSM_opt, simp_MaxOrder, ...
-    simp_SmallRadii, simp_ReplaceIterations, simp_Plot, simp_Disp);
-
 %% ------------------------------------------------------------
 %  17) VOLUME TABLE with variability, in m^3
-%       All inputs       = all models of the first run
-%       Optimal          = models of the winning parameter combination
-%       Optimal (single) = the one model that gets simplified
-%       Estimated        = optimal models + second run (better std)
-%       Simplified       = the simplified model (single -> no std)
+%       All inputs              = all models of the first run
+%       Optimal                 = models of the winning parameter combination
+%       Optimal (single)        = the one model that gets simplified
+%       Estimated               = optimal models + second run (better std)
+%       Simplified              = the simplified model (single -> no std)
+%       Simplified (no islands) = Simplified, with disconnected branch
+%                                  islands removed (section 15c) - only
+%                                  present if islands were found
 %       TreeQSM stores volumes in LITERS -> divide by 1000
 %  ------------------------------------------------------------
 
@@ -723,17 +754,20 @@ else
     warning('res_new not found - run steps 13 and 14 to get the Estimated row.');
 end
 
+% Keep 'Simplified' (uncleaned QSM_simple) as-is for side-by-side
+% comparison against the cleaned version added right below.
 groups(end+1,:) = {'Simplified', V_simp};
 
-% QSM_opt_clean/V_rep_clean only exist if section 15c was run manually
-% (it is NOT run automatically - see its comment above). This adds a
-% SEPARATE new row ('Optimal (single, no islands)') without touching or
-% replacing the existing 'Optimal (single)' row above, so both are kept
-% side by side in VolumeTable/volumes_*.csv for comparison in Python.
-if exist('QSM_opt_clean', 'var')
-    groups(end+1,:) = {'Optimal (single, no islands)', V_rep_clean};
+% QSM_simple_clean only exists if section 15c actually removed islands
+% (it is NOT run/created when island_groups was empty - see its comment
+% above). This adds a SEPARATE new row ('Simplified (no islands)')
+% without touching or replacing the existing 'Simplified' row above, so
+% both are kept side by side in VolumeTable/volumes_*.csv for comparison.
+if exist('QSM_simple_clean', 'var')
+    V_simp_clean = vols(QSM_simple_clean(end));   % same vols() helper used for V_simp above
+    groups(end+1,:) = {'Simplified (no islands)', V_simp_clean};
 else
-    fprintf('QSM_opt_clean not found - skipping "Optimal (single, no islands)" group (section 15c was not run).\n');
+    fprintf('QSM_simple_clean not found - skipping "Simplified (no islands)" group (no islands detected, or section not run).\n');
 end
 
 % Only add the "Filtered <10cm" group when export_filtered_10cm is true
@@ -925,18 +959,41 @@ time_sum(1,2) = time_sum./60;         % total time in hours
 %  20) EXPORT geometry for ANSYS
 %  ------------------------------------------------------------
 % --- choose the SOURCE model ------------------------------------
-% 'simplified' = QSM_simple (after simplify_qsm, section 16)
-% 'optimal'    = QSM_opt    (before simplification, section 16, output of select_optimum)
-ansys_source = 'simplified';   % <-- change to 'simplified' when you want the simplified export
+% 'simplified_clean' = QSM_simple_clean (simplified model, island cylinders
+%                       removed - section 15c). This is now the PRIMARY
+%                       model the user exports to ANSYS: it is both the
+%                       fewer-cylinder simplified geometry AND has any
+%                       disconnected branch-island noise stripped out.
+% 'simplified'        = QSM_simple (after simplify_qsm, section 16, BEFORE
+%                        island cleaning) - kept for occasional comparison
+%                        exports only.
+% 'optimal'           = QSM_opt (before simplification, section 16, output
+%                        of select_optimum) - kept for occasional
+%                        comparison exports only.
+ansys_source = 'simplified_clean';   % <-- default: simplified + islands removed
 
 switch ansys_source
+    case 'simplified_clean'
+        % QSM_simple_clean only exists if section 15c actually ran AND
+        % found islands to remove (see its comment above). If it wasn't
+        % created, error out with a clear pointer to 'simplified' instead
+        % of silently exporting the wrong thing - in the no-islands case
+        % QSM_simple and QSM_simple_clean would be identical anyway, so
+        % nothing is lost by switching ansys_source manually.
+        if ~exist('QSM_simple_clean', 'var')
+            error(['ansys_source = ''simplified_clean'', but QSM_simple_clean does not exist ' ...
+                   '(no islands were found in section 15b/15c, so there was nothing to clean). ' ...
+                   'Set ansys_source = ''simplified'' instead - QSM_simple and QSM_simple_clean ' ...
+                   'would be identical anyway when no islands exist.']);
+        end
+        qsm_selected = QSM_simple_clean(1);   % single cleaned model (not an array)
     case 'simplified'
         ansys_export_idx = 1;                 % index into QSM_simple
         qsm_selected = QSM_simple(ansys_export_idx);
     case 'optimal'
         qsm_selected = QSM_opt;               % QSM_opt is a single model (not an array)
     otherwise
-        error('ansys_source must be ''simplified'' or ''optimal''.');
+        error('ansys_source must be ''simplified_clean'', ''simplified'' or ''optimal''.');
 end
 
 n_opt = length(qsm_selected);
@@ -952,19 +1009,15 @@ for i = 1:n_opt
     fprintf('Exported: %s\n', file_name);
 end
 
-%% ------------------------------------------------------------
-%  20) EXPORT geometry for ANSYS
-%  ------------------------------------------------------------
-qsm_selected = QSM_simple;
-n_opt     = length('QSM_simple');
-geom_orig = myfun.result_ansys(QSM_simple, n_opt);
-
-for i = 1:n_opt
-    geom_table = geom_orig{i};                            % table of one model
-    file_name  = sprintf('%s%d.txt', export_prefix, i);   % e.g. geom_IND07_v3_1.txt
-    writematrix(geom_table, file_name, 'Delimiter', '\t');
-    fprintf('Exported: %s\n', file_name);
-end
+% REMOVED: a duplicate, leftover second "20) EXPORT geometry for ANSYS"
+% block used to sit here. It always re-exported QSM_simple (ignoring
+% whatever ansys_source above had chosen, e.g. 'optimal') using
+% n_opt = length('QSM_simple') - a bug, since that computes the length of
+% the literal 10-character STRING 'QSM_simple', not length(QSM_simple)
+% (the number of models). Because it wrote to the exact same file_name
+% pattern as the block above, it silently ran a second time and could
+% overwrite the export the user actually intended. Deleted as dead code -
+% the switch above already covers every case correctly on its own.
 
 % ---------------------------------------------------------------
 % LOCAL FUNCTIONS
