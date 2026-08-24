@@ -576,6 +576,20 @@ def report_thin_branch_volume(lengths, radii, order_arr, cut_cm=10.0, source_lab
               % (label, v_kept, v_removed, pct_removed))
         result["%s_vol" % key] = v_total
         result["%s_vol_kept" % key] = v_kept
+
+        # Same idea as the volume block above, but summing cylinder LENGTH
+        # instead of volume. `lengths` is already an input parameter of this
+        # function (used to build `volumes` above), so no extra data is
+        # needed - we just also sum it directly, using the same `mask`
+        # (stem vs. branch) and the same `keep` (>= cut_cm diameter) filter.
+        len_total = float(lengths[mask].sum())      # total length of this group (stem or branch), before filtering
+        len_kept = float(lengths[mask & keep].sum())  # length remaining after removing thin (< cut_cm) cylinders
+        len_removed = len_total - len_kept
+        pct_len_removed = (len_removed / len_total * 100.0) if len_total else 0.0
+        print("%-6s length kept  : %.3f m   (removed %.3f m, %.1f %%)"
+              % (label, len_kept, len_removed, pct_len_removed))
+        result["%s_len" % key] = len_total
+        result["%s_len_kept" % key] = len_kept
     return result
 
 

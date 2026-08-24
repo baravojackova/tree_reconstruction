@@ -100,9 +100,10 @@ AdTree_DIR = os.path.join(DATA_ROOT, TREE_NAME)
 INPUT_PLY = os.path.join(AdTree_DIR, "%s - Cloud_skeleton.ply" % TREE_NAME)
 
 # Radius threshold (in METERS). You can give several values -> several variants.
+# Remove all branches whose radius is below this threshold. The trunk (branch order 0) is never removed, even if its radius is below the threshold.
 # Example of a single variant:   RADIUS_THRESHOLDS = [0.010]
 # Example of several variants:   RADIUS_THRESHOLDS = [0.010, 0.020, 0.030]
-RADIUS_THRESHOLDS = [0.005]        # 0.030 m = 30 mm radius (60 mm diameter)
+RADIUS_THRESHOLDS = [0.01]        # 0.030 m = 30 mm radius (60 mm diameter)
 
 # Adaptive segment length used for resampling (in METERS). The target length at
 # a given point is SEG_LEN_K * local_radius, clamped to [SEG_LEN_MIN, SEG_LEN_MAX]:
@@ -110,8 +111,8 @@ RADIUS_THRESHOLDS = [0.005]        # 0.030 m = 30 mm radius (60 mm diameter)
 # If SEG_LEN_MIN == SEG_LEN_MAX, this reduces to the old constant-length
 # resampling (that fixed value, regardless of radius).
 # Set SEG_LEN_MIN to 0 or None to disable resampling entirely (keep every point).
-SEG_LEN_MIN = 0.01                # shortest allowed segment (m), for thin twigs
-SEG_LEN_MAX = 0.3                # longest allowed segment (m), for the trunk
+SEG_LEN_MIN = 0.1                # shortest allowed segment (m), for thin twigs
+SEG_LEN_MAX = 0.5                # longest allowed segment (m), for the trunk
 SEG_LEN_K = 0.5                   # target length = SEG_LEN_K * local_radius
 
 # --- Build a short suffix identifying THIS resampling configuration -----
@@ -142,6 +143,7 @@ SEG_VARIANT_SUFFIX = "_seg%d-%d-k%d" % (
 
 # Shortest permissible cylinder (in METERS). Shorter ones (e.g. at branch
 # points) are not created, to avoid degenerate zero-length beams in ANSYS.
+# At the end of the resampling step, any cylinder shorter than this is merged into its parent cylinder. Set to 0 or None to disable this check entirely.
 MIN_CYL_LEN = 0.005               # 0.1 mm
 
 # Rounding used when merging coincident points (number of decimal places).
@@ -247,18 +249,17 @@ else:
 # =====================================================================
 
 # --- Output file name(s) --------------------------------------------
-# These name the FINAL geom_*.txt that export_geom_ansys.py will eventually
-# write (this script itself only writes the intermediate .npz - see the
-# RUN section). Keeping the naming here (instead of in export_geom_ansys.py)
-# means the geom_*.txt name is decided once, alongside the threshold/variant
-# it belongs to, and carried inside the .npz - so step 2 never has to guess it.
-#
-# OUTPUT_NAME is used as-is when RADIUS_THRESHOLDS has exactly ONE value.
-OUTPUT_NAME = "geom_r30_optim.txt"
-# OUTPUT_PATTERN is used instead when RADIUS_THRESHOLDS has SEVERAL values,
-# so the generated files don't overwrite each other. {r} is replaced by the
-# radius threshold in mm (e.g. geom_r10.txt).
-OUTPUT_PATTERN = "geom_r{r}.txt"
+# The FINAL geom_*.txt name that export_geom_ansys.py will eventually write
+# (this script itself only writes the intermediate .npz - see the RUN
+# section) is no longer a fixed/hand-edited name here. Instead it's built
+# automatically from the same ingredients as npz_name below (TREE_NAME,
+# threshold, variant_suffix, SEG_VARIANT_SUFFIX), just with "geom_" instead
+# of "calib_" and ".txt" instead of ".npz" - see the `out = ...` line in the
+# RUN section. This guarantees the geom_*.txt name always matches the
+# calib_*.npz it came from (e.g. calib_IND01_054_r5mm_seg100-500-k50.npz ->
+# geom_IND01_054_r5mm_seg100-500-k50.txt), so you can tell at a glance which
+# .npz produced which geom_*.txt, and different thresholds/variants/segment
+# settings never silently overwrite each other's exported file.
 # =====================================================================
 
 # =====================  VISUALIZATION  ================================
@@ -292,7 +293,6 @@ print("\n%-12s %-12s %-12s %-12s" % ("threshold", "cylinders", "length [m]", "fi
 print("Volume verification below is computed from the exact cylinders that will be "
       "written to each geom file (pi * radius^2 * length per cylinder).\n")
 z_base = float(xyz[:, 2].min())   # tree base; DBH/height/taper are measured from here
-multiple_thresholds = len(RADIUS_THRESHOLDS) > 1
 multiple_variants = len(ADQSM_VARIANT_LIST) > 1   # True only if you used ADQSM_VARIANTS (case 2 above)
 
 # Outer loop: one pass per AdQSM variant (just one pass, using the plain
@@ -361,21 +361,18 @@ for variant_label, taper_file, branch_file, params_file in ADQSM_VARIANT_LIST:
         # `out` is the geom_*.txt name step 2 (export_geom_ansys.py) will
         # eventually write - computed here (once, alongside the threshold/
         # variant it belongs to) and carried inside the .npz below.
-        out = OUTPUT_PATTERN.format(r=int(round(thr * 1000))) if multiple_thresholds else OUTPUT_NAME
-        # Insert variant_suffix (only when an AdQSM variant is active) AND
-        # SEG_VARIANT_SUFFIX (always) just before the file extension, e.g.
-        # "geom_r30_optim.txt" -> "geom_r30_optim_adqsm05_seg10-300-k50.txt".
-        # SEG_VARIANT_SUFFIX is added UNCONDITIONALLY here (unlike
-        # variant_suffix, which is "" unless ADQSM_VARIANTS is set) because
-        # it's always non-empty by construction - it's built directly from
-        # SEG_LEN_MIN/MAX/K above, which always have SOME value. This keeps
-        # the eventual geom_*.txt name in sync with the same suffix already
-        # added to npz_name and every AdTree method name further down: a
-        # different SEG_LEN_* setting must never silently overwrite a
-        # previous run's exported geometry (see SEG_VARIANT_SUFFIX's own
-        # definition, next to SEG_LEN_MIN/MAX/K, for the full "why").
-        name_part, ext_part = os.path.splitext(out)
-        out = name_part + variant_suffix + SEG_VARIANT_SUFFIX + ext_part
+        #
+        # Built with the EXACT SAME ingredients (and in the same order) as
+        # npz_name further down - just "geom_"/".txt" instead of
+        # "calib_"/".npz" - so every geom_*.txt name matches the calib_*.npz
+        # it was exported from at a glance, e.g.:
+        #   calib_IND01_054_r5mm_seg100-500-k50.npz
+        #   geom_IND01_054_r5mm_seg100-500-k50.txt
+        # This replaces the old fixed OUTPUT_NAME/OUTPUT_PATTERN constants -
+        # every combination of tree/threshold/variant/segment-settings now
+        # gets its own name automatically, so nothing can silently overwrite
+        # a previous run's exported file.
+        out = "geom_%s_r%dmm%s%s.txt" % (TREE_NAME, round(thr * 1000), variant_suffix, SEG_VARIANT_SUFFIX)
 
         # Height of the pruned model: z-range of the nodes actually used by these
         # cylinders. Unaffected by radius calibration (geometry doesn't change).
@@ -412,8 +409,8 @@ for variant_label, taper_file, branch_file, params_file in ADQSM_VARIANT_LIST:
         # calibration + comparison + printing, which you may want to re-run
         # or tweak (e.g. different AdQSM variant) without re-exporting to
         # ANSYS every time, and conversely you may want to re-export to
-        # ANSYS (different OUTPUT_NAME, etc.) without redoing the whole
-        # calibration. Splitting the pipeline here lets export_geom_ansys.py
+        # ANSYS without redoing the whole calibration. Splitting the
+        # pipeline here lets export_geom_ansys.py
         # do ONLY the second half, fast, from already-calibrated data.
         #
         # What goes into the .npz (so it can be reloaded with NO information
@@ -440,7 +437,7 @@ for variant_label, taper_file, branch_file, params_file in ADQSM_VARIANT_LIST:
         #   geom_filename : the `out` filename computed above - so
         #                  export_geom_ansys.py writes the SAME geom_*.txt name
         #                  this script would have used, without recomputing
-        #                  OUTPUT_NAME/OUTPUT_PATTERN/variant-suffix logic.
+        #                  the tree/threshold/variant-suffix naming logic.
         #   tree_name, variant_label, threshold_m : just metadata, so you can
         #                  tell which run produced a given .npz file later.
         # SEG_VARIANT_SUFFIX added here too (after variant_suffix, same "end
@@ -536,6 +533,13 @@ for variant_label, taper_file, branch_file, params_file in ADQSM_VARIANT_LIST:
                               cal_thin["total_vol_kept"], cal_thin["trunk_vol_kept"],
                               cal_thin["branch_vol_kept"], None,
                               cal_dbh, height_m, cal_taper,
+                              # trunk_len/branch_len: length (in metres) of the trunk/branch
+                              # cylinders that SURVIVED the >=10cm diameter filter. These come
+                              # from report_thin_branch_volume()'s new "..._len_kept" keys
+                              # (added alongside the existing "..._vol_kept" keys), so this
+                              # "(>=10cm only)" row finally gets trunk_len_m/branch_len_m
+                              # filled in instead of being left blank.
+                              cal_thin["trunk_len_kept"], cal_thin["branch_len_kept"],
                               branch_filter="10cm")
 
                 # Same idea as the THIRD row above, but for the RAW (uncalibrated)
@@ -556,6 +560,9 @@ for variant_label, taper_file, branch_file, params_file in ADQSM_VARIANT_LIST:
                               orig_thin["total_vol_kept"], orig_thin["trunk_vol_kept"],
                               orig_thin["branch_vol_kept"], None,
                               raw_dbh, height_m, raw_taper,
+                              # Same fix as the calibrated row above, using the "raw"
+                              # (uncalibrated) cylinder set's kept lengths instead.
+                              orig_thin["trunk_len_kept"], orig_thin["branch_len_kept"],
                               branch_filter="10cm")
 
             print("  DBH (at %.1f m)   : raw AdTree = %s   |   calibrated = %s"

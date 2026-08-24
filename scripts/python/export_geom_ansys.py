@@ -28,7 +28,7 @@ from tree_geom_utils import write_geom
 # you can see what's there before picking one) - set it to one of the
 # printed names to actually export it, e.g.:
 #   NPZ_FILE = "calib_IND01_054_r5mm.npz"
-NPZ_FILE = "calib_IND01_054_r5mm.npz"
+NPZ_FILE = "calib_IND01_054_r10mm_seg100-500-k50.npz"
 
 # Folder to look for "calib_*.npz" files in. "." means "the folder this
 # script is run from" (matches how adtree_reconstruct_compare.py writes them).

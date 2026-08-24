@@ -38,7 +38,7 @@ import numpy as np
 # TREE_NAME (true for IND07_083, but NOT for IND01_054 - its folder is
 # "IND01_54", a shorter form - if you switch back to that tree, set
 # DATA_DIR directly instead of deriving it from TREE_NAME).
-TREE_NAME = "IND07_083"
+TREE_NAME = "IND01_054"
 
 # Base folder holding every tree's data, one subfolder per tree (normally
 # named exactly like TREE_NAME - see the note above for the one exception).
