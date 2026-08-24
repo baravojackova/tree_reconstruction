@@ -1,0 +1,325 @@
+!beamovy model stromu_buk ze skenu (Babice) dyna [m,N,Pa,kg/m3]------------
+!===================================================================================
+!
+/clear
+!
+/prep7
+*afun,rad   	
+*set,pi,2*asin(1)   		!pi calculation 
+*afun,deg   			!use degrees
+!
+!----------vstupni parametry
+n_sl=10					!pocet sloupcu
+n_rad=2668				!number of rows - keep the same number without first row (0)
+d_kmen=0.64
+t_ks=2*d_kmen				!tloustka KS
+e_sizetree=0.1
+e_sizeks=0.3
+pull_dir=(24+36)
+an_height=9.6
+lev3_height=4.8
+f_stat=7990
+f_dyn=7990
+alfa=14.2
+!
+!nacteni tabulky s geometrii ze skenu (x,y,z,lenght,radius,xaxis,yaxis,zaxis,parent,branchorder)
+*dim,geom,table,n_rad,n_sl,1,poradi,vlast
+*tread,geom,geom_IND01_054_v1manual_1,txt
+!
+!vypocet pozice druhehu bodu strednice valce
+*dim,geom_2,array,n_rad,5,1,poradi,vlast
+*do,i,1,n_rad,1    
+ geom_2(i,1)=sqrt(geom(i,6)**2+geom(i,7)**2+geom(i,8)**2) !velikost vektoru - d
+ geom_2(i,2)=geom(i,4)/geom_2(i,1)		!pomer mezi velkosti vektoru a delkou nosniku
+ geom_2(i,3)=geom(i,1)+(geom_2(i,2)*geom(i,6))	!x
+ geom_2(i,4)=geom(i,2)+(geom_2(i,2)*geom(i,7))	!y
+ geom_2(i,5)=geom(i,3)+(geom_2(i,2)*geom(i,8))	!z
+*enddo
+!
+!-----------TVORBA GEOMETRIE--------------------------
+!**********kmen************
+!-----------nacteni prurezu
+!
+*do,i,1,n_rad,1                      
+ sectype,i,beam,csolid,									
+ secoffset,cent
+ secdata,geom(i,5),8,2
+*enddo
+!
+!----------tvorba kp
+!
+*do,i,1,n_rad,1  								
+ k,i,geom(i,1),geom(i,2),geom(i,3)
+ k,10000+i,geom_2(i,3),geom_2(i,4),geom_2(i,5)									
+*enddo
+!
+*do,i,1,n_rad,1  								
+ l,i,10000+i										
+*enddo
+!
+!----------tvorba linii
+*do,i,1,n_rad,1  
+ ksel,s,kp,,i						!vyber kp baze sekce
+ ksel,a,kp,,10000+i					!vyber kp top sekce
+ lslk,s,1
+ latt,1,1,1,,,,i
+*enddo
+allsel,all
+!
+!********korenovy system********
+!------------kruhova plocha
+!
+csys,0
+wpoffs,geom(1,1),geom(1,2),geom(1,3)
+cswpla,11,1				!cyl.sour,sys
+!
+d_ks1=2*d_kmen						!prumer korenoveho systemu-stat. stabilni vrstva
+d_ks2=6*d_kmen	
+d_ks3=15*d_kmen	
+!
+cyl4,0,0,0,,d_ks1/2
+cyl4,0,0,d_ks1/2,,d_ks2/2
+cyl4,0,0,d_ks2/2,,d_ks3/2
+!
+!------------rozdeleni ks systemu na vysece
+wprota,,90
+*do,i,1,6
+ wprota,,,30
+ asbw,all,,delete						!rozdeli plochu v rovine xy, vymaze puvodni plochy
+*enddo
+wpcsys,1,0
+!
+aglue,all
+!
+csys,11
+*do,i,1,12
+ asel,s,loc,x,0,d_ks1/2						!1_vrstva KS vyber a prirazeni vlastnosti
+ asel,r,loc,y,(i-1)*30,i*30
+ aatt,10e3+i,1,2,11,600000,
+ allsel
+*enddo
+!
+*do,i,1,12	
+ asel,s,loc,x,d_ks1/2,d_ks2/2					!2_vrstva KS vyber a prirazeni vlastnosti
+ asel,r,loc,y,(i-1)*30,i*30
+ aatt,20e3+i,1,2,11,600000,
+ allsel
+*enddo
+!
+*do,i,1,12
+ asel,s,loc,x,d_ks2/2,d_ks3/2	
+ asel,r,loc,y,(i-1)*30,i*30
+ aatt,30e3+i,1,2,11,600000,
+ allsel
+*enddo
+!
+!------------TVORBA SITE A UKOTVENI
+!**********kmen************
+!------sitovani
+et,1,beam189
+esize,e_sizetree
+lsel,s,loc,z,0.01,100
+lmesh,all
+allsel,all
+!-----pozice uzlu pro ukotveni vetvi
+!
+*dim,c_ppos,array,n_rad,2,1,poradi,vlast
+!
+*do,i,2,n_rad,1  
+ ksel,s,kp,,i				
+ nslk,s	
+ *get,c_ppos(i,1),node,0,num,min							
+ ksel,s,kp,,geom(i,9)+10000		!vyber vrchniho uzlu - nutno opravit! nejblizsi uzel bazi predchozi vetve
+ nslk,s	
+ *get,c_ppos(i,2),node,0,num,min
+*enddo
+!
+allsel,all
+!
+!********korenovy system********
+!--------sitovani
+sectype,600000,shell,
+et,2,shell281
+secoffset,top
+secdata,t_ks,,,9
+!smrtsize,1
+aesize,all,e_sizeks
+amesh,all
+!
+!-----pozice uzlu pro ukotveni kmene v ks
+ksel,s,kp,,1
+nslks,s
+*get,num_kmen,node,0,num,min
+!
+ksel,s,loc,x,0
+ksel,r,loc,z,0
+nslk,s
+*get,num_ks,node,0,num,max
+allsel,all
+!
+!----------natoceni ss a vytvoreni pro smer zatizeni
+csys,0
+wpoffs,geom(1,1),geom(1,2),geom(1,3)
+wprota,180	!x smeruje na sever
+wprota,-pull_dir
+cswpla,12,0			!kart. smer zatizeni
+csys,12
+nrotat,all
+!
+csys,1
+!***************CE***********
+!------svazani vetvi
+!
+*do,i,2,n_rad,1
+ ce,i+10000,0,c_ppos(i,1),rotz,1,c_ppos(i,2),rotz,-1
+ ce,i+20000,0,c_ppos(i,1),roty,1,c_ppos(i,2),roty,-1
+ ce,i+30000,0,c_ppos(i,1),rotx,1,c_ppos(i,2),rotx,-1
+ ce,i+40000,0,c_ppos(i,1),uz,1,c_ppos(i,2),uz,-1
+ ce,i+50000,0,c_ppos(i,1),uy,1,c_ppos(i,2),uy,-1
+ ce,i+60000,0,c_ppos(i,1),ux,1,c_ppos(i,2),ux,-1
+*enddo
+!
+!------svazani ks
+ce,600001,0,num_kmen,rotz,1,num_ks,rotz,-1
+ce,600002,0,num_kmen,rotx,1,num_ks,rotx,-1
+ce,600003,0,num_kmen,roty,1,num_ks,roty,-1
+ce,600004,0,num_kmen,uz,1,num_ks,uz,-1
+ce,600005,0,num_kmen,ux,1,num_ks,ux,-1
+ce,600006,0,num_kmen,uy,1,num_ks,uy,-1
+!
+!/eshape,1
+eplot
+!-----------MATERIAL---------
+!**********kmen*******
+!---------material kmen parametry
+e_x=(11.147e9)*0.9					!mat model beech all - kluci
+e_z=e_x*1			
+e_y=e_x*1			
+!
+g_xy=0.934e9					
+g_yz=e_x*1			
+g_xz=e_x*1		
+!
+pr_xy=0.43					
+pr_yz=0.43		
+pr_xz=0.43		
+!
+densw=966
+!--------vytvoreni mat. modelu kmen
+mp,ex,1,e_x				!definice materialovych vlastnosti
+mp,ey,1,e_z
+mp,ez,1,e_y
+!
+mp,gxy,1,g_xy
+mp,gyz,1,g_yz	
+mp,gxz,1,g_xz
+!
+mp,prxy,1,pr_xy
+mp,pryz,1,pr_yz
+mp,prxz,1,pr_xz
+!
+mp,dens,1,densw
+!
+!*********korenovy system*********
+!---------material ks parametry
+e_koren_1=e_x					!modul pruznosti dreva
+e_koren_2=e_koren_1/2
+e_koren_3=e_koren_1/4
+e_puda=11.95e6					!Foundation analysis
+pr_xy_p=0.33					!Foundation analysis
+!
+podil_koren_1=0.6				!podil korenu oddenek
+podil_koren_2=0.2				!podil korenu 1. vrstva
+podil_koren_3=0					!podil korenu 3. vrstva (bal)
+!
+densp=1000					!Foucard
+!--------------nacteni tabulky koeficentu a cykly------------------
+!
+*dim,koef_mat,table,3,12,1,vrstva,vysec						!vytvoreni tabulky
+*tread,koef_mat,koef_mat,mac,,1	
+*do,j,1,3
+ *do,i,1,12											
+  mp,ex,((10e3*j)+i),e_koren_%j%*podil_koren_%j%*koef_mat(j,i)+e_puda*(1-podil_koren_%j%)		!definice materialovych vlastnosti - s vlivem koeficientu pro upravu materialu koef_mat
+  mp,prxy,((10e3*j)+i),pr_xy_p										!kombinace puda koren?
+  !
+  mp,dens,((10e3*j)+i),densw*podil_koren_%j%*koef_mat(1,i)+densp*(1-podil_koren_%j%)			!hustota puda
+ *enddo
+*enddo
+!
+allsel,all
+csys,0
+save,geom_buk,db
+finish
+!!!!!!-----------reseni-------------!!!!!!
+!---------------harmon--------------
+!harm.mac
+!---------------modal---------------
+!modal.mac
+!-------------transient-------------
+!trans.mac
+!
+!---------------static solution a postpr. k buk babice [m,N,Pa,kg/m3]
+/sol
+/eof
+antype,0,
+nlgeom,off
+!                                                                                                       
+kbc,1						    !pokud se nezmeni automaticky se prevadi do dalsich LS
+!acel,0,0,9.81
+csys,11
+lsel,s,loc,x,d_ks3/2
+lsel,r,loc,z,0
+dl,all,1,all,0
+allsel,all
+outres,all,all
+lswrite,1
+!
+nsel,s,loc,z,an_height-0.05,an_height+0.05
+*get,n_for,node,0,count
+csys,12
+f_xstat=cos(alfa)*f_stat
+f_zstat=sin(alfa)*f_stat
+f,all,fx,f_xstat/n_for
+f,all,fz,-f_zstat/n_for
+allsel,all
+outres,all,all				
+lswrite,2
+lssolve,1,2,1
+finish
+!
+!-----------POST---------
+!
+/post1
+SET,LAST
+/eof
+rsys,12
+nsel,s,loc,x,0
+nsel,r,loc,z,0
+nsel,r,loc,y,0
+*get,n_baze,node,0,num,min
+*get,u_rotsum,node,n_baze,rot,sum
+*get,u_rotx,node,n_baze,rot,x
+*get,u_roty,node,n_baze,rot,y
+*get,u_rotz,node,n_baze,rot,z
+!
+allsel,all
+esel,s,cent,z,0,e_sizetree*0.9
+esel,u,cent,z,0.000001,-100
+nsle,s
+*get,n_baze2,node,0,num,max
+*get,u_rotsum2,node,n_baze2,rot,sum
+allsel,all
+!
+nsel,s,loc,z,an_height-0.05,an_height+0.05
+*get,ntah,node,0,num,max
+*get,u_xtah,node,ntah,u,x
+allsel
+!
+nsel,s,loc,z,lev3_height-0.05,lev3_height+0.05
+*get,n3,node,0,num,max
+*get,u_xtah3,node,n3,u,x
+allsel
+!
+plnsol,u,x,0,1
+*get,u_max,plnsol,0,max
+!

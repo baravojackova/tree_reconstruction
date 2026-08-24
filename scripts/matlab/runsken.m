@@ -484,6 +484,134 @@ else
     fprintf('Source model: res.QSMs(%d).\n', model_index);
 end
 
+%% ------------------------------------------------------------
+%  15b) DETECT DISCONNECTED BRANCH ISLANDS - REVIEW BEFORE REMOVING
+% This section only DETECTS and PLOTS potential disconnected branch
+% fragments (cylinder.parent == 0 for a non-root cylinder) - it does
+% NOT remove anything. Look at the resulting figure: islands are
+% drawn in red on top of the tree in gray. Only run the NEXT section
+% (15c) if you decide, after reviewing the plot, that these really
+% are broken/noise fragments that should be removed.
+%  ------------------------------------------------------------
+
+% cylinder.parent(k) is the row index (into the SAME cylinder table) of
+% cylinder k's parent cylinder. A well-formed QSM has exactly ONE cylinder
+% with parent == 0: cylinder 1, the trunk base (the true root, with no
+% parent at all). If any OTHER cylinder also has parent == 0, that means
+% TreeQSM/AdQSM lost track of how it connects to the rest of the tree -
+% it and everything built on top of it form a separate "island" floating
+% disconnected from the main structure. These usually come from noisy or
+% incomplete point-cloud data and typically represent little volume, but
+% should be reviewed visually (not blindly deleted) before removal.
+parent_arr = QSM_opt.cylinder.parent;
+radius_arr = QSM_opt.cylinder.radius;
+length_arr = QSM_opt.cylinder.length;
+start_arr  = QSM_opt.cylinder.start;      % (n_cyl,3) xyz of each cylinder's base
+total_tree_volume = sum(pi .* radius_arr.^2 .* length_arr);
+
+% find_disconnected_islands() is the local function defined at the very
+% end of this file (see "LOCAL FUNCTIONS" there) - it walks the
+% parent/child tree and returns one list of cylinder indices per island.
+island_groups = find_disconnected_islands(parent_arr);
+
+fprintf('\n--- Disconnected branch islands found: %d ---\n', numel(island_groups));
+fprintf('Total tree volume: %.4f m3\n', total_tree_volume);
+
+% NOTE: uses "island_idx" (NOT "idx") on purpose - section 16 above
+% already assigned the script variable "idx" to the winning-combination
+% MODEL indices, and section 17 below reads that same "idx" again
+% (V_opt = vols(res.QSMs(idx))). Since this is a plain script, every
+% section shares ONE workspace, so reusing "idx" here would silently
+% overwrite it with cylinder indices instead and break section 17.
+all_island_indices = [];
+for oi = 1:numel(island_groups)
+    island_idx = island_groups{oi};
+    vol = sum(pi .* radius_arr(island_idx).^2 .* length_arr(island_idx));
+    pct = vol / total_tree_volume * 100;
+    z_range = [min(start_arr(island_idx,3)), max(start_arr(island_idx,3))];
+    fprintf('  Island %d: %d cylinders, %.5f m3 (%.2f %% of tree), height %.2f-%.2f m\n', ...
+        oi, numel(island_idx), vol, pct, z_range(1), z_range(2));
+    all_island_indices = [all_island_indices, island_idx];
+end
+
+if isempty(island_groups)
+    fprintf('No disconnected islands found.\n');
+else
+    % --- plot: whole tree in light gray, islands in red on top ---
+    figure('Name', 'Disconnected branch islands (red)');
+    plot3(start_arr(:,1), start_arr(:,2), start_arr(:,3), '.', ...
+          'Color', [0.75 0.75 0.75], 'MarkerSize', 4);
+    hold on
+    plot3(start_arr(all_island_indices,1), start_arr(all_island_indices,2), ...
+          start_arr(all_island_indices,3), '.', 'Color', 'r', 'MarkerSize', 14);
+    xlabel('x [m]'); ylabel('y [m]'); zlabel('z [m]');
+    title(sprintf('%d disconnected island(s), %.2f %% of tree volume', ...
+          numel(island_groups), sum(pi.*radius_arr(all_island_indices).^2 .* ...
+          length_arr(all_island_indices))/total_tree_volume*100));
+    axis equal
+    grid on
+    view(3)
+    hold off
+end
+
+%% ------------------------------------------------------------
+%  15c) REMOVE DISCONNECTED ISLANDS (run manually, only after reviewing the plot above)
+% Creates QSM_opt_clean - a COPY of QSM_opt with the island cylinders
+% removed and every remaining cylinder's "parent" index remapped to
+% the new (shifted) row numbers. QSM_opt itself is left untouched, so
+% re-running earlier sections is unaffected.
+%  ------------------------------------------------------------
+
+if isempty(island_groups)
+    fprintf('No islands to remove - QSM_opt_clean not created.\n');
+else
+    n_cyl_total = numel(parent_arr);
+    keep_mask = true(n_cyl_total, 1);
+    keep_mask(all_island_indices) = false;   % mark every island cylinder for removal
+
+    % old_to_new maps an OLD row index to its NEW row index after the
+    % island rows are deleted (rows shift up to fill the gaps). A kept
+    % cylinder that used to be row 37 might become row 30, for example -
+    % every "parent" reference has to follow that same shift or it would
+    % end up pointing at the wrong (unrelated) cylinder.
+    old_to_new = zeros(n_cyl_total, 1);
+    old_to_new(keep_mask) = 1:sum(keep_mask);
+
+    QSM_opt_clean = QSM_opt;
+    cyl_fields = fieldnames(QSM_opt_clean.cylinder);
+    for f = 1:numel(cyl_fields)
+        field_name = cyl_fields{f};
+        field_val = QSM_opt_clean.cylinder.(field_name);
+        % Only touch fields that have one ROW per cylinder (size along
+        % dim 1 equal to n_cyl_total) - e.g. radius/length/parent/start.
+        % Anything else (a scalar setting, etc.) is left untouched.
+        if size(field_val, 1) == n_cyl_total
+            QSM_opt_clean.cylinder.(field_name) = field_val(keep_mask, :);
+        end
+    end
+
+    % Remap parent indices: any parent > 0 (i.e. not itself a root) must
+    % now point at the NEW row number of that same parent cylinder.
+    new_parent = QSM_opt_clean.cylinder.parent;
+    nonzero = new_parent > 0;
+    new_parent(nonzero) = old_to_new(new_parent(nonzero));
+    QSM_opt_clean.cylinder.parent = new_parent;
+
+    r_c = QSM_opt_clean.cylinder.radius;
+    L_c = QSM_opt_clean.cylinder.length;
+    order_c = QSM_opt_clean.cylinder.BranchOrder;
+    V_cyl_c = pi .* r_c.^2 .* L_c;
+
+    total_vol_clean  = sum(V_cyl_c);
+    stem_vol_clean   = sum(V_cyl_c(order_c == 0));
+    branch_vol_clean = sum(V_cyl_c(order_c >= 1));
+    V_rep_clean = [total_vol_clean, stem_vol_clean, branch_vol_clean];
+
+    fprintf('QSM_opt_clean created: %d cylinders (was %d), removed %.5f m3 (%.2f %%).\n', ...
+        sum(keep_mask), n_cyl_total, total_tree_volume - total_vol_clean, ...
+        (total_tree_volume - total_vol_clean)/total_tree_volume*100);
+end
+
 QSM_simple = simplify_qsm(QSM_opt, simp_MaxOrder, ...
     simp_SmallRadii, simp_ReplaceIterations, simp_Plot, simp_Disp);
 
@@ -596,6 +724,17 @@ else
 end
 
 groups(end+1,:) = {'Simplified', V_simp};
+
+% QSM_opt_clean/V_rep_clean only exist if section 15c was run manually
+% (it is NOT run automatically - see its comment above). This adds a
+% SEPARATE new row ('Optimal (single, no islands)') without touching or
+% replacing the existing 'Optimal (single)' row above, so both are kept
+% side by side in VolumeTable/volumes_*.csv for comparison in Python.
+if exist('QSM_opt_clean', 'var')
+    groups(end+1,:) = {'Optimal (single, no islands)', V_rep_clean};
+else
+    fprintf('QSM_opt_clean not found - skipping "Optimal (single, no islands)" group (section 15c was not run).\n');
+end
 
 % Only add the "Filtered <10cm" group when export_filtered_10cm is true
 % (set in section 1c). This is the switch itself: if it's false, this row
@@ -825,4 +964,47 @@ for i = 1:n_opt
     file_name  = sprintf('%s%d.txt', export_prefix, i);   % e.g. geom_IND07_v3_1.txt
     writematrix(geom_table, file_name, 'Delimiter', '\t');
     fprintf('Exported: %s\n', file_name);
+end
+
+% ---------------------------------------------------------------
+% LOCAL FUNCTIONS
+% A script file (as opposed to a function file) is allowed to define its
+% own "local functions" (small helper functions usable only inside this
+% same file), but ONLY if they are placed at the very end of the file,
+% after every other script statement - MATLAB would otherwise not know
+% where the script code ends and the function definitions begin.
+% ---------------------------------------------------------------
+
+function island_groups = find_disconnected_islands(parent_arr)
+    % Finds every group of cylinders that got disconnected from the
+    % main tree structure (cylinder.parent == 0 for any cylinder OTHER
+    % than cylinder index 1, which is always the true trunk-base root).
+    % Returns a cell array, one entry per island, each containing the
+    % list of cylinder indices belonging to that island (the orphan
+    % root itself plus every descendant found by walking DOWN the
+    % parent-child tree from it).
+    n_cyl = numel(parent_arr);
+    children = cell(n_cyl, 1);
+    for k = 1:n_cyl
+        p = parent_arr(k);
+        if p > 0
+            children{p} = [children{p}, k];
+        end
+    end
+
+    orphan_roots = find(parent_arr == 0);
+    orphan_roots = orphan_roots(orphan_roots ~= 1);   % exclude the true root
+
+    island_groups = cell(numel(orphan_roots), 1);
+    for oi = 1:numel(orphan_roots)
+        stack = orphan_roots(oi);
+        island_indices = [];
+        while ~isempty(stack)
+            cur = stack(end);
+            stack(end) = [];
+            island_indices(end+1) = cur;
+            stack = [stack, children{cur}];
+        end
+        island_groups{oi} = island_indices;
+    end
 end
