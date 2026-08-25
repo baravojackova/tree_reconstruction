@@ -16,9 +16,10 @@
 #  particular run) - that's what makes it safe to import from two different
 #  scripts without dragging along unrelated state.
 #
-#  Dependencies: numpy, scipy   (matplotlib is imported lazily, only inside
-#  plot_model(), so importing this file doesn't require it unless you
-#  actually call that one function).
+#  Dependencies: numpy, scipy, pandas (pandas only used by the TreeGraph
+#  section at the end of this file; matplotlib is imported lazily, only
+#  inside plot_model(), so importing this file doesn't require it unless
+#  you actually call that one function).
 # =====================================================================
 
 import os
@@ -26,6 +27,7 @@ import re
 import csv
 
 import numpy as np
+import pandas as pd
 from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import breadth_first_order
 
@@ -945,3 +947,124 @@ def plot_model(xyz, cyl, root, recenter_xy, thr, out_path, show, save_png):
         plt.show()
     else:
         plt.close(fig)
+
+
+# =====================================================================
+#  TreeGraph JSON support (added for the TreeGraph pipeline).
+# ---------------------------------------------------------------------
+#  TreeGraph (https://github.com/wanxinyang/treegraph) already outputs a
+#  per-cylinder table ("cyls") with start point, unit axis and length
+#  computed for us - unlike the AdTree .ply skeleton above, there is no
+#  xyz+edges graph to walk and no geometry to recompute. These functions
+#  read that table directly (plain json + pandas, NOT importing the
+#  treegraph package itself, so this stays independent of that other
+#  repo/environment) and reshape it into the same geom.txt format that
+#  write_geom() produces for AdTree, so both pipelines feed the same
+#  ANSYS macro (bk1.mac).
+#
+#  Dependencies: json (stdlib), pandas, numpy
+# =====================================================================
+
+import json as _json
+
+
+def load_treegraph_json(path):
+    """Read one TreeGraph output .json and return (cyls, tree, args, name).
+
+    cyls: pd.DataFrame, one row per cylinder, columns include
+          p1 (cylinder id), p2 (parent cylinder id, 0 = trunk root),
+          sx,sy,sz (start point), ax,ay,az (unit axis), radius, length,
+          vol, surface_area, branch_order, is_tip, ...
+    tree: pd.DataFrame with exactly one row of whole-tree summary stats
+          (H_from_qsm, DBH_from_qsm, vol, trunk_vol, trunk_length, length, ...)
+    args: dict of the input parameters the run used (cluster_size, min_pts, ...)
+    name: str, the treeid TreeGraph was given (e.g. "IND01_054")
+
+    NOTE: p1 is NOT guaranteed to be topologically ordered (a child's p1 can
+    be smaller than its own parent's p1) - see write_geom_from_treegraph()
+    below, which re-orders before writing geom.txt.
+    """
+    with open(path, "r", encoding="utf-8") as f:
+        J = _json.load(f)
+    cyls = pd.read_json(J["cyls"])
+    tree = pd.read_json(J["tree"])
+    return cyls, tree, J["args"], J["name"]
+
+
+def treegraph_stem_diameter_at_height(cyls, z_base, h):
+    """Diameter [m] of the trunk (branch_order == 0 cylinders) at height h
+    [m] above the tree base z_base. Same purpose as stem_diameter_at_height()
+    above, adapted to TreeGraph's own columns (sz/az/length instead of an
+    xyz+cyl index pair) - used for DBH (h=1.3) and the taper metric.
+    Returns None if h falls outside the height range covered by trunk
+    cylinders (no extrapolation)."""
+    trunk = cyls[cyls.branch_order == 0]
+    if len(trunk) == 0:
+        return None
+    z0 = trunk.sz.to_numpy() - z_base
+    z1 = z0 + trunk.length.to_numpy() * trunk.az.to_numpy()
+    lo, hi = np.minimum(z0, z1), np.maximum(z0, z1)
+    if h < lo.min() or h > hi.max():
+        return None
+    inside = (lo <= h) & (h <= hi)
+    if inside.any():
+        return float(2.0 * trunk.radius.to_numpy()[inside][0])
+    mid = 0.5 * (lo + hi)
+    nearest = int(np.argmin(np.abs(mid - h)))
+    return float(2.0 * trunk.radius.to_numpy()[nearest])
+
+
+def write_geom_from_treegraph(path, cyls, recenter_xy=True):
+    """Write a TreeGraph 'cyls' table to geom.txt in the format read by
+    bk1.mac - same 11-column layout as write_geom() above (idx, sx,sy,sz,
+    length, radius, ax,ay,az, pid, branch_order), but built directly from
+    TreeGraph's own columns instead of an xyz+cyl index pair (TreeGraph
+    already gives us length/axis, so there is no geometry to recompute here,
+    only reformatting).
+
+    Cylinder ids are RENUMBERED 1..N in a parent-before-child (topological)
+    order before writing - TreeGraph's own p1 ids are not guaranteed to be
+    in that order (a child's p1 can be numerically smaller than its
+    parent's), and geom.txt/bk1.mac expects every pid reference to point at
+    an already-defined row, same guarantee AdTree's write_geom() gets for
+    free from its DFS build order.
+    """
+    cyls = cyls.sort_values("p1").reset_index(drop=True)
+    children_of = {}
+    for p1, p2 in zip(cyls.p1, cyls.p2):
+        children_of.setdefault(int(p2), []).append(int(p1))
+
+    # BFS from the root (p2 == 0) so every parent is visited before its children
+    order = []
+    stack = list(children_of.get(0, []))
+    seen = set(stack)
+    while stack:
+        n = stack.pop()
+        order.append(n)
+        for c in children_of.get(n, []):
+            if c not in seen:
+                seen.add(c)
+                stack.append(c)
+
+    if len(order) != len(cyls):
+        raise ValueError(
+            "write_geom_from_treegraph: topological walk visited %d of %d "
+            "cylinders - the p1/p2 parent links do not form a single tree "
+            "rooted at p2 == 0." % (len(order), len(cyls)))
+
+    old_to_new = {old_p1: k for k, old_p1 in enumerate(order, start=1)}
+    by_p1 = cyls.set_index("p1")
+
+    root_row = by_p1.loc[order[0]]
+    off = np.array([root_row.sx, root_row.sy, 0.0]) if recenter_xy else np.zeros(3)
+
+    with open(path, "w") as f:
+        f.write("0\t1\t2\t3\t4\t5\t6\t7\t8\t9\t10\n")
+        for old_p1 in order:
+            row = by_p1.loc[old_p1]
+            k = old_to_new[old_p1]
+            pid = 0 if row.p2 == 0 else old_to_new[int(row.p2)]
+            s = np.array([row.sx, row.sy, row.sz]) - off
+            f.write("%d\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g\t%d\t%d\n"
+                    % (k, s[0], s[1], s[2], row.length, row.radius,
+                       row.ax, row.ay, row.az, pid, int(row.branch_order)))

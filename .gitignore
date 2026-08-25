@@ -18,6 +18,8 @@
 !scripts/python/volume_results.py
 !scripts/python/visualize_pointcloud_region.py
 !scripts/python/check_adqsm_thin_branch_length.py
+!scripts/python/treegraph_add_to_comparison.py
+!scripts/python/treegraph_export_geom.py
 
 !scripts/matlab/
 !scripts/matlab/runsken.m
