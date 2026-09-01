@@ -90,8 +90,8 @@ AdQSM_DIR = os.path.join(DATA_ROOT, TREE_NAME, "05")
 #   ADQSM_VARIANTS = ["05", "08"]
 # Each name in ADQSM_VARIANTS must be a subfolder of ADQSM_BASE_DIR that
 # contains its own taper.txt, BranchStructure.txt and TreesParams.txt.
-ADQSM_BASE_DIR = None
-ADQSM_VARIANTS = None   # e.g. ["05", "08"]
+ADQSM_BASE_DIR = os.path.join(DATA_ROOT, TREE_NAME)
+ADQSM_VARIANTS = ["05", "06", "08"]   # e.g. ["05", "08"]
 
 AdTree_DIR = os.path.join(DATA_ROOT, TREE_NAME)
 
@@ -103,7 +103,7 @@ INPUT_PLY = os.path.join(AdTree_DIR, "%s - Cloud_skeleton.ply" % TREE_NAME)
 # Remove all branches whose radius is below this threshold. The trunk (branch order 0) is never removed, even if its radius is below the threshold.
 # Example of a single variant:   RADIUS_THRESHOLDS = [0.010]
 # Example of several variants:   RADIUS_THRESHOLDS = [0.010, 0.020, 0.030]
-RADIUS_THRESHOLDS = [0.005]        # 0.030 m = 30 mm radius (60 mm diameter)
+RADIUS_THRESHOLDS = [0.005, 0.01, 0.02]        # 0.030 m = 30 mm radius (60 mm diameter)
 
 # Adaptive segment length used for resampling (in METERS). The target length at
 # a given point is SEG_LEN_K * local_radius, clamped to [SEG_LEN_MIN, SEG_LEN_MAX]:

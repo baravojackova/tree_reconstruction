@@ -171,7 +171,7 @@ end
 %  1c) USER SETTINGS - all manual setting
 %  ------------------------------------------------------------
 %
-run_tag = 'v1manual';    % change for every new settings variant
+run_tag = 'v1auto';    % change for every new settings variant
 % --- tree identification -------------------------------------
 tree_id   = 'IND01_054';           % short name used for ALL output files
 cloud_txt = 'IND01_054.txt';   % input point cloud (text file, 3 columns X Y Z)
@@ -189,19 +189,19 @@ n_workers = 0;         % 0 = derive automatically from the number of tasks
 % define_input(P, nPD1, nPD2Min, nPD2Max) = how many values are tested
 % for each of the three patch-diameter parameters
 % !!! if manual input nPD = 1
-nPD1    = 1;
-nPD2Min = 1;
-nPD2Max = 1;
+nPD1    = 2;
+nPD2Min = 2;
+nPD2Max = 2;
 
 % --- MANUAL PatchDiam (see section 9) ------------------------
-manual_patchdiam = true;   % false = keep everything from define_input
+manual_patchdiam = false;   % false = keep everything from define_input
 
 % PatchDiam1 (rought first cover) has to be t ≥ PatchDiam2Max (gentle cover)
 
 man_PD1    = 0.08;   % PatchDiam1     - AdQSM paper, Indonesian site 0,08
 man_PD2Min = 0.02;   % PatchDiam2Min
 man_PD2Max = 0.07;   % PatchDiam2Max
-man_MinCylRad = 0.0025; % MinCylRad
+man_MinCylRad = 0.0025; % MinCylRad default 0.0025
 
 % --- which model is simplified and exported ------------------
 use_optimal = true;    % true  = use the optimal model from select_optimum

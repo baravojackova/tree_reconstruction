@@ -10,7 +10,7 @@
 !
 !----------vstupni parametry
 n_sl=10					!pocet sloupcu
-n_rad=6632				!number of rows - keep the same number without first row (0)
+n_rad=2354				!number of rows - keep the same number without first row (0)
 d_kmen=0.64
 t_ks=2*d_kmen				!tloustka KS
 e_sizetree=0.1
@@ -24,7 +24,7 @@ alfa=14.2
 !
 !nacteni tabulky s geometrii ze skenu (x,y,z,lenght,radius,xaxis,yaxis,zaxis,parent,branchorder)
 *dim,geom,table,n_rad,n_sl,1,poradi,vlast
-*tread,geom,geom_IND01_054-cs0.15,txt
+*tread,geom,geom_IND01_054_v1auto_1,txt
 !
 !vypocet pozice druhehu bodu strednice valce
 *dim,geom_2,array,n_rad,5,1,poradi,vlast
@@ -66,7 +66,6 @@ alfa=14.2
 *enddo
 allsel,all
 !
-/eof
 !********korenovy system********
 !------------kruhova plocha
 !
@@ -188,7 +187,7 @@ ce,600004,0,num_kmen,uz,1,num_ks,uz,-1
 ce,600005,0,num_kmen,ux,1,num_ks,ux,-1
 ce,600006,0,num_kmen,uy,1,num_ks,uy,-1
 !
-!/eshape,1
+/eshape,1
 eplot
 !-----------MATERIAL---------
 !**********kmen*******
@@ -292,6 +291,7 @@ finish
 /post1
 SET,LAST
 rsys,12
+/eof
 nsel,s,loc,x,0
 nsel,r,loc,z,0
 nsel,r,loc,y,0

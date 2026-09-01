@@ -417,10 +417,16 @@ def plot_tree_overview(rows, tree, branch_filter, color_map):
         values = [row_of[m][field_key] for m in present_methods]
         colors = [color_of[m] for m in present_methods]
 
-        x_positions = list(range(len(present_methods)))
-        ax.bar(x_positions, values, color=colors)
+        # Spacing factor > 1 widens the gap between bars (and thus between
+        # their labels) without changing bar width itself - needed because
+        # with many methods the rotated labels below start overlapping at
+        # spacing=1 (bars packed edge-to-edge).
+        bar_spacing = 1.6
+        bar_width = 0.7
+        x_positions = [i * bar_spacing for i in range(len(present_methods))]
+        ax.bar(x_positions, values, width=bar_width, color=colors)
         ax.set_xticks(x_positions)
-        ax.set_xticklabels(present_methods, rotation=30, ha="right", fontsize=8)
+        ax.set_xticklabels(present_methods, rotation=40, ha="right", fontsize=8)
         ax.set_title(subplot_title)
 
         # Small FYI note (not the heavy AdQSM data-quality warning further

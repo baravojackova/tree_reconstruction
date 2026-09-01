@@ -84,7 +84,7 @@ REFERENCE_METHOD = "Reference (destructive)"
 # Bias/MAE/RMSE/field-error tables have SOME baseline to express every other
 # method's difference against. This is NOT an accuracy claim about AdQSM -
 # it's just "how far is each method from AdQSM", nothing more.
-REFERENCE_METHOD_NONE = "AdQSM (TreesParams)"
+REFERENCE_METHOD_NONE = "AdQSM (TreesParams) (AdQSM 05)"
 # =====================================================================
 
 
