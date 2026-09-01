@@ -272,7 +272,7 @@ fprintf('Extent: X %.2f m, Y %.2f m, Z %.2f m\n', ...
 figure('Name', ['check - ' tree_id]);
 plot3(P(:,1), P(:,2), P(:,3), '.k', 'MarkerSize', 1);
 axis equal;                      % same scale on all axes
-grid on;
+grid off;
 xlabel('X [m]'); ylabel('Y [m]'); zlabel('Z [m]');
 title(['Cleaned and positioned tree: ' tree_id], 'Interpreter', 'none');
 
@@ -569,16 +569,16 @@ else
     % --- plot: whole tree in light gray, islands in red on top ---
     figure('Name', 'Disconnected branch islands (red)');
     plot3(start_arr(:,1), start_arr(:,2), start_arr(:,3), '.', ...
-          'Color', [0.75 0.75 0.75], 'MarkerSize', 4);
+          'Color', [0.3 0.3 0.3], 'MarkerSize', 6);
     hold on
     plot3(start_arr(all_island_indices,1), start_arr(all_island_indices,2), ...
-          start_arr(all_island_indices,3), '.', 'Color', 'r', 'MarkerSize', 14);
+          start_arr(all_island_indices,3), '.', 'Color', 'r', 'MarkerSize', 18);
     xlabel('x [m]'); ylabel('y [m]'); zlabel('z [m]');
     title(sprintf('%d disconnected island(s), %.2f %% of tree volume', ...
           numel(island_groups), sum(pi.*radius_arr(all_island_indices).^2 .* ...
           length_arr(all_island_indices))/total_tree_volume*100));
     axis equal
-    grid on
+    grid off
     view(3)
     hold off
 end
@@ -641,6 +641,35 @@ else
     fprintf('QSM_simple_clean created: %d cylinders (was %d), removed %.5f m3 (%.2f %%).\n', ...
         sum(keep_mask), n_cyl_total, total_tree_volume - total_vol_clean, ...
         (total_tree_volume - total_vol_clean)/total_tree_volume*100);
+end
+
+%% ------------------------------------------------------------
+%  15d) PLOT the simplified (no islands) model for visual comparison
+%       against the raw "Simplified" model and the islands plot (15b).
+%       Only meaningful when islands were actually found and removed
+%       (guard mirrors the exist('QSM_simple_clean','var') check used
+%       for the "Simplified (no islands)" row in the volume table, 17).
+%  ------------------------------------------------------------
+
+if isempty(island_groups)
+    fprintf('No islands removed - skipping Simplified (no islands) plot.\n');
+elseif ~exist('QSM_simple_clean', 'var')
+    fprintf('QSM_simple_clean not found - skipping Simplified (no islands) plot.\n');
+else
+    fig_clean = figure('Name', 'Simplified model (no islands)');
+    if exist('plot_cylinder_model', 'file')
+        % Built-in TreeQSM plotter - renders actual cylinders (not just points)
+        plot_cylinder_model(QSM_simple_clean.cylinder, 'order', fig_clean.Number);
+    else
+        % Fallback: lightweight point plot, same style as the 15b islands plot
+        start_clean = QSM_simple_clean.cylinder.start;
+        plot3(start_clean(:,1), start_clean(:,2), start_clean(:,3), '.k', 'MarkerSize', 4);
+    end
+    xlabel('x [m]'); ylabel('y [m]'); zlabel('z [m]');
+    title('Simplified model (no islands)');
+    axis equal
+    grid off
+    view(3)
 end
 
 %% ------------------------------------------------------------
