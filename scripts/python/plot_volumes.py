@@ -68,6 +68,7 @@
 
 import os
 import random   # used in plot_error_boxplot() to jitter the individual-tree scatter points sideways
+import re        # used by shorten_method_label() to parse the CSV's full method strings
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors     # used in _darken_color() and build_method_color_map()
 import matplotlib.patches as mpatches   # used to build the shared legend in plot_tree_overview()
@@ -106,6 +107,142 @@ def save_and_report(fig, filename):
 
 
 # ----------------------------------------------------------------------
+# Short display labels, used by EVERY chart in this file wherever a
+# method's name is actually DRAWN on the figure (x-tick labels, legend
+# text, titles that name a specific method). This is DISPLAY-ONLY - see
+# shorten_method_label()'s own docstring - volume_results.csv, color_map
+# dict keys, and every lookup/filter/comparison elsewhere in this file
+# keep using the FULL, untouched method string throughout.
+# ----------------------------------------------------------------------
+
+# TreeQSM's "group" qualifier (the second, comma-separated part of
+# "TreeQSM mine (<run>, <group>)") doesn't shorten by one consistent rule -
+# "Optimal (single)" drops its parenthetical entirely, while "Simplified
+# (no islands)" keeps it (as an underscore-joined suffix, so it stays
+# visually distinguishable from plain "Simplified" rather than collapsing
+# onto it). Hard-coded per the groups actually seen in volume_results.csv
+# today; extend this table if a new TreeQSM group string appears.
+_TREEQSM_GROUP_SHORT = {
+    "Optimal (single)": "Optimal",
+    "Optimal": "Optimal",   # current volume_results.csv uses this form (no "(single)" suffix)
+    "Simplified": "Simplified",
+    "Simplified (no islands)": "Simplified_noislands",
+    "Filtered <10cm": "Filtered10cm",
+}
+
+# Known "[calmethod=...]" tag VALUES -> short suffix word (used by
+# shorten_method_label() below). calref=... tags don't need this table -
+# their value (e.g. "min5mm") is already short enough to use as-is.
+_CALMETHOD_SHORT = {
+    "regression-perorder": "regperorder",
+    "regression": "regression",
+    "interpolation-perorder": "interpperorder",
+}
+
+
+def _calibration_tag_suffix(tag):
+    """Turn a "calref=X" or "calmethod=X" tag (captured WITHOUT the
+    surrounding brackets) into a short suffix to append to an
+    "AT_Calib_..." label - e.g. "calref=min5mm" -> "_calref-min5mm",
+    "calmethod=regression-perorder" -> "_regperorder". Returns "" if `tag`
+    is None (no tag present in this method string at all - the old,
+    pre-multi-method rows had none)."""
+    if tag is None:
+        return ""
+    if tag.startswith("calref="):
+        return "_calref-%s" % tag[len("calref="):]
+    if tag.startswith("calmethod="):
+        value = tag[len("calmethod="):]
+        short = _CALMETHOD_SHORT.get(value, value.replace("-", ""))
+        # General rule (not a one-off replace): whenever "reg" and
+        # "perorder" appear together in the short form (e.g. "regperorder"
+        # from the dict above, or "regressionfooperorder" from a future
+        # calmethod value not yet added to the dict), drop the "perorder"
+        # part - it's redundant with per-order regression already being
+        # implied by context, and keeps the label short without needing a
+        # new dict entry for every future reg*-perorder variant.
+        short = re.sub(r'reg\w*?perorder', 'reg', short, count=1)
+        return "_%s" % short
+    return ""   # unrecognized tag shape - shouldn't happen, but never crash over it
+
+
+def shorten_method_label(method):
+    """Map a full volume_results.csv method string to a short display
+    label, for legends/titles/axis labels ONLY - never used to look up or
+    filter rows (matching against the CSV must always use the full,
+    untouched method string; color_map keys, reference_method comparisons,
+    etc. all keep using `method` as-is, never this function's output).
+
+    Handles the method-string "families" as they actually appear in
+    volume_results.csv today (see each branch below for the exact
+    pattern); anything that doesn't match a known pattern is returned
+    UNCHANGED - a long label drawn once is far less harmful than silently
+    mislabelling or dropping a method from a chart.
+    """
+    # "AdTree calibrated r{N}mm (AdQSM {variant}) [{tag}]? (>=10cm only)?_seg{min}-{max}-k{k}"
+    # -> "AT_Calib_{N}_{variant}_{min}/{max}/{k}" (+ a short tag suffix, if
+    # a "[calref=...]"/"[calmethod=...]" tag is present). The "(>=10cm
+    # only)" marker is dropped entirely (not folded into the short name) -
+    # branch_filter is already shown elsewhere (e.g. tree_overview's own
+    # suptitle), so repeating it here would be redundant.
+    m = re.match(
+        r'^AdTree calibrated r(\d+)mm \(AdQSM ([^)]+)\)'
+        r'(?: \[(calref=[^\]]+|calmethod=[^\]]+)\])?'
+        r'(?: \(>=\d+cm only\))?'
+        r'_seg(\d+)-(\d+)-k(\d+)$',
+        method)
+    if m:
+        n_mm, variant, tag, seg_min, seg_max, seg_k = m.groups()
+        return "AT_Calib_%s_%s_%s/%s/%s" % (n_mm, variant, seg_min, seg_max, seg_k) \
+            + _calibration_tag_suffix(tag)
+
+    # "AdTree raw r{N}mm (>=10cm only)?_seg{min}-{max}-k{k}"
+    # -> "AT_Raw_{N}_{min}/{max}/{k}" - no variant (raw isn't calibrated
+    # against any particular AdQSM variant).
+    m = re.match(r'^AdTree raw r(\d+)mm(?: \(>=\d+cm only\))?_seg(\d+)-(\d+)-k(\d+)$', method)
+    if m:
+        n_mm, seg_min, seg_max, seg_k = m.groups()
+        return "AT_Raw_%s_%s/%s/%s" % (n_mm, seg_min, seg_max, seg_k)
+
+    # "TreeQSM mine ({run}, {group})" -> "TQ_{run}_{group_short}". `group`
+    # can itself contain parentheses (e.g. "Optimal (single)"), so this is
+    # parsed by stripping the outer "TreeQSM mine (...)" wrapper and
+    # splitting on the FIRST ", " rather than with one regex.
+    if method.startswith("TreeQSM mine (") and method.endswith(")"):
+        inner = method[len("TreeQSM mine ("):-1]
+        if ", " in inner:
+            run, group = inner.split(", ", 1)
+            group_short = _TREEQSM_GROUP_SHORT.get(group)
+            if group_short is not None:
+                return "TQ_%s_%s" % (run, group_short)
+
+    # "TreeQSM de Tanago (mean)" / "TreeQSM de Tanago (mean, Filtered<10cm)"
+    # -> "TQ_ref" / "TQ_ref_Filtered10cm" (exact matches - only these two
+    # variants exist today).
+    if method == "TreeQSM de Tanago (mean)":
+        return "TQ_ref"
+    if method == "TreeQSM de Tanago (mean, Filtered<10cm)":
+        return "TQ_ref_Filtered10cm"
+
+    # "AdQSM (TreesParams) (AdQSM {variant})" -> "AQ_Params_{variant}"
+    m = re.match(r'^AdQSM \(TreesParams\) \(AdQSM ([^)]+)\)$', method)
+    if m:
+        return "AQ_Params_%s" % m.group(1)
+
+    # "AdQSM (BranchStructure, cyl. approx.) (AdQSM {variant})"
+    # -> "AQ_BranchApprox_{variant}"
+    m = re.match(r'^AdQSM \(BranchStructure, cyl\. approx\.\) \(AdQSM ([^)]+)\)$', method)
+    if m:
+        return "AQ_BranchApprox_%s" % m.group(1)
+
+    # "Reference (destructive)" -> "Ref"
+    if method == "Reference (destructive)":
+        return "Ref"
+
+    return method   # unrecognized shape - show it in full rather than guess
+
+
+# ----------------------------------------------------------------------
 # Shared colour scheme, used by EVERY chart in this file (plot_tree_overview,
 # plot_total_volume_by_tree, plot_error_boxplot, plot_error_metrics_bar).
 #
@@ -124,75 +261,118 @@ def save_and_report(fig, filename):
 def build_method_color_map(methods, reference_method):
     """Return a {method: color} dict for the given list of methods.
 
-    Non-reference methods are now split into TWO groups, each with its OWN
-    smooth gradient, instead of one shared gradient for everyone (Task 2):
-      - Methods whose name starts with "AdTree" (all AdTree rows do, by
-        construction - "AdTree raw ...", "AdTree calibrated ...") get a
-        warm YELLOW/AMBER gradient (pale yellow -> gold -> amber -> deep
-        amber). Chosen deliberately warm-but-distinct from "coral" (the
-        reference highlight below) so AdTree bars/boxes read as a clearly
-        separate family at a glance, without visually merging into the
-        reference highlight.
-      - Every other non-reference method (TreeQSM, AdQSM, etc.) keeps the
-        EXISTING muted MINT/TEAL gradient exactly as before - soft mint
-        green through turquoise to a deeper teal (built by hand from those
-        four hex stops via LinearSegmentedColormap, rather than using one
-        of matplotlib's stock qualitative palettes) - a continuous,
-        pastel, low-saturation gradient like this stays readable even with
-        a dozen+ methods in one chart, unlike matplotlib's default bright/
-        saturated color cycle, which starts visually clashing once you
-        have more than ~5 categories.
+    Non-reference methods are split into FOUR groups by the FULL,
+    untouched method string's prefix - deliberately independent of
+    shorten_method_label() (this function never shortens a label, it only
+    classifies the original string), so a future change to the short-label
+    rules can never accidentally change which colour a method gets:
+      - "AdTree raw ..."        -> pastel GREEN gradient
+      - "AdTree calibrated ..." -> pastel BLUE gradient
+      - "TreeQSM ..."           -> pastel GREY gradient (covers both
+        "TreeQSM mine (...)" and "TreeQSM de Tanago (...)")
+      - "AdQSM ..."             -> pastel YELLOW/OCHRE gradient (covers
+        both "AdQSM (TreesParams) ..." and "AdQSM (BranchStructure...) ...")
     Each group is spread evenly across ITS OWN gradient's 0..1 range
     independently (same `t = i/(n-1)` logic as before, just computed once
-    PER GROUP) - so adding/removing an AdTree variant never shifts the
-    TreeQSM/AdQSM colors, and vice versa.
+    PER GROUP, same as the previous 2-group scheme) - so adding/removing a
+    method in one group never shifts another group's shades.
 
     `reference_method` (the method this chart is comparing everything else
     against - REFERENCE_METHOD for the destructive-reference mode, or
-    REFERENCE_METHOD_NONE for the AdQSM-as-yardstick mode) is deliberately
-    EXCLUDED from both gradients and instead gets a single fixed highlight
-    colour ("coral" - a warm, high-contrast tone chosen specifically because
-    the mint/teal gradient is entirely cool-toned, so a warm highlight
-    stands out at a glance instead of reading as "just another teal shade" -
-    it also stays visually distinct from the new AdTree amber gradient,
-    since amber/gold and coral are different enough hues not to be confused
-    even though both are "warm"). This guarantees the reference can never
-    accidentally land on the same shade as one of the gradient-coloured
-    methods (which could happen with the old "reference = hard-coded
-    tab:orange, everything else = matplotlib's automatic cycle" approach,
-    since that cycle's orange could still coincide with the explicit one -
-    see the tree_overview color-collision bug fixed earlier in this file's
-    history). Excluding it from the gradients also means its position never
-    shifts the other methods' shades depending on where in the method list
-    it happens to sit.
+    REFERENCE_METHOD_NONE for the AdQSM-as-yardstick mode) is checked
+    against the four family prefixes FIRST, before any other
+    classification:
+      - If reference_method's prefix does NOT match any of the four
+        families (e.g. REFERENCE_METHOD, "Reference (destructive)"), it
+        is excluded from the four groups and instead gets a single fixed
+        PINK/RED highlight colour (not a gradient, same "one flat
+        highlight colour" treatment the old "coral" reference had - just
+        a pink/red hue now), so it can never accidentally land on the
+        same shade as one of the gradient-coloured methods.
+      - If reference_method's prefix DOES match one of the four families
+        (e.g. REFERENCE_METHOD_NONE, which literally IS an "AdQSM ..."
+        method string, in the "none" mode), it is NOT isolated - it is
+        classified into that family's group like any other member (sorted
+        FIRST within that group) and shares that family's gradient with
+        its siblings, so the "none" mode shows every AdQSM variant
+        together in one gradient family instead of splitting the
+        reference out into its own colour while its siblings stay
+        yellow.
+
+    Any non-reference method whose prefix matches NONE of "AdTree raw",
+    "AdTree calibrated", "TreeQSM", "AdQSM" is unexpected (every method
+    string produced by this project's pipeline today starts with one of
+    those) - rather than crashing, it's printed as a clear warning and
+    coloured a flat neutral grey (a different, flatter grey than the
+    TreeQSM pastel-grey GRADIENT, so an unclassified method is still
+    visually distinguishable from an actual TreeQSM one).
+
+    Also prints, for every method in `methods`, which group (green/blue/
+    grey/yellow/pink) it was classified into - a diagnostic so the colour
+    assignment can be reviewed at a glance, same spirit as
+    shorten_method_label()'s own diagnostic table printed in the RUN
+    section below.
     """
-    # Hand-picked, pastel mint/turquoise stops (not fully saturated) so the
-    # gradient stays easy on the eye across many bars/boxes at once, while
-    # still spanning a visibly distinct light-mint-to-deep-teal range.
-    gradient = mcolors.LinearSegmentedColormap.from_list(
-        "method_gradient",
-        ["#d3f5ec", "#8fe0cf", "#4fbfae", "#2f8f8a"],  # light mint -> mint -> turquoise -> deep teal
+    # Hand-picked, pastel (light, low-saturation) stops per group - four
+    # stops each, same style as this file's previous hand-built gradients,
+    # so a dozen+ methods in one group still stays readable instead of
+    # clashing the way matplotlib's default saturated cycle would.
+    green_gradient = mcolors.LinearSegmentedColormap.from_list(
+        "adtree_raw_gradient",
+        ["#e1f5e1", "#b8e2b8", "#8fce8f", "#63b563"],  # pastel green: pale -> sage -> leaf -> deeper green
+    )
+    blue_gradient = mcolors.LinearSegmentedColormap.from_list(
+        "adtree_calib_gradient",
+        ["#dceaf9", "#b3d1f2", "#84b3e8", "#5a92d6"],  # pastel blue: pale -> sky -> mid -> deeper blue
+    )
+    grey_gradient = mcolors.LinearSegmentedColormap.from_list(
+        "treeqsm_gradient",
+        ["#eeeeee", "#d4d4d4", "#b8b8b8", "#98989a"],  # pastel grey: near-white -> light -> mid -> deeper grey
+    )
+    yellow_gradient = mcolors.LinearSegmentedColormap.from_list(
+        "adqsm_gradient",
+        ["#fdf3c9", "#f8e08c", "#eec85a", "#d6a83f"],  # pastel yellow/ochre: pale -> gold -> ochre -> deeper ochre
     )
 
-    # Task 2: separate warm yellow/amber gradient, used ONLY for methods
-    # whose name starts with "AdTree" - keeps this "family" visually
-    # distinct from the mint/teal TreeQSM/AdQSM family in every chart.
-    adtree_gradient = mcolors.LinearSegmentedColormap.from_list(
-        "adtree_gradient",
-        ["#fff3b0", "#ffd166", "#f4a300", "#c97a00"],  # pale yellow -> gold -> amber -> deep amber
-    )
+    family_prefixes = ("AdTree raw", "AdTree calibrated", "TreeQSM", "AdQSM")
+    reference_is_family_member = any(
+        reference_method.startswith(p) for p in family_prefixes) if reference_method else False
+    print("  build_method_color_map(): reference '%s' %s a known family prefix - %s"
+          % (reference_method,
+             "matches" if reference_is_family_member else "does NOT match",
+             "included within its family gradient (sorted first in that group), not isolated"
+             if reference_is_family_member else "isolated with its own fixed highlight colour"))
 
     non_ref_methods = [m for m in methods if m != reference_method]
-    # Split into the two groups BEFORE assigning colors, so each group's
-    # `t = i/(n-1)` spread is computed over ONLY that group's own count -
-    # an AdTree method being added/removed must never shift where a
-    # TreeQSM/AdQSM method lands on the mint/teal gradient, and vice versa.
-    adtree_methods = [m for m in non_ref_methods if m.startswith("AdTree")]
-    other_methods = [m for m in non_ref_methods if not m.startswith("AdTree")]
+
+    # Classify BEFORE assigning colors, so each group's `t = i/(n-1)`
+    # spread is computed over ONLY that group's own count - a method being
+    # added/removed in one group must never shift another group's shades.
+    # When the reference matches a family, it's put in the pool FIRST so it
+    # lands at the start of its family's group list (see docstring above).
+    classify_pool = ([reference_method] + non_ref_methods) if reference_is_family_member else non_ref_methods
+    groups = {"AdTree raw": [], "AdTree calibrated": [], "TreeQSM": [], "AdQSM": []}
+    unclassified = []
+    for m in classify_pool:
+        if m.startswith("AdTree raw"):
+            groups["AdTree raw"].append(m)
+        elif m.startswith("AdTree calibrated"):
+            groups["AdTree calibrated"].append(m)
+        elif m.startswith("TreeQSM"):
+            groups["TreeQSM"].append(m)
+        elif m.startswith("AdQSM"):
+            groups["AdQSM"].append(m)
+        else:
+            unclassified.append(m)
 
     color_of = {}
-    for group_methods, group_gradient in ((adtree_methods, adtree_gradient),
-                                           (other_methods, gradient)):
+    group_of_method = {}   # for the diagnostic print below only
+    for group_name, group_gradient, color_name in (
+            ("AdTree raw", green_gradient, "green"),
+            ("AdTree calibrated", blue_gradient, "blue"),
+            ("TreeQSM", grey_gradient, "grey"),
+            ("AdQSM", yellow_gradient, "yellow")):
+        group_methods = groups[group_name]
         n = len(group_methods)
         for i, m in enumerate(group_methods):
             # Spread methods evenly across the gradient's full 0..1 range. With
@@ -200,9 +380,25 @@ def build_method_color_map(methods, reference_method):
             # is used instead of dividing by (n - 1) = 0.
             t = (i / (n - 1)) if n > 1 else 0.5
             color_of[m] = group_gradient(t)
+            group_of_method[m] = color_name
 
-    if reference_method in methods:
-        color_of[reference_method] = "coral"
+    if unclassified:
+        print("WARNING: build_method_color_map(): %d method(s) matched none of "
+              "'AdTree raw'/'AdTree calibrated'/'TreeQSM'/'AdQSM' and are not the "
+              "reference method - falling back to flat neutral grey: %s"
+              % (len(unclassified), unclassified))
+        for m in unclassified:
+            color_of[m] = "#9a9a9a"   # flat neutral grey - distinct from the TreeQSM grey GRADIENT
+            group_of_method[m] = "grey (unclassified fallback)"
+
+    if reference_method in methods and not reference_is_family_member:
+        color_of[reference_method] = "#ef476f"   # fixed pink/red highlight (was "coral")
+        group_of_method[reference_method] = "pink (reference)"
+
+    print("  build_method_color_map(): colour-group assignment for this mode "
+          "(reference='%s'):" % reference_method)
+    for m in methods:
+        print("    %-75s -> %s" % (m, group_of_method.get(m, "?")))
 
     return color_of
 
@@ -217,6 +413,72 @@ def order_with_reference_first(methods, reference_method):
     if reference_method in methods:
         return [reference_method] + [m for m in methods if m != reference_method]
     return methods
+
+
+def group_order_methods(methods, reference_method):
+    """Order `methods` into a fixed 4-group sequence, so chart x-axis/box/
+    legend order is consistent across every chart regardless of which order
+    methods happen to first appear in the CSV:
+
+      1. reference_method's own family group (if reference_method's prefix
+         matches one of "AdQSM"/"TreeQSM"/"AdTree raw"/"AdTree calibrated" -
+         e.g. the "none" mode, where the reference IS an AdQSM variant):
+         reference_method FIRST, then its remaining family siblings in
+         their existing relative order. If reference_method matches NO
+         family (e.g. "Reference (destructive)" in "10cm" mode), this
+         group is just reference_method alone, first.
+      2. AdTree raw   (remaining methods with this prefix, existing
+         relative order, skipping anything already placed in group 1)
+      3. AdTree calibrated (same pattern)
+      4. TreeQSM      (same pattern)
+
+    Any method matching none of the four family prefixes and not already
+    placed as the reference is appended at the end, in its original
+    relative order, with a printed warning - should not normally happen,
+    matching this file's existing defensive-fallback style (see
+    build_method_color_map()'s "unclassified" handling).
+    """
+    family_prefixes = ("AdTree raw", "AdTree calibrated", "TreeQSM", "AdQSM")
+    reference_family = None
+    if reference_method is not None:
+        for p in family_prefixes:
+            if reference_method.startswith(p):
+                reference_family = p
+                break
+
+    placed = set()
+    ordered = []
+
+    # Group 1: reference_method's own family (or just itself, if no family match).
+    if reference_method in methods:
+        ordered.append(reference_method)
+        placed.add(reference_method)
+    if reference_family is not None:
+        for m in methods:
+            if m.startswith(reference_family) and m not in placed:
+                ordered.append(m)
+                placed.add(m)
+
+    # Groups 2-4: the three remaining fixed families, in this fixed order,
+    # skipping reference_family (already handled as group 1 above) and
+    # anything already placed.
+    for family in ("AdTree raw", "AdTree calibrated", "TreeQSM"):
+        if family == reference_family:
+            continue
+        for m in methods:
+            if m.startswith(family) and m not in placed:
+                ordered.append(m)
+                placed.add(m)
+
+    # Anything left over matched no known family prefix - append as-is.
+    leftover = [m for m in methods if m not in placed]
+    if leftover:
+        print("WARNING: group_order_methods(): %d method(s) matched none of "
+              "'AdTree raw'/'AdTree calibrated'/'TreeQSM'/'AdQSM' - appending at "
+              "the end in original order: %s" % (len(leftover), leftover))
+        ordered.extend(leftover)
+
+    return ordered
 
 
 def _darken_color(color, factor=0.6):
@@ -258,10 +520,11 @@ def plot_total_volume_by_tree(rows, color_map):
     trees = sorted({r["tree"] for r in rows})
     # dict.fromkeys() keeps the methods in the order they first appear in
     # the CSV (a plain set() would print them in a random order every run).
-    # order_with_reference_first() (Task 1) then moves REFERENCE_METHOD (the
-    # destructive reference - this chart is always "10cm" mode) to the front,
-    # so its highlighted bar is always the leftmost group member/legend entry.
-    methods = order_with_reference_first(list(dict.fromkeys(r["method"] for r in rows)), REFERENCE_METHOD)
+    # group_order_methods() then puts REFERENCE_METHOD (the destructive
+    # reference - this chart is always "10cm" mode) first, followed by the
+    # fixed AdTree raw / AdTree calibrated / TreeQSM group order, so bars
+    # are always in the same order across every chart.
+    methods = group_order_methods(list(dict.fromkeys(r["method"] for r in rows)), REFERENCE_METHOD)
 
     # Quick lookup: (tree, method) -> total_m3 (may be missing -> None).
     total_of = {(r["tree"], r["method"]): r["total"] for r in rows}
@@ -284,7 +547,7 @@ def plot_total_volume_by_tree(rows, color_map):
         # colour as every other chart's reference bar/box.
         ax.bar(x, heights, width=bar_width,
                color=color_map.get(method),
-               label=method + (" (reference)" if is_ref else ""))
+               label=shorten_method_label(method) + (" (reference)" if is_ref else ""))
 
     # Put the x-axis tick for each tree in the middle of its group of bars.
     group_centers = [tree_idx + bar_width * (n_methods - 1) / 2.0 for tree_idx in range(len(trees))]
@@ -332,7 +595,7 @@ def plot_tree_overview(rows, tree, branch_filter, color_map):
     # annotations further down were silently never drawn for "none" mode
     # charts, even though AdQSM WAS present and perfectly usable as a
     # yardstick. Computing the right reference per-mode here fixes that.
-    # (Moved above the `methods` list below so order_with_reference_first()
+    # (Moved above the `methods` list below so group_order_methods()
     # can use it right away - it only depends on branch_filter, not on the
     # tree's actual rows, so computing it first is safe.)
     reference_method = REFERENCE_METHOD if branch_filter == "10cm" else REFERENCE_METHOD_NONE
@@ -345,7 +608,7 @@ def plot_tree_overview(rows, tree, branch_filter, color_map):
     # The actual COLOUR per method still comes from `color_map` (built once
     # in the RUN section via build_method_color_map(), shared across every
     # chart in this file), not from an ad-hoc palette built locally here.
-    methods = order_with_reference_first(
+    methods = group_order_methods(
         list(dict.fromkeys(r["method"] for r in tree_rows)), reference_method)
     # One row dict per method, for quick lookups below (assumes at most one
     # row per (tree, method) pair, which is how upsert_result() keeps the CSV).
@@ -388,14 +651,31 @@ def plot_tree_overview(rows, tree, branch_filter, color_map):
         ("n_cylinders", "Number of cylinders"),
     ]
 
+    # Unit shown next to the absolute-difference annotation below, matching
+    # each field's own subplot_title unit above exactly (m^3 -> "m3" without
+    # the caret, since it's plain annotation text, not an axis label; "" for
+    # n_cylinders, which has no unit - see the annotation loop's "n_cylinders"
+    # special case, which formats it as a plain signed integer instead).
+    FIELD_UNITS = {
+        "total": "m3", "stem": "m3", "branch": "m3",
+        "dbh": "m", "height": "m",
+        "taper": "cm/m",
+        "trunk_len": "m", "branch_len": "m",
+        "n_cylinders": "",
+    }
+
     # GRID SIZE CHOICE: 3x3 (9 slots), matches the 9 fields above exactly -
     # no empty panel to explain away. (Previously 2x4/8 fields fit its own
     # grid perfectly too, for the same reason - adding n_cylinders as a 9th
     # field made 3x3 the new perfect fit instead of leaving an empty slot
     # in a 2x5 grid.) figsize scaled to keep each panel roughly the same
     # size as before (21/4 =~5.25 wide, 9/2 =~4.5 tall per panel before ->
-    # 3*5.25 =~16 wide, 3*4.5 =~13.5 tall now).
-    fig, axes = plt.subplots(3, 3, figsize=(16, 13.5))
+    # 3*5.25 =~16 wide, 3*4.5 =~13.5 tall now). Height bumped again to
+    # 3*5.3 =~16 tall (was 13.5) - taller panels give the rotated 90 deg
+    # deviation annotations (see the annotation loop below) more vertical
+    # room, on top of the ylim headroom fix, instead of relying on ylim
+    # headroom alone to keep them from crossing into the panel above.
+    fig, axes = plt.subplots(3, 3, figsize=(16, 16))
 
     for ax, (field_key, subplot_title) in zip(axes.flat, fields):
         # Skip methods with no value (None) for THIS field entirely, instead
@@ -426,7 +706,8 @@ def plot_tree_overview(rows, tree, branch_filter, color_map):
         x_positions = [i * bar_spacing for i in range(len(present_methods))]
         ax.bar(x_positions, values, width=bar_width, color=colors)
         ax.set_xticks(x_positions)
-        ax.set_xticklabels(present_methods, rotation=40, ha="right", fontsize=8)
+        ax.set_xticklabels([shorten_method_label(m) for m in present_methods],
+                           rotation=40, ha="right", fontsize=8)
         ax.set_title(subplot_title)
 
         # Small FYI note (not the heavy AdQSM data-quality warning further
@@ -450,17 +731,48 @@ def plot_tree_overview(rows, tree, branch_filter, color_map):
         # REFERENCE_METHOD_NONE for "none" - see the comment where that
         # variable is set above), NOT a hard-coded REFERENCE_METHOD, so this
         # annotation now actually appears in "none"-mode charts too.
+        #
+        # Also shows the SIGNED ABSOLUTE difference (value - ref_value), on
+        # a second line, in this field's own unit (matching whatever unit
+        # subplot_title already shows for it above - see FIELD_UNITS below).
+        # WHY both: a percentage alone can make a small absolute difference
+        # on a small reference value look dramatic, while an equally-small
+        # absolute difference on a large reference value looks negligible -
+        # showing both numbers lets the viewer judge practical relevance
+        # themselves instead of only seeing one side of that picture.
+        # Extra headroom above the tallest bar, set BEFORE the annotation
+        # loop below (not after) - the two-line, rotated 90 deg deviation
+        # annotations need vertical room reserved above the bars they sit
+        # on, so the axis already has that room when the text is placed,
+        # instead of relying on a post-hoc ylim bump to keep it from
+        # running into subplot_title/the neighbouring panel. Based on
+        # `values` (the actual bar heights) rather than whatever ylim
+        # ax.bar() happened to autoscale to, so it's not sensitive to
+        # matplotlib's own default margin. Bumped from the previous 18% to
+        # 35% - 18% still left a few labels crossing into the panel above
+        # at small fontsize/rotation=90 in practice.
+        finite_values = [v for v in values if v is not None]
+        if finite_values and max(finite_values) > 0:
+            ax.set_ylim(top=max(finite_values) * 1.35)
+
         ref_value = ref_row[field_key] if ref_row is not None else None
+        unit = FIELD_UNITS.get(field_key, "")
         for xi, m in zip(x_positions, present_methods):
             if m == reference_method:
                 continue
-            d_pct = pct_diff(row_of[m][field_key], ref_value)
+            value = row_of[m][field_key]
+            d_pct = pct_diff(value, ref_value)
             if d_pct is None:   # no reference value to compare against - leave blank
                 continue
-            ax.annotate("%+.0f%%" % d_pct,
-                        xy=(xi, row_of[m][field_key]),
+            d_abs = value - ref_value   # ref_value is guaranteed non-None here (d_pct was not None)
+            if field_key == "n_cylinders":
+                abs_text = "%+d" % round(d_abs)   # a cylinder COUNT - never fractional
+            else:
+                abs_text = ("%+.2f %s" % (d_abs, unit)).strip()
+            ax.annotate("%+.0f%%\n(%s)" % (d_pct, abs_text),
+                        xy=(xi, value),
                         xytext=(0, 3), textcoords="offset points",   # 3 points above the bar top
-                        ha="center", va="bottom", fontsize=7)
+                        ha="center", va="bottom", fontsize=5, linespacing=1.15, rotation=90)
 
     # Subtitle spells out which methodology this figure shows, so it's clear
     # at a glance even without reading the filename.
@@ -498,7 +810,7 @@ def plot_tree_overview(rows, tree, branch_filter, color_map):
     # hard-coded REFERENCE_METHOD, so AdQSM correctly gets tagged in "none" mode.
     legend_handles = [
         mpatches.Patch(color=color_of[m],
-                       label=m + (" (reference)" if m == reference_method else ""))
+                       label=shorten_method_label(m) + (" (reference)" if m == reference_method else ""))
         for m in methods
     ]
     fig.legend(handles=legend_handles, loc="lower center",
@@ -532,10 +844,11 @@ def plot_error_boxplot(rows, branch_filter, reference_method, color_map):
     trees = sorted({r["tree"] for r in rows})
     # reference_method is already excluded here (this chart never draws a
     # box for it, only the axhline(0.0) below stands in for "perfect match
-    # with the reference"), so order_with_reference_first() (Task 1) is a
-    # no-op in practice - applied anyway for consistency with every other
-    # method-list build in this file, and in case that exclusion ever changes.
-    methods = order_with_reference_first(
+    # with the reference"), so group_order_methods()'s "group 1" is a no-op
+    # in practice (reference_method isn't in the list to move) - applied
+    # anyway for consistency with every other method-list build in this
+    # file, and in case that exclusion ever changes.
+    methods = group_order_methods(
         [m for m in dict.fromkeys(r["method"] for r in rows) if m != reference_method],
         reference_method)
     total_of = {(r["tree"], r["method"]): r["total"] for r in rows}
@@ -569,7 +882,10 @@ def plot_error_boxplot(rows, branch_filter, reference_method, color_map):
     # set from color_map below - this is what makes THIS chart's per-method
     # colours match every other chart's, instead of every box being the
     # same default matplotlib blue.
-    bplot = ax.boxplot(data, tick_labels=labels, patch_artist=True)
+    # tick_labels gets the SHORTENED display text - `labels` itself stays
+    # full-string throughout (it's still used below for color_map lookups
+    # keyed by the full method string, e.g. the zip()s further down).
+    bplot = ax.boxplot(data, tick_labels=[shorten_method_label(m) for m in labels], patch_artist=True)
     for patch, m in zip(bplot["boxes"], labels):
         # facecolor gets an ALPHA of 0.55 (via to_rgba, not patch.set_alpha())
         # specifically so only the FILL becomes semi-transparent - this is
@@ -609,7 +925,7 @@ def plot_error_boxplot(rows, branch_filter, reference_method, color_map):
                 markeredgewidth=0, alpha=0.9, zorder=3)   # zorder=3: draw dots ON TOP of the (semi-transparent) boxes
     ax.set_ylabel("Error vs. reference [%]")
     ax.set_title("Total-volume error distribution by method (across trees)\n"
-                  "vs. '%s'  (branch_filter='%s')" % (reference_method, branch_filter))
+                  "vs. '%s'  (branch_filter='%s')" % (shorten_method_label(reference_method), branch_filter))
     ax.tick_params(axis="x", rotation=30)
     fig.tight_layout()
     # Filename includes branch_filter so the "10cm" and "none" versions of
@@ -637,9 +953,10 @@ def plot_error_metrics_bar(rows, branch_filter, reference_method, color_map):
 
     # compute_error_metrics() already excludes reference_method from its
     # results (same reasoning as plot_error_boxplot() above), so
-    # order_with_reference_first() (Task 1) is a no-op here too - applied
-    # anyway for consistency with every other method-list build in this file.
-    methods = order_with_reference_first([m["method"] for m in metrics], reference_method)
+    # group_order_methods()'s "group 1" is a no-op here too (reference_method
+    # isn't in the list to move) - applied anyway for consistency with every
+    # other method-list build in this file.
+    methods = group_order_methods([m["method"] for m in metrics], reference_method)
     bias = [m["bias"] for m in metrics]
     mae = [m["mae"] for m in metrics]
     rmse = [m["rmse"] for m in metrics]
@@ -652,25 +969,27 @@ def plot_error_metrics_bar(rows, branch_filter, reference_method, color_map):
     # for Bias/MAE/RMSE), so a single "one colour per method" mapping
     # (color_map) doesn't fit the same way it does in the other three charts
     # (there, each bar/box IS one method). Instead, the three metrics
-    # themselves are drawn in fixed colours sampled from the SAME mint/teal
-    # family used everywhere else (so this chart still belongs visually to
-    # the same set), and each method's x-axis tick label is tinted with its
-    # color_map colour below - that's how this chart still shows "this
-    # method = this colour", consistent with the rest.
-    ax.bar([xi - width for xi in x], bias, width=width, label="Bias", color="#8fe0cf")   # mint (gradient start)
-    ax.bar(x,                        mae,  width=width, label="MAE",  color="#4fbfae")   # turquoise (gradient middle)
-    ax.bar([xi + width for xi in x], rmse, width=width, label="RMSE", color="#2f8f8a")   # deep teal (gradient end)
+    # themselves are drawn in a fixed mint/turquoise/teal triplet (a flat,
+    # method-independent style choice for this chart specifically - not tied
+    # to build_method_color_map()'s groups), and each method's x-axis tick
+    # label is tinted with its color_map colour below - that's how this
+    # chart still shows "this method = this colour", consistent with the rest.
+    ax.bar([xi - width for xi in x], bias, width=width, label="Bias", color="#8fe0cf")   # mint
+    ax.bar(x,                        mae,  width=width, label="MAE",  color="#4fbfae")   # turquoise
+    ax.bar([xi + width for xi in x], rmse, width=width, label="RMSE", color="#2f8f8a")   # deep teal
     ax.axhline(0.0, color="gray", linestyle="-", linewidth=0.8)
     ax.set_xticks(x)
-    ax.set_xticklabels(methods, rotation=30, ha="right")
+    ax.set_xticklabels([shorten_method_label(m) for m in methods], rotation=30, ha="right")
     # Tint each x-axis tick label with that method's shared color_map colour,
     # so this chart still visually agrees with the other three on "which
     # colour is which method", even though its BARS are coloured by metric
-    # (Bias/MAE/RMSE) rather than by method - see the comment above.
+    # (Bias/MAE/RMSE) rather than by method - see the comment above. Zips
+    # against the FULL-string `methods` list (not the shortened tick text),
+    # since color_map is keyed by the full method string.
     for tick_label, m in zip(ax.get_xticklabels(), methods):
         tick_label.set_color(color_map.get(m, "#333333"))
     ax.set_ylabel("Volume error [m^3]")
-    ax.set_title("Error metrics vs. '%s'  (branch_filter='%s')" % (reference_method, branch_filter))
+    ax.set_title("Error metrics vs. '%s'  (branch_filter='%s')" % (shorten_method_label(reference_method), branch_filter))
     ax.legend()
     fig.tight_layout()
     # Filename includes branch_filter, same reason as plot_error_boxplot() above.
@@ -687,6 +1006,19 @@ if __name__ == "__main__":
 
     rows = load_results(RESULTS_CSV)
     all_trees = sorted({r["tree"] for r in rows})
+
+    # ---- DIAGNOSTIC: full method string -> short display label ------------
+    # Printed BEFORE shorten_method_label() gets wired into any chart below,
+    # so the mapping can be reviewed against real CSV data before trusting
+    # it - see that function's own docstring for the mapping rules. Every
+    # DISTINCT method string currently in volume_results.csv (both modes
+    # combined), sorted alphabetically.
+    print("=" * 90)
+    print("DIAGNOSTIC: method name -> short label mapping (review before trusting on charts)")
+    print("=" * 90)
+    for m in sorted({r["method"] for r in rows}):
+        print("  %-75s -> %s" % (m, shorten_method_label(m)))
+    print()
 
     # Pre-filtered once here too (mirrors compare_volumes.py's RUN section),
     # and passed into the "vs. reference" chart functions below - they also

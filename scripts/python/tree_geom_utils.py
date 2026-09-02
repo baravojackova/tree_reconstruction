@@ -247,12 +247,14 @@ def make_trunk_radius_func(taper_heights, taper_diameters, field_dbh=None):
     return trunk_radius
 
 
-def parse_adqsm_branch_file(path):
-    """Parse an AdQSM BranchStructure.txt file and return the MEDIAN AdQSM
-    radius per branch order. Only lines that split by TAB into >=7 fields
-    whose first field is an integer are used (column 0 = order, column 2 =
-    diameter [m]); the file may contain several concatenated runs, all
-    matching rows are used."""
+def parse_adqsm_branch_file_raw(path):
+    """Same parsing as parse_adqsm_branch_file() (order = column 0, diameter
+    = column 2 in metres, /2.0 for radius) but returns the RAW dict
+    {order: [radius, radius, ...]} instead of reducing to medians - needed
+    for quantile-matching against AdTree's distribution (see
+    build_quantile_matched_pairs()) instead of comparing single median
+    points. parse_adqsm_branch_file() below is just this function reduced
+    to per-order medians."""
     diam_by_order = {}
     with open(path, "r", encoding="latin-1") as f:
         for line in f:
@@ -265,6 +267,16 @@ def parse_adqsm_branch_file(path):
             except ValueError:
                 continue
             diam_by_order.setdefault(order, []).append(diameter / 2.0)
+    return diam_by_order
+
+
+def parse_adqsm_branch_file(path):
+    """Parse an AdQSM BranchStructure.txt file and return the MEDIAN AdQSM
+    radius per branch order. Only lines that split by TAB into >=7 fields
+    whose first field is an integer are used (column 0 = order, column 2 =
+    diameter [m]); the file may contain several concatenated runs, all
+    matching rows are used."""
+    diam_by_order = parse_adqsm_branch_file_raw(path)
     return {o: float(np.median(r)) for o, r in diam_by_order.items()}
 
 
@@ -390,6 +402,12 @@ def report_adqsm_thin_branch(path, cut_cm=10.0, params_file=None):
     the COUNT and PERCENTAGE of branches thinner than cut_cm - clearly
     labelled as a proxy, since no volume can honestly be computed from
     diameter alone.
+
+    Returns a dict (stem_vol, branch_vol, stem_vol_kept, branch_vol_kept,
+    trunk_len_kept, branch_len_kept, have_length) when the length column
+    was usable, or None in the proxy-only fallback case (no volume to
+    report). See adtree_reconstruct_compare.py for the caller that upserts
+    an AdQSM ">=10cm only" comparison row from this.
     """
     header_cols = _read_adqsm_branch_header(path)
     idx_diam = _find_adqsm_column(header_cols, ["diameter"])
@@ -443,6 +461,8 @@ def report_adqsm_thin_branch(path, cut_cm=10.0, params_file=None):
         branch_vol = float(volumes[is_branch].sum())
         stem_vol_kept = float(volumes[is_stem & keep].sum())
         branch_vol_kept = float(volumes[is_branch & keep].sum())
+        trunk_len_kept = float(length_arr[is_stem & keep].sum())
+        branch_len_kept = float(length_arr[is_branch & keep].sum())
 
         for label, v_total, v_kept in (("Stem", stem_vol, stem_vol_kept),
                                         ("Branch", branch_vol, branch_vol_kept)):
@@ -461,6 +481,19 @@ def report_adqsm_thin_branch(path, cut_cm=10.0, params_file=None):
                 print("    BranchVolume = %7.3f m3   (cylinder approx above: %7.3f m3, %.1fx)"
                       % (official["branch_vol"], branch_vol,
                          (branch_vol / official["branch_vol"]) if official["branch_vol"] else float("nan")))
+
+        # Return the cylinder-approximation results (see this function's
+        # docstring for why they OVER-estimate volume for tapering branches)
+        # so a caller can upsert an AdQSM ">=10cm only" comparison row - see
+        # adtree_reconstruct_compare.py. have_length is included so the
+        # caller can tell this apart from the proxy-only fallback below
+        # (where None is returned instead - there is no volume to report).
+        return {
+            "stem_vol": stem_vol, "branch_vol": branch_vol,
+            "stem_vol_kept": stem_vol_kept, "branch_vol_kept": branch_vol_kept,
+            "trunk_len_kept": trunk_len_kept, "branch_len_kept": branch_len_kept,
+            "have_length": have_length,
+        }
     else:
         # No usable length column - deliberately do NOT invent a volume;
         # report only what the file actually supports: branch count/share.
@@ -472,21 +505,24 @@ def report_adqsm_thin_branch(path, cut_cm=10.0, params_file=None):
             pct_removed = (n_removed / n_total * 100.0) if n_total else 0.0
             print("    %-6s: %5d total, %5d thinner than %.0f cm (%.1f %%)"
                   % (label, n_total, n_removed, cut_cm, pct_removed))
+        return None
 
 
-def calibrate_cylinder_radii(xyz, cyl, cyl_order, trunk_radius_func, adqsm_median_by_order):
-    """Compute AdQSM-calibrated radii for the final cylinders.
+def compute_order_calibration_factors(cyl, cyl_order, adqsm_median_by_order):
+    """Compute the per-branch-order calibration factor dict from a given
+    cylinder set: factor = AdQSM_median_radius(order) / AdTree_median_radius
+    (order), where the AdTree median is computed over THIS cyl/cyl_order.
+    Orders absent from the AdQSM table (or with a zero/degenerate AdTree
+    median) get factor 1 (unchanged). Order 0 (trunk) is skipped entirely -
+    the trunk always comes from the taper curve, never from this factor.
+    Returns {order: factor}.
 
-    Order 0 (trunk) cylinders get their radius from the taper curve, evaluated
-    at the cylinder's midpoint height. Every other order is scaled by a single
-    factor = AdQSM_median_radius(order) / AdTree_median_radius(order), where
-    the AdTree median is computed over these same cylinders; orders absent
-    from the AdQSM table get factor 1 (unchanged). Returns (new_radii, factors)
-    where new_radii is an array parallel to `cyl` and factors maps order -> factor.
-    """
+    Deliberately separate from apply_order_calibration_factors() so the
+    reference cylinder set used to compute factors (a fixed threshold, e.g.
+    "[calref=min5mm]") can differ from the cylinder set the factors are
+    later applied to - see apply_order_calibration_factors()."""
     orders = np.asarray(cyl_order)
     orig_r = np.array([c[2] for c in cyl])
-    new_r = orig_r.copy()
 
     factors = {}
     for o in sorted(set(orders.tolist()) - {0}):
@@ -495,6 +531,24 @@ def calibrate_cylinder_radii(xyz, cyl, cyl_order, trunk_radius_func, adqsm_media
         adqsm_med = adqsm_median_by_order.get(o)
         factor = (adqsm_med / adtree_med) if (adqsm_med is not None and adtree_med > 0) else 1.0
         factors[o] = factor
+    return factors
+
+
+def apply_order_calibration_factors(xyz, cyl, cyl_order, trunk_radius_func, factors):
+    """Apply an ALREADY-COMPUTED per-order `factors` dict (from
+    compute_order_calibration_factors(), possibly on a different cylinder
+    set than this one) to THIS xyz/cyl/cyl_order: every non-trunk cylinder's
+    radius is scaled by factors[order] (unchanged if its order is missing
+    from `factors`); trunk (order 0) cylinders get their radius from the
+    taper curve, evaluated at the cylinder's midpoint height, exactly as
+    before. Returns new_radii, an array parallel to `cyl`."""
+    orders = np.asarray(cyl_order)
+    orig_r = np.array([c[2] for c in cyl])
+    new_r = orig_r.copy()
+
+    for o in sorted(set(orders.tolist()) - {0}):
+        mask = orders == o
+        factor = factors.get(o, 1.0)
         new_r[mask] = orig_r[mask] * factor
 
     z_base = float(xyz[:, 2].min())   # tree base; AdQSM taper heights are measured from here
@@ -505,7 +559,322 @@ def calibrate_cylinder_radii(xyz, cyl, cyl_order, trunk_radius_func, adqsm_media
         new_r[i] = trunk_radius_func(h)
 
     new_r = np.maximum(new_r, 1e-6)   # never allow radius <= 0
-    return new_r, factors
+    return new_r
+
+
+def build_quantile_matched_pairs(ref_cyl, ref_cyl_order, raw_diam_by_order):
+    """Build quantile-matched (AdTree_radius, AdQSM_radius) pairs for the
+    per-order regression calibration method (see
+    fit_radius_regression()/apply_radius_regression_per_order()), as an
+    alternative to the discrete per-order median-ratio approach in
+    compute_order_calibration_factors().
+
+    For every branch order present in BOTH ref_cyl_order and
+    raw_diam_by_order, EXCEPT order 0 (trunk - calibrated separately via
+    the taper curve, never via this regression): sort that order's AdQSM
+    radii (raw_diam_by_order[o], from parse_adqsm_branch_file_raw()),
+    compute their percentile positions (np.linspace(0, 100, n)), and use
+    np.percentile() on that order's AdTree radii (from ref_cyl, filtered by
+    ref_cyl_order == o) at those exact percentiles to get one matched
+    AdTree radius per AdQSM branch - i.e. this matches the two
+    DISTRIBUTIONS per order, not individual branches (which have no
+    correspondence between AdTree and AdQSM).
+
+    Pools the matched pairs from every order into two flat arrays and
+    returns (adtree_radii, adqsm_radii, order_labels), where order_labels
+    (same length) records which order each pair came from - used only for
+    the diagnostic plot's colouring (plot_radius_regression_per_order()),
+    not for the regression itself. Any order present in only one of the two
+    inputs is skipped (nothing to match against), with a printed warning
+    naming it."""
+    orders = np.asarray(ref_cyl_order)
+    ref_r = np.array([c[2] for c in ref_cyl])
+
+    adtree_orders = set(orders.tolist()) - {0}
+    adqsm_orders = set(raw_diam_by_order.keys()) - {0}
+    common_orders = sorted(adtree_orders & adqsm_orders)
+    skipped_orders = sorted((adtree_orders | adqsm_orders) - set(common_orders))
+    if skipped_orders:
+        print("  build_quantile_matched_pairs: skipping order(s) %s - present in only "
+              "one of AdTree/AdQSM cylinder sets, nothing to quantile-match." % skipped_orders)
+
+    adtree_parts, adqsm_parts, order_label_parts = [], [], []
+    for o in common_orders:
+        adqsm_sorted = np.sort(np.asarray(raw_diam_by_order[o], dtype=float))
+        n = len(adqsm_sorted)
+        adtree_this_order = ref_r[orders == o]
+        if n == 0 or len(adtree_this_order) == 0:
+            continue
+        pct = np.linspace(0, 100, n)
+        matched_adtree = np.percentile(adtree_this_order, pct)
+        adtree_parts.append(matched_adtree)
+        adqsm_parts.append(adqsm_sorted)
+        order_label_parts.append(np.full(n, o))
+
+    if not adtree_parts:
+        return np.array([]), np.array([]), np.array([])
+
+    adtree_radii = np.concatenate(adtree_parts)
+    adqsm_radii = np.concatenate(adqsm_parts)
+    order_labels = np.concatenate(order_label_parts)
+    return adtree_radii, adqsm_radii, order_labels
+
+
+def fit_radius_regression(adtree_radii, adqsm_radii):
+    """Fit AdQSM_radius ~= a * AdTree_radius^b via a robust Theil-Sen
+    regression (scipy.stats.theilslopes) on log(adtree_radii) vs.
+    log(adqsm_radii) - robust to outliers/noise contamination, unlike an
+    ordinary least-squares fit. Returns (a, b).
+
+    Non-positive radius values are filtered out before taking logs (log()
+    cannot handle zero/negative); the number of pairs used vs. discarded is
+    printed. R^2 (via scipy.stats.linregress on the same log-log data) is
+    also printed, purely as a fit-quality diagnostic - it is NOT used for
+    the fit itself, which stays the robust Theil-Sen slope/intercept.
+
+    scipy is a hard dependency of this whole module (see the top-of-file
+    import of scipy.sparse), so scipy.stats failing to import here would
+    mean a broken installation - if that happens, this stops with a clear
+    message instead of silently falling back to a different regression
+    method."""
+    try:
+        from scipy.stats import theilslopes, linregress
+    except ImportError:
+        raise SystemExit(
+            "fit_radius_regression() requires scipy.stats (theilslopes/linregress), which "
+            "could not be imported. Install/repair scipy ('pip install scipy' or "
+            "'conda install scipy' in the treegraph310 environment) and re-run - there is "
+            "no substitute regression method used here.")
+
+    adtree_radii = np.asarray(adtree_radii, dtype=float)
+    adqsm_radii = np.asarray(adqsm_radii, dtype=float)
+    valid = (adtree_radii > 0) & (adqsm_radii > 0)
+    n_used, n_discarded = int(valid.sum()), int((~valid).sum())
+    print("  fit_radius_regression: %d pairs used, %d discarded (non-positive radius)."
+          % (n_used, n_discarded))
+
+    log_adtree = np.log(adtree_radii[valid])
+    log_adqsm = np.log(adqsm_radii[valid])
+
+    b, intercept, _lo_slope, _up_slope = theilslopes(log_adqsm, log_adtree)
+    a = float(np.exp(intercept))
+
+    r_squared = linregress(log_adtree, log_adqsm).rvalue ** 2
+    print("  fit_radius_regression: AdQSM_radius = %.5f * AdTree_radius^%.4f  "
+          "(R^2 = %.4f, OLS diagnostic only)" % (a, b, r_squared))
+    return a, b
+
+
+def group_orders_for_fitting(order_labels, min_pairs):
+    """Decide which branch orders share a regression fit, for the per-order
+    (grouped) variant of fit_radius_regression() (see
+    "[calmethod=regression-perorder]" in adtree_reconstruct_compare.py).
+
+    `order_labels` is the pooled per-pair order array already produced by
+    build_quantile_matched_pairs() (order 0/trunk never appears in it - the
+    trunk is always calibrated separately via the taper curve).
+
+    Algorithm: walk orders in ASCENDING order (lowest/thickest first).
+    Accumulate consecutive orders into a running group; once the group's
+    total pair count reaches `min_pairs`, close it and start a new group.
+    If pairs run out before the LAST group reaches min_pairs (a sparse tail
+    with nothing higher to merge into), fold that leftover group into the
+    PREVIOUS group instead (or keep it as the only group, if there is only
+    one group total).
+
+    Prints the RAW per-order pair counts (before any grouping) and, for
+    each final group, which orders it contains and its total pair count.
+
+    If the final grouping puts branch order 1 in a group together with ANY
+    other order (i.e. it did NOT get its own solo group), prints a loud
+    warning block - order 1 is known to behave differently from other
+    orders (see CHANGELOG_adtree.md), so a merged fit may not represent it
+    well. Fires ONLY when order 1 is actually merged, never when it gets
+    its own solo group (the expected/normal case whenever order 1 alone
+    already has >= min_pairs).
+
+    Returns order_to_group: {order: group_id}, where group_id is a tuple
+    of the orders in that group (ascending), so it doubles as a readable
+    label."""
+    order_labels = np.asarray(order_labels)
+    orders_sorted = sorted(set(order_labels.tolist()))
+    raw_counts = {o: int((order_labels == o).sum()) for o in orders_sorted}
+
+    print("  group_orders_for_fitting: raw per-order pair counts (before grouping, min_pairs=%d): %s"
+          % (min_pairs, ", ".join("%d=%d" % (o, raw_counts[o]) for o in orders_sorted)))
+
+    groups = []
+    current = []
+    current_count = 0
+    for o in orders_sorted:
+        current.append(o)
+        current_count += raw_counts[o]
+        if current_count >= min_pairs:
+            groups.append(current)
+            current = []
+            current_count = 0
+    if current:   # sparse tail left over - nothing higher to merge into
+        if groups:
+            groups[-1] = groups[-1] + current
+        else:
+            groups.append(current)   # only group there is, even if under min_pairs
+
+    order_to_group = {}
+    for g in groups:
+        group_id = tuple(g)
+        total = sum(raw_counts[o] for o in g)
+        print("    group %s : orders=%s, total pairs=%d" % (str(group_id), g, total))
+        for o in g:
+            order_to_group[o] = group_id
+
+    group_of_1 = order_to_group.get(1)
+    if group_of_1 is not None and len(group_of_1) > 1:
+        others = [o for o in group_of_1 if o != 1]
+        combined_pairs = sum(raw_counts[o] for o in group_of_1)
+        print("!" * 70)
+        print("WARNING: branch order 1 was MERGED with order(s) %s into one" % others)
+        print("regression fit (combined group has %d pairs; order 1 alone" % combined_pairs)
+        print("had only %d, below MIN_PAIRS_PER_ORDER=%d). Order 1 is known" % (raw_counts[1], min_pairs))
+        print("to behave differently from other orders (see")
+        print("CHANGELOG_adtree.md) - a merged fit may not represent it")
+        print("well. Consider lowering MIN_PAIRS_PER_ORDER or reviewing")
+        print("this tree's order-1 branch structure before trusting this")
+        print("fit.")
+        print("!" * 70)
+
+    return order_to_group
+
+
+def apply_radius_regression_per_order(xyz, cyl, cyl_order, trunk_radius_func, order_to_ab):
+    """Same contract/shape as apply_order_calibration_factors(), except
+    each non-trunk cylinder is calibrated with ITS OWN order's fitted
+    (a, b) power law - order_to_ab[that cylinder's order], from
+    group_orders_for_fitting()'s per-group fits - instead of a single
+    multiplicative factor. Trunk (order 0) radii still come from
+    trunk_radius_func, evaluated at the cylinder's midpoint height, exactly
+    as apply_order_calibration_factors() already does.
+
+    If a cylinder's order is missing from order_to_ab (should not happen if
+    order_to_ab was built to cover every order actually present in
+    cyl_order - see the RUN section's per-threshold guard - but guarded
+    anyway, e.g. in case pruning ever exposes an order that had no AdQSM
+    correspondence and was therefore skipped by
+    build_quantile_matched_pairs), that cylinder's radius is left UNSCALED
+    (kept at its raw AdTree value) and a one-time warning is printed naming
+    the missing order. Returns new_radii, an array parallel to `cyl`."""
+    orders = np.asarray(cyl_order)
+    orig_r = np.array([c[2] for c in cyl])
+    new_r = orig_r.copy()
+
+    warned_orders = set()
+    for o in sorted(set(orders.tolist()) - {0}):
+        mask = orders == o
+        if o not in order_to_ab:
+            if o not in warned_orders:
+                print("  WARNING: apply_radius_regression_per_order: order %d has no fitted "
+                      "(a, b) in order_to_ab - leaving its %d cylinder(s) UNSCALED (raw AdTree "
+                      "radius kept)." % (o, int(mask.sum())))
+                warned_orders.add(o)
+            continue
+        a, b = order_to_ab[o]
+        new_r[mask] = a * orig_r[mask] ** b
+
+    z_base = float(xyz[:, 2].min())
+    trunk_idx = np.nonzero(orders == 0)[0]
+    for i in trunk_idx:
+        node_a, node_b = cyl[i][0], cyl[i][1]
+        h = 0.5 * (xyz[node_a, 2] + xyz[node_b, 2]) - z_base
+        new_r[i] = trunk_radius_func(h)
+
+    new_r = np.maximum(new_r, 1e-6)   # never allow radius <= 0
+    return new_r
+
+
+def plot_radius_regression_per_order(adtree_radii, adqsm_radii, order_labels, group_fits,
+                                      tree_name, variant_label, order1_merge_note=None,
+                                      plots_dir="plots"):
+    """Diagnostic PNG for the per-order (grouped) regression variant
+    ([calmethod=regression-perorder], the adopted primary calibration
+    method - see CHANGELOG_adtree.md): a log-log scatter of the
+    quantile-matched (AdTree, AdQSM) radius pairs from
+    build_quantile_matched_pairs(), coloured by branch order, with ONE
+    fitted line per group instead of a single global line, each spanning
+    only the x-range actually covered by that group's own matched AdTree
+    radii (not the full plot width), so it's visually clear which line
+    belongs to which order range.
+
+    `group_fits` is a list of (group_orders, a, b) tuples - group_orders is
+    an iterable of the branch orders sharing that fit (e.g. as built by the
+    RUN section's group_orders_for_fitting()-driven per-group fitting loop).
+
+    `order1_merge_note`, if given (a short string), is drawn directly on
+    the plot (ax.text(), bottom-left corner) so a merged order-1 fit stays
+    visible to someone who only looks at the PNG, not the console output -
+    see group_orders_for_fitting()'s warning for when this should be set.
+
+    Deliberately does NOT call matplotlib.use("Agg"): this project's RUN
+    script (adtree_reconstruct_compare.py) also calls plot_model() for an
+    INTERACTIVE 3D preview (SHOW_PLOT=True by default) later in the same
+    process - forcing the Agg backend here would silently break that (Agg
+    cannot show a window) for the rest of the run. Saving a PNG never
+    requires plt.show(), so this stays headless-safe regardless of which
+    backend is active, without touching the global backend - matplotlib is
+    imported lazily here too, same pattern as plot_model().
+
+    Saved into `plots_dir` (created if missing) as
+    "adtree_adqsm_radius_regression_perorder_<tree_name>_AdQSM<variant>.png".
+    Returns the saved path."""
+    import matplotlib.pyplot as plt
+
+    if not os.path.isdir(plots_dir):
+        os.makedirs(plots_dir)
+
+    adtree_radii = np.asarray(adtree_radii, dtype=float)
+    adqsm_radii = np.asarray(adqsm_radii, dtype=float)
+    order_labels = np.asarray(order_labels)
+
+    fig, ax = plt.subplots(figsize=(8, 7))
+
+    cmap = plt.get_cmap("tab10")
+    for i, o in enumerate(sorted(set(order_labels.tolist()))):
+        mask = order_labels == o
+        ax.scatter(adtree_radii[mask], adqsm_radii[mask], s=12,
+                   color=cmap(i % 10), alpha=0.6, label="order %d" % o)
+
+    line_cmap = plt.get_cmap("Dark2")
+    for gi, (group_orders, a, b) in enumerate(group_fits):
+        group_mask = np.isin(order_labels, list(group_orders))
+        group_x = adtree_radii[group_mask]
+        valid = group_x > 0
+        if not valid.any():
+            continue
+        x_fit = np.linspace(group_x[valid].min(), group_x[valid].max(), 100)
+        y_fit = a * x_fit ** b
+        order_range_str = "(%s)" % ",".join(str(o) for o in group_orders)
+        ax.plot(x_fit, y_fit, "-", linewidth=2.5, color=line_cmap(gi % 8),
+                label="orders %s: y = %.3g*x^%.3g" % (order_range_str, a, b))
+
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xlabel("AdTree radius [m] (log)")
+    ax.set_ylabel("AdQSM radius [m] (log)")
+    variant_tag = variant_label if variant_label else "single"
+    ax.set_title("AdTree vs AdQSM radius - quantile-matched, global regression\n"
+                 "(%s, AdQSM %s) - per-order fit" % (tree_name, variant_tag))
+    ax.legend(fontsize=6.5, loc="best")
+
+    if order1_merge_note:
+        ax.text(0.02, 0.02, order1_merge_note, transform=ax.transAxes,
+                ha="left", va="bottom", fontsize=7, color="firebrick",
+                bbox=dict(boxstyle="round,pad=0.3", facecolor="#fff3cd", edgecolor="firebrick"))
+
+    fig.tight_layout()
+
+    plot_path = os.path.join(plots_dir, "adtree_adqsm_radius_regression_perorder_%s_AdQSM%s.png"
+                              % (tree_name, variant_tag))
+    fig.savefig(plot_path, dpi=150)
+    plt.close(fig)
+    return plot_path
 
 
 def volume_stats(lengths, radii, order_arr):
@@ -764,6 +1133,13 @@ def convert(xyz, rad, edges, thr, seg_len_min, seg_len_max, seg_len_k, min_cyl_l
     no_resample = seg_len_min is None or seg_len_min <= 0
 
     # the stack carries: (node, anchor=last kept ancestor, distance travelled since anchor)
+    # TODO: **Finding:** `convert()` (`tree_geom_utils.py`, ~line 1150) collapses
+    # each cylinder's two endpoint radii into a single average radius
+    # (`r = 0.5*(rad[anchor]+rad[n])`). `volume_stats()`/
+    #`report_thin_branch_volume()` then treat every cylinder as
+    #CONSTANT-radius (`V = pi*r^2*h`), not as a true frustum of a cone
+    # (`V = pi*h/3*(r1^2 + r1*r2 + r2^2)`).
+
     st = [(c, root, float(np.linalg.norm(xyz[c] - xyz[root]))) for c in kids[root]]
     while st:
         n, anchor, dist = st.pop()

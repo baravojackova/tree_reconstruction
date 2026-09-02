@@ -18,9 +18,14 @@
 #      reduces the element count).
 #   7) Shifts the x,y coordinates to the origin (z is left untouched,
 #      since it is the height above ground).
-#   8) Optionally CALIBRATES the cylinder radii against AdQSM data (a taper
-#      curve for the trunk, and median branch diameters per branch order for
-#      the rest), replacing the AdTree radii before writing.
+#   8) Optionally CALIBRATES the cylinder radii against AdQSM data: a taper
+#      curve for the trunk, and a per-order-group log-log power-law
+#      regression fit for the rest ([calmethod=regression-perorder], the
+#      adopted primary method - see CHANGELOG_adtree.md), replacing the
+#      AdTree radii before writing. A fixed-threshold median-ratio
+#      calibration ("[calref=min5mm]") is also computed and written as a
+#      secondary/backup reference point, alongside (not instead of) the
+#      primary method.
 #   9) Prints/upserts volume, DBH, height, taper, trunk/branch length
 #      comparisons into the shared volume_results.csv (see compare_volumes.py).
 #   10) SAVES the final calibrated geometry (xyz, cyl, root, RECENTER_XY, ...)
@@ -48,7 +53,10 @@ from tree_geom_utils import (
     read_ply, merge_vertices, smooth_centerline,
     parse_adqsm_taper_file, make_trunk_radius_func, parse_adqsm_branch_file,
     parse_adqsm_params_file, print_adqsm_branch_file_sample, report_adqsm_thin_branch,
-    calibrate_cylinder_radii, convert, cylinder_metrics, volume_stats,
+    compute_order_calibration_factors, apply_order_calibration_factors,
+    parse_adqsm_branch_file_raw, build_quantile_matched_pairs, fit_radius_regression,
+    group_orders_for_fitting, apply_radius_regression_per_order, plot_radius_regression_per_order,
+    convert, cylinder_metrics, volume_stats,
     report_thin_branch_volume, upsert_result, stem_diameter_at_height,
     _fmt_dbh, _fmt_taper, print_volume_stats, raw_skeleton_stats,
     report_volume, plot_model,
@@ -103,7 +111,50 @@ INPUT_PLY = os.path.join(AdTree_DIR, "%s - Cloud_skeleton.ply" % TREE_NAME)
 # Remove all branches whose radius is below this threshold. The trunk (branch order 0) is never removed, even if its radius is below the threshold.
 # Example of a single variant:   RADIUS_THRESHOLDS = [0.010]
 # Example of several variants:   RADIUS_THRESHOLDS = [0.010, 0.020, 0.030]
-RADIUS_THRESHOLDS = [0.005, 0.01, 0.02]        # 0.030 m = 30 mm radius (60 mm diameter)
+RADIUS_THRESHOLDS = [0.005]        # 0.030 m = 30 mm radius (60 mm diameter)
+
+# Fixed reference threshold(s) (in METERS) used to build the
+# "[calref=minXmm]" calibration factors (see the "FIXED calibration
+# reference set" block in the RUN section below) - one factors dict per
+# entry, each producing its own labelled family of rows. Deliberately a
+# SEPARATE list from RADIUS_THRESHOLDS (which controls final-model
+# pruning, not calibration), NOT derived from it - if it were derived,
+# changing RADIUS_THRESHOLDS would silently change what "[calref=minXmm]"
+# is actually calibrated against, breaking comparability with rows
+# already stored in volume_results.csv. Each entry's label is
+# "[calref=min%dmm]" % round(ref_thr * 1000) - e.g. 0.005 ->
+# "[calref=min5mm]".
+#
+# Decision (see CHANGELOG_adtree.md): per-order regression
+# ([calmethod=regression-perorder]) is the PRIMARY calibration method
+# going forward; calref=min5mm is kept only as a SECONDARY/backup
+# reference point, so this list was collapsed back to its single min5mm
+# entry (it previously also tested min2mm/min3mm/min4mm during the
+# investigation - see the changelog). The list-based mechanism below is
+# left as-is (not reverted to old single-value code) since it already
+# handles one entry with no extra complexity.
+CALIBRATION_REF_THRESHOLDS_MM = [0.005]
+
+# Whether to compute/write the calref=min5mm secondary calibration variant
+# at all. OFF by default since per-order regression
+# ([calmethod=regression-perorder]) is the PRIMARY method - turn True only
+# when you want to re-verify calref=min5mm against fresh data. When False,
+# no calref=min5mm rows are computed or upserted this run, but any EXISTING
+# calref=min5mm rows already in volume_results.csv from past runs are left
+# untouched (last-verified snapshot) until this is re-enabled and re-run.
+COMPUTE_CALREF_MIN5MM = False   # secondary/backup calibration check
+# (fixed-reference median-ratio method) - OFF by default since
+# per-order regression is the primary method; turn True only when
+# you want to re-verify calref=min5mm against fresh data.
+
+# Minimum quantile-matched pairs (see build_quantile_matched_pairs()) a
+# branch order must have before it gets its OWN regression fit for the
+# "[calmethod=regression-perorder]" calibration variant (see
+# group_orders_for_fitting() in tree_geom_utils.py). Sparser orders are
+# merged with the next order(s), walked in ascending order, until this
+# minimum is reached. Tune this after seeing the printed raw per-order
+# pair counts if 15 turns out too strict/loose for a given tree.
+MIN_PAIRS_PER_ORDER = 15
 
 # Adaptive segment length used for resampling (in METERS). The target length at
 # a given point is SEG_LEN_K * local_radius, clamped to [SEG_LEN_MIN, SEG_LEN_MAX]:
@@ -313,6 +364,11 @@ for variant_label, taper_file, branch_file, params_file in ADQSM_VARIANT_LIST:
         taper_heights, taper_diameters = parse_adqsm_taper_file(taper_file)
         trunk_radius_func = make_trunk_radius_func(taper_heights, taper_diameters, FIELD_DBH)
         adqsm_median_by_order = parse_adqsm_branch_file(branch_file)
+        # raw_diam_by_order (Task: regression calibration method): the RAW
+        # per-order AdQSM radius lists behind adqsm_median_by_order's medians
+        # - needed for build_quantile_matched_pairs() below, which matches
+        # whole DISTRIBUTIONS rather than single median points.
+        raw_diam_by_order = parse_adqsm_branch_file_raw(branch_file)
         print("  %s: %d height/diameter rows, %.1f-%.1f m"
               % (taper_file, len(taper_heights), taper_heights.min(), taper_heights.max()))
         if FIELD_DBH is not None:
@@ -352,7 +408,101 @@ for variant_label, taper_file, branch_file, params_file in ADQSM_VARIANT_LIST:
         if PRINT_ADQSM_BRANCH_SAMPLE:
             print("\n  BranchStructure.txt column check (first 10 rows):")
             print_adqsm_branch_file_sample(branch_file, n=10)
+        # NOTE: report_adqsm_thin_branch() returns its >=cut_cm-kept cylinder-
+        # approximation totals (see tree_geom_utils.py), but they are
+        # DELIBERATELY NOT upserted into RESULTS_CSV any more - REVERTED
+        # after the approximation was shown to badly overestimate: for all
+        # three AdQSM variants tested, the >=10cm-filtered approximation
+        # exceeded even AdQSM's own OFFICIAL, UNFILTERED whole-tree
+        # BranchVolume from TreesParams.txt - a logically impossible result
+        # (a filtered subset can never exceed its own unfiltered total), so
+        # it cannot be trusted as a comparison row. See CHANGELOG_adtree.md.
+        # The return value is still printed to console (unchanged) for
+        # manual reference; only the upsert_result() call that used to write
+        # an "AdQSM (BranchStructure, cyl. approx.)" row was removed.
         report_adqsm_thin_branch(branch_file, cut_cm=THIN_BRANCH_CUT_CM, params_file=params_file)
+
+        # ---- FIXED calibration reference set: calref=min5mm (secondary) ---
+        # Originally diagnosed: calibrate_cylinder_radii()'s self-referencing
+        # behaviour computed each order's AdTree median from the SAME,
+        # already-pruned cylinder set it was calibrating, so a higher
+        # RADIUS_THRESHOLDS value mechanically shrank the factor and
+        # over-rescaled even the thick, never-pruned cylinders of that order
+        # - see CHANGELOG_adtree.md (Steps 1-3) for the full investigation,
+        # including calref=unpruned and calref=min2/3/4mm, since removed.
+        #
+        # DECISION (CHANGELOG_adtree.md, Step 7): per-order regression
+        # ([calmethod=regression-perorder], below) is the PRIMARY calibration
+        # method going forward. This fixed 5mm-reference factor set
+        # (calref=min5mm) is kept only as a SECONDARY/backup reference point
+        # - computed ONCE per AdQSM variant (not inside the RADIUS_THRESHOLDS
+        # loop below), reused for every threshold.
+        #
+        # ref_cyl_0/ref_order_0 (the fully unpruned reference set, thr=0.0)
+        # is kept too - NOT for calref (calref=unpruned was removed), but
+        # because build_quantile_matched_pairs() below (for the per-order
+        # regression) still needs it as its fixed AdTree reference population.
+        ref_root_0, ref_cyl_0, ref_order_0 = convert(
+            xyz, rad, edges, 0.0, SEG_LEN_MIN, SEG_LEN_MAX, SEG_LEN_K, MIN_CYL_LEN)
+
+        # factors_by_ref: {ref_thr: factors_dict} - one fixed factors dict per
+        # CALIBRATION_REF_THRESHOLDS_MM entry (just min5mm now), computed
+        # ONCE here (not inside the RADIUS_THRESHOLDS loop below).
+        factors_by_ref = {}
+        if COMPUTE_CALREF_MIN5MM:
+            for ref_thr in CALIBRATION_REF_THRESHOLDS_MM:
+                ref_root, ref_cyl, ref_order = convert(
+                    xyz, rad, edges, ref_thr, SEG_LEN_MIN, SEG_LEN_MAX, SEG_LEN_K, MIN_CYL_LEN)
+                factors_by_ref[ref_thr] = compute_order_calibration_factors(
+                    ref_cyl, ref_order, adqsm_median_by_order)
+                print("  Fixed calibration factors - reference set 'min%dmm' (thr=%.3f), "
+                      "reused for every RADIUS_THRESHOLDS run:" % (round(ref_thr * 1000), ref_thr))
+                for o in sorted(factors_by_ref[ref_thr]):
+                    print("    order %d : factor = %.3f" % (o, factors_by_ref[ref_thr][o]))
+
+        # ---- PRIMARY calibration method: per-order (grouped) regression ---
+        # Adopted as the primary calibration method (CHANGELOG_adtree.md,
+        # Step 7), after the investigation found order-dependent bias a
+        # single global fit could not capture (order 1's own ratio ~1.6 vs.
+        # ~2.1-2.35 for every other order). group_orders_for_fitting() merges
+        # sparse orders together (walking ascending, greedy upward merge) so
+        # every group still has >= MIN_PAIRS_PER_ORDER pairs for a stable
+        # two-parameter fit; each group then gets its own (a, b) via
+        # fit_radius_regression() on that group's own pooled quantile-matched
+        # pairs (build_quantile_matched_pairs(), reusing the fixed
+        # ref_cyl_0/ref_order_0 reference population above). Computed ONCE
+        # per AdQSM variant here, reused for every RADIUS_THRESHOLDS value
+        # below.
+        adtree_matched, adqsm_matched, order_labels_matched = build_quantile_matched_pairs(
+            ref_cyl_0, ref_order_0, raw_diam_by_order)
+
+        order_to_group = group_orders_for_fitting(order_labels_matched, MIN_PAIRS_PER_ORDER)
+
+        group_fits = []    # [(group_orders_tuple, a, b), ...] - for the diagnostic plot
+        order_to_ab = {}   # {order: (a, b)} - for apply_radius_regression_per_order()
+        for group_orders in dict.fromkeys(order_to_group.values()):   # de-duplicated, first-seen order
+            group_mask = np.isin(order_labels_matched, list(group_orders))
+            print("  Per-order regression: fitting group orders=%s (n_pairs=%d)..."
+                  % (str(group_orders), int(group_mask.sum())))
+            g_a, g_b = fit_radius_regression(adtree_matched[group_mask], adqsm_matched[group_mask])
+            group_fits.append((group_orders, g_a, g_b))
+            for o in group_orders:
+                order_to_ab[o] = (g_a, g_b)
+
+        # order1_merge_note: short text for plot_radius_regression_per_order()'s
+        # on-plot annotation (bottom-left corner) - group_orders_for_fitting()
+        # already printed the loud console warning above when this applies;
+        # this just makes the same fact visible on the PNG itself.
+        order1_merge_note = None
+        group_of_1 = order_to_group.get(1)
+        if group_of_1 is not None and len(group_of_1) > 1:
+            order1_merge_note = ("order 1 MERGED with order(s) %s\n(see CHANGELOG_adtree.md)"
+                                  % [o for o in group_of_1 if o != 1])
+
+        regression_perorder_plot_path = plot_radius_regression_per_order(
+            adtree_matched, adqsm_matched, order_labels_matched, group_fits,
+            TREE_NAME, variant_label, order1_merge_note=order1_merge_note)
+        print("  Saved per-order regression diagnostic plot: %s" % regression_perorder_plot_path)
 
     # Inner loop: one pass per radius threshold (same as before this feature
     # existed), now repeated for each AdQSM variant above.
@@ -389,9 +539,10 @@ for variant_label, taper_file, branch_file, params_file in ADQSM_VARIANT_LIST:
                          if raw_dbh is not None and raw_d_upper is not None else None)
 
             # ---- thin-branch diagnostic on the RAW (uncalibrated) cylinders ----
-            # Computed here (BEFORE `cyl`'s radii get overwritten by
-            # calibrate_cylinder_radii() below) since orig_lengths/orig_radii
-            # are only valid for the CURRENT (raw AdTree) radii at this point.
+            # Computed here (BEFORE `cyl`'s radii get overwritten by the
+            # per-order regression calibration below) since orig_lengths/
+            # orig_radii are only valid for the CURRENT (raw AdTree) radii
+            # at this point.
             # source_label="AdTree raw" makes this printout visually distinct
             # from the calibrated one further below (same function, same cut_cm,
             # different cylinder set) - see report_thin_branch_volume()'s
@@ -399,9 +550,91 @@ for variant_label, taper_file, branch_file, params_file in ADQSM_VARIANT_LIST:
             orig_thin = report_thin_branch_volume(orig_lengths, orig_radii, cyl_order,
                                                    cut_cm=THIN_BRANCH_CUT_CM, source_label="AdTree raw")
 
-            new_radii, factors = calibrate_cylinder_radii(
-                xyz, cyl, cyl_order, trunk_radius_func, adqsm_median_by_order)
-            cyl = [(a, b, float(new_radii[i]), pid) for i, (a, b, r, pid) in enumerate(cyl)]
+            # ---- SECONDARY calibration variant: calref=min5mm -----------------
+            # Apply the FIXED factors_by_ref[...] dict (computed once per
+            # AdQSM variant, above the RADIUS_THRESHOLDS loop, from the fixed
+            # min5mm reference cylinder set) to THIS threshold's still-RAW
+            # `cyl`/`cyl_order` - captured here BEFORE the primary
+            # (per-order regression) calibration below overwrites `cyl`'s
+            # radii. Kept as a secondary/backup reference point alongside the
+            # primary per-order regression rows below (see
+            # CHANGELOG_adtree.md, Step 7).
+            fixedref_data = {}
+            if COMPUTE_CALREF_MIN5MM:
+                fixedref_variants = [
+                    ("min%dmm" % round(ref_thr * 1000), factors_by_ref[ref_thr])
+                    for ref_thr in CALIBRATION_REF_THRESHOLDS_MM
+                ]
+                for ref_name, ref_factors in fixedref_variants:
+                    fr_new_r = apply_order_calibration_factors(
+                        xyz, cyl, cyl_order, trunk_radius_func, ref_factors)
+                    fr_cyl = [(a, b, float(fr_new_r[i]), pid) for i, (a, b, r, pid) in enumerate(cyl)]
+                    fr_lengths, fr_radii = cylinder_metrics(xyz, fr_cyl)
+                    fr_stats = volume_stats(fr_lengths, fr_radii, np.asarray(cyl_order))
+                    fr_thin = report_thin_branch_volume(
+                        fr_lengths, fr_radii, cyl_order, cut_cm=THIN_BRANCH_CUT_CM,
+                        source_label="AdTree calibrated [calref=%s]" % ref_name)
+                    fr_dbh = stem_diameter_at_height(xyz, fr_cyl, cyl_order, z_base, TAPER_H_LOWER)
+                    fr_d_upper = stem_diameter_at_height(xyz, fr_cyl, cyl_order, z_base, TAPER_H_UPPER)
+                    fr_taper = ((fr_dbh - fr_d_upper) * 100.0 / (TAPER_H_UPPER - TAPER_H_LOWER)
+                                if fr_dbh is not None and fr_d_upper is not None else None)
+                    fixedref_data[ref_name] = dict(stats=fr_stats, thin=fr_thin, dbh=fr_dbh,
+                                                    taper=fr_taper, n_cylinders=len(fr_cyl))
+
+            # ---- PRIMARY calibration variant: per-order regression -------------
+            # Applies order_to_ab (computed ONCE per AdQSM variant above, via
+            # group_orders_for_fitting() + one fit_radius_regression() call
+            # per group) to THIS threshold's still-RAW cyl/cyl_order. This is
+            # the ADOPTED PRIMARY calibration method (CHANGELOG_adtree.md,
+            # Step 7) - its cylinders (regperorder_cyl) become the final `cyl`
+            # used for the exported .npz/geom_*.txt below, replacing the OLD,
+            # buggy self-referencing calibrate_cylinder_radii() (removed).
+            #
+            # Sanity guard (order_to_ab coverage): order_to_ab was built from
+            # order_labels_matched, i.e. only orders that (a) survive in the
+            # UNPRUNED reference set AND (b) have their own entry in AdQSM's
+            # BranchStructure.txt (build_quantile_matched_pairs() skips - and
+            # prints a warning for - any order present in only one of the
+            # two). A given threshold's cyl_order can only ever be a SUBSET
+            # of the unpruned reference's orders (pruning removes cylinders,
+            # it never invents a new order), so this gap can only matter if
+            # AdQSM's own table is missing an order AdTree has - checked
+            # explicitly here (not just left to
+            # apply_radius_regression_per_order()'s internal per-cylinder
+            # warning) so a coverage gap is visible immediately, per
+            # threshold, instead of only inside a buried per-cylinder
+            # warning.
+            cyl_orders_present = set(np.asarray(cyl_order).tolist()) - {0}
+            missing_from_order_to_ab = sorted(cyl_orders_present - set(order_to_ab))
+            if missing_from_order_to_ab:
+                print("  WARNING: order_to_ab has NO fit for order(s) %s present in this "
+                      "threshold's cyl_order (missing from AdQSM's own BranchStructure.txt, "
+                      "or otherwise skipped by build_quantile_matched_pairs) - those cylinders "
+                      "will be left UNSCALED by apply_radius_regression_per_order() below."
+                      % missing_from_order_to_ab)
+
+            regperorder_new_r = apply_radius_regression_per_order(
+                xyz, cyl, cyl_order, trunk_radius_func, order_to_ab)
+            regperorder_cyl = [(a, b, float(regperorder_new_r[i]), pid)
+                                for i, (a, b, r, pid) in enumerate(cyl)]
+            regperorder_lengths, regperorder_radii = cylinder_metrics(xyz, regperorder_cyl)
+            regperorder_stats = volume_stats(regperorder_lengths, regperorder_radii, np.asarray(cyl_order))
+            regperorder_thin = report_thin_branch_volume(
+                regperorder_lengths, regperorder_radii, cyl_order, cut_cm=THIN_BRANCH_CUT_CM,
+                source_label="AdTree calibrated [calmethod=regression-perorder]")
+            regperorder_dbh = stem_diameter_at_height(xyz, regperorder_cyl, cyl_order, z_base, TAPER_H_LOWER)
+            regperorder_d_upper = stem_diameter_at_height(xyz, regperorder_cyl, cyl_order, z_base, TAPER_H_UPPER)
+            regperorder_taper = ((regperorder_dbh - regperorder_d_upper) * 100.0 / (TAPER_H_UPPER - TAPER_H_LOWER)
+                                  if regperorder_dbh is not None and regperorder_d_upper is not None else None)
+            regperorder_n_cylinders = len(regperorder_cyl)
+
+            # `cyl` now becomes the PRIMARY-calibrated (per-order regression)
+            # cylinders - everything below this point (the .npz save, the
+            # "processed, CALIBRATED" report, plot_model()) uses this, same
+            # as the OLD self-referencing calibrate_cylinder_radii() call
+            # used to reassign `cyl` here (see CHANGELOG_adtree.md, Step 7,
+            # for why that call was removed).
+            cyl = regperorder_cyl
 
         # ---- CHANGE vs. the old single-file ply_to_geom.py: save the final
         # (possibly calibrated) geometry to an .npz file INSTEAD OF calling
@@ -462,21 +695,17 @@ for variant_label, taper_file, branch_file, params_file in ADQSM_VARIANT_LIST:
         report_volume(xyz, cyl, thr)   # uses the (possibly calibrated) radii above
 
         if CALIBRATE_RADII:
-            print("  AdQSM calibration factors (order: AdQSM_median_radius / AdTree_median_radius):")
-            for o in sorted(factors):
-                print("    order %d : factor = %.3f" % (o, factors[o]))
-            cal_lengths, cal_radii = cylinder_metrics(xyz, cyl)
-            cal_stats = volume_stats(cal_lengths, cal_radii, np.asarray(cyl_order))
-
-            # ---- (Part A) thin-branch diagnostic on the CALIBRATED cylinders ----
-            cal_thin = report_thin_branch_volume(cal_lengths, cal_radii, cyl_order,
-                                                  cut_cm=THIN_BRANCH_CUT_CM)
-
-            # DBH/taper of the CALIBRATED trunk, using the now-replaced radii.
-            cal_dbh = stem_diameter_at_height(xyz, cyl, cyl_order, z_base, TAPER_H_LOWER)
-            cal_d_upper = stem_diameter_at_height(xyz, cyl, cyl_order, z_base, TAPER_H_UPPER)
-            cal_taper = ((cal_dbh - cal_d_upper) * 100.0 / (TAPER_H_UPPER - TAPER_H_LOWER)
-                         if cal_dbh is not None and cal_d_upper is not None else None)
+            # cal_stats/cal_dbh/cal_taper/cal_thin (used in the report block
+            # below) are exactly regperorder_stats/regperorder_dbh/
+            # regperorder_taper/regperorder_thin computed above - `cyl` was
+            # already reassigned to regperorder_cyl right after that block
+            # (the PRIMARY calibration method, see CHANGELOG_adtree.md, Step
+            # 7), so recomputing them here would just repeat the same
+            # numbers. Aliased under their original names purely so the
+            # report block below (predating the multi-method investigation)
+            # doesn't need renaming.
+            cal_stats, cal_dbh, cal_taper, cal_thin = (
+                regperorder_stats, regperorder_dbh, regperorder_taper, regperorder_thin)
 
             # ---- upsert both the uncalibrated and calibrated rows for this threshold ----
             # "AdTree raw" does NOT depend on AdQSM at all, so it gets no variant
@@ -498,79 +727,23 @@ for variant_label, taper_file, branch_file, params_file in ADQSM_VARIANT_LIST:
                           branch_filter="none",
                           # n_cylinders (Task B): total cylinder count for this
                           # threshold's reconstruction. Raw and calibrated share
-                          # the exact same count (see the calibrated call below) -
-                          # calibration only replaces radii, it never adds,
-                          # removes, or splits cylinders, so len(cyl) here is
-                          # identical to len(cyl) at the calibrated row.
+                          # the exact same count - calibration only replaces
+                          # radii, it never adds, removes, or splits cylinders,
+                          # so len(cyl) here is identical to len(cyl) at every
+                          # calibrated row below.
                           n_cylinders=len(cyl))
-            # "AdTree calibrated" DOES depend on which AdQSM variant it was
-            # calibrated against, so it gets the variant suffix (when set).
-            # NOTE: radius calibration only rescales/replaces RADII, never the
-            # cylinder geometry itself, so cal_stats's lengths equal orig_stats's -
-            # calibration cannot change how much length was reconstructed.
-            # branch_filter = "none": calibrated radii, but still the full
-            # reconstruction - no diameter cut-off applied (see the THIRD row
-            # right below for the "10cm"-filtered counterpart of this one).
-            # SEG_VARIANT_SUFFIX appended AFTER variant_method_suffix (i.e. at
-            # the true end of the name, same rule as every other method name
-            # touched in this step) - so e.g. "AdTree calibrated r5mm (AdQSM
-            # 05)_seg10-300-k50" stays sortable/filterable by resampling
-            # setting regardless of whether an AdQSM variant tag is present.
-            upsert_result(RESULTS_CSV, TREE_NAME,
-                          "AdTree calibrated r%dmm%s%s"
-                          % (round(thr * 1000), variant_method_suffix, SEG_VARIANT_SUFFIX),
-                          cal_stats["total_vol"], cal_stats["trunk_vol"], cal_stats["branch_vol"], None,
-                          cal_dbh, height_m, cal_taper,
-                          cal_stats["trunk_len"], cal_stats["branch_len"],
-                          branch_filter="none",
-                          # n_cylinders (Task B): same count as the "AdTree raw"
-                          # row above - calibration only rescales/replaces radii
-                          # (see line 404's cyl reassignment), it never adds,
-                          # removes, or splits cylinders, so the two rows sharing
-                          # this exact count is expected, not a bug.
-                          n_cylinders=len(cyl))
-            # Optional THIRD row: same tree/DBH/height/taper, but total/stem/branch
-            # volume restricted to cylinders >= THIN_BRANCH_CUT_CM (like TreeQSM's
-            # "...Filtered..." rows) - lets compare_volumes.py/plot_volumes.py show
-            # the reference vs. an apples-to-apples "same cut-off" comparison.
-            if WRITE_THIN_BRANCH_FILTERED_ROW:
-                # branch_filter = "10cm": this row IS the diameter-cut-off variant
-                # (its name already says "(>=10cm only)") - trunk_len/branch_len
-                # AND n_cylinders below all come from report_thin_branch_volume(),
-                # which tracks filtered length/volume/count together (see its
-                # "..._len_kept"/"n_cyl_kept" keys).
-                # SEG_VARIANT_SUFFIX at the very end again, same rule as above.
-                upsert_result(RESULTS_CSV, TREE_NAME,
-                              "AdTree calibrated r%dmm%s (>=%.0fcm only)%s"
-                              % (round(thr * 1000), variant_method_suffix, THIN_BRANCH_CUT_CM, SEG_VARIANT_SUFFIX),
-                              cal_thin["total_vol_kept"], cal_thin["trunk_vol_kept"],
-                              cal_thin["branch_vol_kept"], None,
-                              cal_dbh, height_m, cal_taper,
-                              # trunk_len/branch_len: length (in metres) of the trunk/branch
-                              # cylinders that SURVIVED the >=10cm diameter filter. These come
-                              # from report_thin_branch_volume()'s new "..._len_kept" keys
-                              # (added alongside the existing "..._vol_kept" keys), so this
-                              # "(>=10cm only)" row finally gets trunk_len_m/branch_len_m
-                              # filled in instead of being left blank.
-                              cal_thin["trunk_len_kept"], cal_thin["branch_len_kept"],
-                              branch_filter="10cm",
-                              # n_cylinders (Task B): count of cylinders that passed
-                              # the >=10cm diameter filter, from report_thin_branch_volume()'s
-                              # new "n_cyl_kept" key (same "keep" mask used for
-                              # the vol_kept/len_kept values above).
-                              n_cylinders=cal_thin["n_cyl_kept"])
 
-                # Same idea as the THIRD row above, but for the RAW (uncalibrated)
-                # cylinders instead of the calibrated ones - uses orig_thin
-                # (computed earlier from orig_lengths/orig_radii, BEFORE
-                # calibrate_cylinder_radii() replaced `cyl`'s radii) rather
-                # than cal_thin. This row does NOT depend on which AdQSM
-                # variant is active (raw AdTree radii never touch AdQSM at
-                # all - same reasoning as the plain "AdTree raw" row above),
-                # so it gets no variant suffix either. DBH/taper reuse
-                # raw_dbh/raw_taper (the UNCALIBRATED trunk's own values),
-                # not cal_dbh/cal_taper, to stay consistent with "this row
-                # describes the raw model, not the calibrated one."
+            if WRITE_THIN_BRANCH_FILTERED_ROW:
+                # Same idea as the calibrated (>=10cm only) rows further below,
+                # but for the RAW (uncalibrated) cylinders instead - uses
+                # orig_thin (computed earlier from orig_lengths/orig_radii,
+                # BEFORE any calibration replaced `cyl`'s radii). This row does
+                # NOT depend on which AdQSM variant is active (raw AdTree radii
+                # never touch AdQSM at all - same reasoning as the plain
+                # "AdTree raw" row above), so it gets no variant suffix either.
+                # DBH/taper reuse raw_dbh/raw_taper (the UNCALIBRATED trunk's
+                # own values), not cal_dbh/cal_taper, to stay consistent with
+                # "this row describes the raw model, not the calibrated one."
                 # SEG_VARIANT_SUFFIX at the very end again, same rule as above.
                 upsert_result(RESULTS_CSV, TREE_NAME,
                               "AdTree raw r%dmm (>=%.0fcm only)%s"
@@ -587,6 +760,66 @@ for variant_label, taper_file, branch_file, params_file in ADQSM_VARIANT_LIST:
                               # uncalibrated cylinder set's filtered count) instead.
                               n_cylinders=orig_thin["n_cyl_kept"])
 
+            # ---- SECONDARY calibration variant: calref=min5mm - upsert 2 rows --
+            # (one "none"/full, one "(>=10cm only)") for the retained secondary
+            # reference (fixedref_data: just "min5mm" now - see
+            # CALIBRATION_REF_THRESHOLDS_MM's definition above and
+            # CHANGELOG_adtree.md, Step 7). Method-name tag "[calref=minXmm]"
+            # sits right after variant_method_suffix, same position the
+            # "(AdQSM 08)" variant tag already occupies. Iterates
+            # fixedref_data's own keys rather than a hard-coded tuple, so this
+            # stays correct even if CALIBRATION_REF_THRESHOLDS_MM ever grows
+            # again, with no second place to keep in sync.
+            for ref_name in fixedref_data:
+                fr = fixedref_data[ref_name]
+                upsert_result(RESULTS_CSV, TREE_NAME,
+                              "AdTree calibrated r%dmm%s [calref=%s]%s"
+                              % (round(thr * 1000), variant_method_suffix, ref_name, SEG_VARIANT_SUFFIX),
+                              fr["stats"]["total_vol"], fr["stats"]["trunk_vol"], fr["stats"]["branch_vol"], None,
+                              fr["dbh"], height_m, fr["taper"],
+                              fr["stats"]["trunk_len"], fr["stats"]["branch_len"],
+                              branch_filter="none",
+                              n_cylinders=fr["n_cylinders"])
+                if WRITE_THIN_BRANCH_FILTERED_ROW:
+                    fr_thin = fr["thin"]
+                    upsert_result(RESULTS_CSV, TREE_NAME,
+                                  "AdTree calibrated r%dmm%s [calref=%s] (>=%.0fcm only)%s"
+                                  % (round(thr * 1000), variant_method_suffix, ref_name,
+                                     THIN_BRANCH_CUT_CM, SEG_VARIANT_SUFFIX),
+                                  fr_thin["total_vol_kept"], fr_thin["trunk_vol_kept"],
+                                  fr_thin["branch_vol_kept"], None,
+                                  fr["dbh"], height_m, fr["taper"],
+                                  fr_thin["trunk_len_kept"], fr_thin["branch_len_kept"],
+                                  branch_filter="10cm",
+                                  n_cylinders=fr_thin["n_cyl_kept"])
+
+            # ---- PRIMARY calibration variant: per-order regression - upsert 2 rows --
+            # Mirrors the "none"/"(>=10cm only)" pattern above exactly, using
+            # the regperorder_* values computed earlier (from
+            # apply_radius_regression_per_order() with this variant's
+            # order_to_ab) - the ADOPTED PRIMARY calibration method
+            # (CHANGELOG_adtree.md, Step 7).
+            upsert_result(RESULTS_CSV, TREE_NAME,
+                          "AdTree calibrated r%dmm%s [calmethod=regression-perorder]%s"
+                          % (round(thr * 1000), variant_method_suffix, SEG_VARIANT_SUFFIX),
+                          regperorder_stats["total_vol"], regperorder_stats["trunk_vol"],
+                          regperorder_stats["branch_vol"], None,
+                          regperorder_dbh, height_m, regperorder_taper,
+                          regperorder_stats["trunk_len"], regperorder_stats["branch_len"],
+                          branch_filter="none",
+                          n_cylinders=regperorder_n_cylinders)
+            if WRITE_THIN_BRANCH_FILTERED_ROW:
+                upsert_result(RESULTS_CSV, TREE_NAME,
+                              "AdTree calibrated r%dmm%s [calmethod=regression-perorder] (>=%.0fcm only)%s"
+                              % (round(thr * 1000), variant_method_suffix,
+                                 THIN_BRANCH_CUT_CM, SEG_VARIANT_SUFFIX),
+                              regperorder_thin["total_vol_kept"], regperorder_thin["trunk_vol_kept"],
+                              regperorder_thin["branch_vol_kept"], None,
+                              regperorder_dbh, height_m, regperorder_taper,
+                              regperorder_thin["trunk_len_kept"], regperorder_thin["branch_len_kept"],
+                              branch_filter="10cm",
+                              n_cylinders=regperorder_thin["n_cyl_kept"])
+
             print("  DBH (at %.1f m)   : raw AdTree = %s   |   calibrated = %s"
                   % (TAPER_H_LOWER, _fmt_dbh(raw_dbh), _fmt_dbh(cal_dbh)))
             print("  Taper (%.1f-%.1f m): raw AdTree = %s   |   calibrated = %s"
@@ -596,7 +829,7 @@ for variant_label, taper_file, branch_file, params_file in ADQSM_VARIANT_LIST:
             print("  Volume comparison (a) raw skeleton vs. (b) processed/AdTree vs. (c) processed/calibrated:")
             print_volume_stats("(a) raw skeleton (AdTree)", raw_stats)
             print_volume_stats("(b) processed, AdTree radii", orig_stats)
-            print_volume_stats("(c) processed, CALIBRATED", cal_stats)
+            print_volume_stats("(c) processed, CALIBRATED [calmethod=regression-perorder]", cal_stats)
         print()
 
         if SHOW_PLOT or SAVE_PLOT_PNG:
