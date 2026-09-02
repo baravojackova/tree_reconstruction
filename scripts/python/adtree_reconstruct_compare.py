@@ -320,7 +320,7 @@ SHOW_PLOT = True
 
 # Also save the preview as a PNG next to each output file (True/False).
 # The PNG name is derived from the output file name (.txt -> .png).
-SAVE_PLOT_PNG = False
+SAVE_PLOT_PNG = True
 # =====================================================================
 
 

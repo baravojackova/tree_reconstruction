@@ -171,7 +171,7 @@ end
 %  1c) USER SETTINGS - all manual setting
 %  ------------------------------------------------------------
 %
-run_tag = 'v1auto';    % change for every new settings variant
+run_tag = 'v1man';    % change for every new settings variant
 % --- tree identification -------------------------------------
 tree_id   = 'IND01_054';           % short name used for ALL output files
 cloud_txt = 'IND01_054.txt';   % input point cloud (text file, 3 columns X Y Z)
@@ -189,12 +189,12 @@ n_workers = 0;         % 0 = derive automatically from the number of tasks
 % define_input(P, nPD1, nPD2Min, nPD2Max) = how many values are tested
 % for each of the three patch-diameter parameters
 % !!! if manual input nPD = 1
-nPD1    = 2;
-nPD2Min = 2;
-nPD2Max = 2;
+nPD1    = 1;
+nPD2Min = 1;
+nPD2Max = 1;
 
 % --- MANUAL PatchDiam (see section 9) ------------------------
-manual_patchdiam = false;   % false = keep everything from define_input
+manual_patchdiam = true;   % false = keep everything from define_input
 
 % PatchDiam1 (rought first cover) has to be t ≥ PatchDiam2Max (gentle cover)
 
@@ -219,6 +219,22 @@ plot_optimal = true;   % true = plot the optimal QSM before simplification
 % diagnostic cylinder/volume printout in the console still runs either
 % way, only the CSV/text-file EXPORT is affected.
 export_filtered_10cm = true;
+
+% Indices of the optimal group (needed here and in 16b)
+%   OptModels{1} = indices of all models of the winning combination
+%   OptModels{2} = index of the single representative model (OptQSM)
+%
+% MaxOrder      Maximum branching order, higher order branches removed
+% SmallRadii    Minimum acceptable radius for a branch at its base
+% ReplaceIterations Number of iterations for replacing two concecutive
+%                     cylinders inside one branch with one longer cylinder
+%
+% --- simplification settings ---------------------------------
+simp_MaxOrder          = 8;
+simp_SmallRadii        = 0.005;
+simp_ReplaceIterations = 0;
+simp_Plot              = 1;
+simp_Disp              = 1;
 
 %% ------------------------------------------------------------
 %  2) DERIVED NAMES - built automatically from tree_id + run_tag
@@ -269,7 +285,20 @@ fprintf('Extent: X %.2f m, Y %.2f m, Z %.2f m\n', ...
 %% ------------------------------------------------------------
 %  5) PLOT the point cloud for visual check
 %  ------------------------------------------------------------
-figure('Name', ['check - ' tree_id]);
+% Explicit, high figure number (10) - NOT auto-numbered - so it can never
+% collide with figures 1/2, which simplify_qsm.m (a shared TreeQSM library
+% function, left untouched) hard-codes internally for the optimal/
+% simplified model plots below. A plain, unnumbered figure() call here
+% used to get auto-assigned Figure 1 (being the first figure created),
+% which simplify_qsm's hard-coded figure(1) call would then silently
+% overwrite (no hold on, so its plot3 call clears the axes) - see
+% CHANGELOG/investigation notes for the full trace.
+% MATLAB does not allow a numeric figure handle together with
+% Name/Value pairs in one figure(...) call ("Numeric figure handles not
+% supported with parameter-value pairs") - so the number and the Name are
+% set in two separate statements instead.
+figure(10);
+set(gcf, 'Name', ['Point cloud - ' tree_id]);
 plot3(P(:,1), P(:,2), P(:,3), '.k', 'MarkerSize', 1);
 axis equal;                      % same scale on all axes
 grid off;
@@ -456,11 +485,11 @@ fprintf('Loaded %d models from %s\n', numel(res_new.QSMs), res_new_file);
 %                     cylinders inside one branch with one longer cylinder
 %
 % --- simplification settings ---------------------------------
-simp_MaxOrder          = 8;
-simp_SmallRadii        = 0.005;
-simp_ReplaceIterations = 2;
-simp_Plot              = 1;
-simp_Disp              = 1;
+% simp_MaxOrder          = 8;
+% simp_SmallRadii        = 0.005;
+% simp_ReplaceIterations = 2;
+% simp_Plot              = 1;
+% simp_Disp              = 1;
 %-------------------------------------------------------------
 if iscell(OptModels)
     idx     = double(OptModels{1}(:))';
@@ -492,6 +521,16 @@ end
 % etc.) is always QSM_simple, built below and cleaned in sections
 % 15b/15c further down (moved there so island cleaning runs on the
 % SIMPLIFIED model, which is what matters for the real workflow).
+%
+% simp_Plot (below) makes simplify_qsm.m draw TWO figures of its own:
+% Figure 1 = the optimal (pre-simplification) model, i.e. QSM_opt as
+%            plotted before simplify_qsm modifies it.
+% Figure 2 = the simplified (post-simplification) model, i.e. QSM_simple.
+% Both figure numbers are HARD-CODED inside simplify_qsm.m itself (a
+% shared TreeQSM library function) - do NOT change them here. The point-
+% cloud plot in section 5 above was moved to an explicit Figure 10 for
+% exactly this reason (it used to auto-number as Figure 1 and get
+% silently overwritten by simplify_qsm's Figure 1 call).
 QSM_simple = simplify_qsm(QSM_opt, simp_MaxOrder, ...
     simp_SmallRadii, simp_ReplaceIterations, simp_Plot, simp_Disp);
 
@@ -567,7 +606,7 @@ if isempty(island_groups)
     fprintf('No disconnected islands found.\n');
 else
     % --- plot: whole tree in light gray, islands in red on top ---
-    figure('Name', 'Disconnected branch islands (red)');
+    figure('Name', ['Disconnected branch islands - ' tree_id]);
     plot3(start_arr(:,1), start_arr(:,2), start_arr(:,3), '.', ...
           'Color', [0.3 0.3 0.3], 'MarkerSize', 6);
     hold on
@@ -656,7 +695,7 @@ if isempty(island_groups)
 elseif ~exist('QSM_simple_clean', 'var')
     fprintf('QSM_simple_clean not found - skipping Simplified (no islands) plot.\n');
 else
-    fig_clean = figure('Name', 'Simplified model (no islands)');
+    fig_clean = figure('Name', ['Simplified model, no islands - ' tree_id]);
     if exist('plot_cylinder_model', 'file')
         % Built-in TreeQSM plotter - renders actual cylinders (not just points)
         plot_cylinder_model(QSM_simple_clean.cylinder, 'order', fig_clean.Number);

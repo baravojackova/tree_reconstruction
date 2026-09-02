@@ -1293,6 +1293,19 @@ def plot_model(xyz, cyl, root, recenter_xy, thr, out_path, show, save_png):
     fig = plt.figure(figsize=(9, 8))
     ax = fig.add_subplot(111, projection="3d")
 
+    # White background/panes (3D axes default to gray pane fills with a
+    # border on each of the three walls - facecolor alone isn't enough to
+    # clear that) and no grid lines, for a cleaner preview.
+    fig.patch.set_facecolor('white')
+    ax.set_facecolor('white')
+    ax.xaxis.pane.set_facecolor('white')
+    ax.yaxis.pane.set_facecolor('white')
+    ax.zaxis.pane.set_facecolor('white')
+    ax.xaxis.pane.set_edgecolor('white')
+    ax.yaxis.pane.set_edgecolor('white')
+    ax.zaxis.pane.set_edgecolor('white')
+    ax.grid(False)
+
     lc = Line3DCollection(segments, array=radii, cmap="viridis", linewidths=1.2)
     ax.add_collection3d(lc)
 
