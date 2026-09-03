@@ -143,6 +143,25 @@ def load_results(path):
                 # numeric column - already returns None for blank/missing
                 # cells (e.g. rows from before this column existed).
                 "n_cylinders": to_float(r.get("n_cylinders")),
+                # Reconstruction parameters (mode/PD1/PD2Min/PD2Max/
+                # MinCylRad/simp_*) - see runsken.m section 19's
+                # params_<tree>_<run>.csv and import_matlab_results.py's
+                # read_params_file()/upsert_result(). "mode" follows
+                # branch_filter's own blank-or-missing-column convention
+                # (falls back to "" here, not "none" - there's no
+                # meaningful default mode the way "none" is a meaningful
+                # default branch_filter); every numeric one uses the same
+                # to_float()-returns-None-if-missing pattern as every other
+                # optional column above (AdTree rows, and any row from
+                # before this column existed, simply get None here).
+                "mode": (r.get("mode") or "").strip(),
+                "pd1": to_float(r.get("pd1_m")),
+                "pd2min": to_float(r.get("pd2min_m")),
+                "pd2max": to_float(r.get("pd2max_m")),
+                "mincylrad": to_float(r.get("mincylrad_m")),
+                "simp_maxorder": to_float(r.get("simp_maxorder")),
+                "simp_smallradii": to_float(r.get("simp_smallradii")),
+                "simp_replaceiterations": to_float(r.get("simp_replaceiterations")),
             })
     return rows
 

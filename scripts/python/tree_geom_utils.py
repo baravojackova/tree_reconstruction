@@ -969,7 +969,9 @@ def report_thin_branch_volume(lengths, radii, order_arr, cut_cm=10.0, source_lab
 
 
 def upsert_result(csv_path, tree, method, total, trunk, branch, std, dbh=None, height=None, taper=None,
-                   trunk_len=None, branch_len=None, branch_filter="none", n_cylinders=None):
+                   trunk_len=None, branch_len=None, branch_filter="none", n_cylinders=None,
+                   mode=None, pd1=None, pd2min=None, pd2max=None, mincylrad=None,
+                   simp_maxorder=None, simp_smallradii=None, simp_replaceiterations=None):
     """Insert/update one (tree, method) row in the shared master results CSV
     (see compare_volumes.py for its format). Reads csv_path if it exists
     (creating it with the header if not), removes any existing row with the
@@ -983,13 +985,27 @@ def upsert_result(csv_path, tree, method, total, trunk, branch, std, dbh=None, h
     (no fmt()): "none" = full/unfiltered reconstruction (the default), "10cm"
     = trunk/branches restricted to diameter >= 10 cm (matching how the
     destructive reference was physically measured - see compare_volumes.py's
-    header comment for why this distinction matters)."""
+    header comment for why this distinction matters).
+
+    mode/pd1/pd2min/pd2max/mincylrad/simp_maxorder/simp_smallradii/
+    simp_replaceiterations: the ACTUAL TreeQSM reconstruction parameters
+    used for a run (see runsken.m section 19's params_<tree>_<run>.csv and
+    import_matlab_results.py's read_params_file()) - all optional/None by
+    default, so every EXISTING caller in THIS file (AdTree's upsert_result()
+    calls) needs no changes and simply leaves these columns blank, same
+    convention as every other optional field here. mode is a plain string
+    ("manual"/"auto"), written as-is like branch_filter (blank string, not
+    the literal text "None", when not given)."""
     # n_cylinders is the LAST column (Task A), added after branch_filter so
     # every existing column keeps its position - old rows/readers relying
-    # on column position elsewhere are unaffected.
+    # on column position elsewhere are unaffected. mode/pd1/.../
+    # simp_replaceiterations are appended after n_cylinders for the same
+    # reason - this is now the LAST group of columns.
     header = ["tree", "method", "total_m3", "trunk_m3", "branch_m3", "std_m3",
               "dbh_m", "height_m", "taper_cm_per_m", "trunk_len_m", "branch_len_m",
-              "branch_filter", "n_cylinders"]
+              "branch_filter", "n_cylinders",
+              "mode", "pd1_m", "pd2min_m", "pd2max_m", "mincylrad_m",
+              "simp_maxorder", "simp_smallradii", "simp_replaceiterations"]
 
     def fmt(x):
         return "" if x is None else "%.6f" % x
@@ -1011,7 +1027,11 @@ def upsert_result(csv_path, tree, method, total, trunk, branch, std, dbh=None, h
                  "trunk_m3": fmt(trunk), "branch_m3": fmt(branch), "std_m3": fmt(std),
                  "dbh_m": fmt(dbh), "height_m": fmt(height), "taper_cm_per_m": fmt(taper),
                  "trunk_len_m": fmt(trunk_len), "branch_len_m": fmt(branch_len),
-                 "branch_filter": branch_filter, "n_cylinders": fmt_int(n_cylinders)})
+                 "branch_filter": branch_filter, "n_cylinders": fmt_int(n_cylinders),
+                 "mode": mode or "", "pd1_m": fmt(pd1), "pd2min_m": fmt(pd2min),
+                 "pd2max_m": fmt(pd2max), "mincylrad_m": fmt(mincylrad),
+                 "simp_maxorder": fmt(simp_maxorder), "simp_smallradii": fmt(simp_smallradii),
+                 "simp_replaceiterations": fmt(simp_replaceiterations)})
 
     with open(csv_path, "w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=header)

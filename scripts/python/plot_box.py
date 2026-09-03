@@ -127,6 +127,10 @@ GROUP_RULES = [
     (r"^AT_Calib_\d+_04_",     "AdTree calib (seg 04)"),
     (r"^AT_Calib_\d+_05_",     "AdTree calib (seg 05)"),
     (r"^AT_Calib_\d+_06_",     "AdTree calib (seg 06)"),
+    (r"^AT_Calib_\d+_07_",     "AdTree calib (seg 07)"),
+    (r"^AT_Calib_\d+_08_",     "AdTree calib (seg 08)"),
+    (r"^AT_Calib_\d+_09_",     "AdTree calib (seg 09)"),
+    (r"^AT_Calib_\d+_10",     "AdTree calib (seg 10)"),
 ]
 
 # Label each jittered point with the specific varying parameter that

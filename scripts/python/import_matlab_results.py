@@ -115,7 +115,9 @@ def extract_group(rows, group):
 
 
 def upsert_result(csv_path, tree, method, total, trunk, branch, std, dbh=None, height=None, taper=None,
-                   trunk_len=None, branch_len=None, branch_filter="none", n_cylinders=None):
+                   trunk_len=None, branch_len=None, branch_filter="none", n_cylinders=None,
+                   mode=None, pd1=None, pd2min=None, pd2max=None, mincylrad=None,
+                   simp_maxorder=None, simp_smallradii=None, simp_replaceiterations=None):
     """Insert/update one (tree, method) row in the shared master results CSV.
     Re-running overwrites the previous row instead of duplicating it.
     Backward compatible: if csv_path still has an older/shorter header, its
@@ -125,13 +127,25 @@ def upsert_result(csv_path, tree, method, total, trunk, branch, std, dbh=None, h
     (no fmt()): "none" = full/unfiltered reconstruction (the default), "10cm"
     = trunk/branches restricted to diameter >= 10 cm (matching how the
     destructive reference was physically measured - see compare_volumes.py's
-    header comment for why this distinction matters)."""
+    header comment for why this distinction matters).
+
+    mode/pd1/pd2min/pd2max/mincylrad/simp_maxorder/simp_smallradii/
+    simp_replaceiterations: the ACTUAL TreeQSM reconstruction parameters
+    used for a run (see runsken.m section 19's params_<tree>_<run>.csv and
+    read_params_file() above) - all optional/None by default. mode is a
+    plain string ("manual"/"auto"), written as-is like branch_filter (blank
+    string, not the literal text "None", when not given)."""
     # n_cylinders is the LAST column (Task A) - kept in sync with
     # tree_geom_utils.py's upsert_result() so both writers produce the
-    # exact same header/column order for the one shared CSV.
+    # exact same header/column order for the one shared CSV. mode/pd1/.../
+    # simp_replaceiterations appended after n_cylinders, same reason -
+    # this is now the LAST group of columns, also kept in sync with
+    # tree_geom_utils.py's copy.
     header = ["tree", "method", "total_m3", "trunk_m3", "branch_m3", "std_m3",
               "dbh_m", "height_m", "taper_cm_per_m", "trunk_len_m", "branch_len_m",
-              "branch_filter", "n_cylinders"]
+              "branch_filter", "n_cylinders",
+              "mode", "pd1_m", "pd2min_m", "pd2max_m", "mincylrad_m",
+              "simp_maxorder", "simp_smallradii", "simp_replaceiterations"]
 
     def fmt(x):
         return "" if x is None else "%.6f" % x
@@ -152,7 +166,11 @@ def upsert_result(csv_path, tree, method, total, trunk, branch, std, dbh=None, h
                  "trunk_m3": fmt(trunk), "branch_m3": fmt(branch), "std_m3": fmt(std),
                  "dbh_m": fmt(dbh), "height_m": fmt(height), "taper_cm_per_m": fmt(taper),
                  "trunk_len_m": fmt(trunk_len), "branch_len_m": fmt(branch_len),
-                 "branch_filter": branch_filter, "n_cylinders": fmt_int(n_cylinders)})
+                 "branch_filter": branch_filter, "n_cylinders": fmt_int(n_cylinders),
+                 "mode": mode or "", "pd1_m": fmt(pd1), "pd2min_m": fmt(pd2min),
+                 "pd2max_m": fmt(pd2max), "mincylrad_m": fmt(mincylrad),
+                 "simp_maxorder": fmt(simp_maxorder), "simp_smallradii": fmt(simp_smallradii),
+                 "simp_replaceiterations": fmt(simp_replaceiterations)})
 
     with open(csv_path, "w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=header)
@@ -173,127 +191,177 @@ def read_single_number(path):
         return None
 
 
-# =========================  RUN  =====================================
-pattern = os.path.join(MATLAB_RESULTS_DIR, FILE_PATTERN)
-files = sorted(glob.glob(pattern))
-
-if not files:
-    print("No files matching '%s' found in '%s'." % (FILE_PATTERN, MATLAB_RESULTS_DIR))
-    raise SystemExit
-
-print("Importing groups %s from %d file(s):\n" % (IMPORT_GROUPS, len(files)))
-print("%-28s %-24s %-12s %10s %10s %10s %10s %8s %8s" %
-      ("file", "group", "tree", "total", "trunk", "branch", "std", "dbh", "height"))
-print("-" * 128)
-
-imported_by_group = {g: 0 for g in IMPORT_GROUPS}
-for path in files:
-    rows = read_matlab_table(path)
+def read_params_file(path):
+    """Read params_<tree>_<run>.csv (header + one data row) into a dict of
+    {column_name: value}, parsing numeric columns with to_float() and
+    leaving 'mode' as a plain string. Returns None if the file doesn't
+    exist (older runs won't have one - that's fine, the resulting row's
+    new columns just stay blank, same convention as every other optional
+    field here)."""
+    if not os.path.exists(path):
+        return None
+    with open(path, "r", encoding="utf-8-sig", newline="") as f:
+        rows = list(csv.DictReader(f))
     if not rows:
-        print("%-28s  (no rows in this file - skipped)" % os.path.basename(path))
-        continue
+        return None
+    r = rows[0]
+    return {
+        "mode": (r.get("mode") or "").strip(),
+        "pd1_m": to_float(r.get("pd1_m")),
+        "pd2min_m": to_float(r.get("pd2min_m")),
+        "pd2max_m": to_float(r.get("pd2max_m")),
+        "mincylrad_m": to_float(r.get("mincylrad_m")),
+        "simp_maxorder": to_float(r.get("simp_maxorder")),
+        "simp_smallradii": to_float(r.get("simp_smallradii")),
+        "simp_replaceiterations": to_float(r.get("simp_replaceiterations")),
+    }
 
-    # Tree/Run are file-level (one MATLAB table per tree+run - see this
-    # file's header comment), not per-group, so they're read straight from
-    # the table's first row rather than via extract_group() - this lets
-    # dbh/height below be read ONCE per file, before the group loop, since
-    # neither depends on which group is currently being processed.
-    tree_raw = rows[0]["Tree"].strip()
-    run = rows[0]["Run"].strip()
-    tree = TREE_NAME_MAP.get(tree_raw, tree_raw)      # map short id -> full id
 
-    # Optional DBH/height/taper, read from "dbh_<tree>_<run>.txt" /
-    # "height_<tree>_<run>.txt" / "taper_<tree>_<run>.txt" next to the
-    # volumes table (single number each: metres for dbh/height, cm/m for
-    # taper). All three are exported by runsken.m section 18 using the SAME
-    # TAPER_H_LOWER/TAPER_H_UPPER reference heights defined above, which is
-    # what makes taper here comparable to taper_cm_per_m for every other
-    # method in volume_results.csv.
-    #
-    # taper has no "_filtered" counterpart (unlike trunk/branch LENGTH just
-    # below): it's the diameter narrowing of the STEM between 1.3 m and
-    # 10.0 m, and the stem at breast height is essentially always thicker
-    # than the 10 cm cut-off anyway - same reason DBH/height don't get a
-    # filtered variant either. So taper is read the same way regardless of
-    # branch_filter (computed per-group, in the loop below), and - like
-    # dbh/height - only once per file, reused for every group from it.
-    table_dir = os.path.dirname(path)
-    dbh = read_single_number(os.path.join(table_dir, "dbh_%s_%s.txt" % (tree, run)))
-    height = read_single_number(os.path.join(table_dir, "height_%s_%s.txt" % (tree, run)))
-    taper = read_single_number(os.path.join(table_dir, "taper_%s_%s.txt" % (tree, run)))
+# =========================  RUN  =====================================
+if __name__ == "__main__":
+    pattern = os.path.join(MATLAB_RESULTS_DIR, FILE_PATTERN)
+    files = sorted(glob.glob(pattern))
 
-    for group in IMPORT_GROUPS:
-        found = extract_group(rows, group)
-        if found is None:
-            print("%-28s  (no group '%s' in this file - skipped)"
-                  % (os.path.basename(path), group))
+    if not files:
+        print("No files matching '%s' found in '%s'." % (FILE_PATTERN, MATLAB_RESULTS_DIR))
+        raise SystemExit
+
+    print("Importing groups %s from %d file(s):\n" % (IMPORT_GROUPS, len(files)))
+    print("%-28s %-24s %-12s %10s %10s %10s %10s %8s %8s" %
+          ("file", "group", "tree", "total", "trunk", "branch", "std", "dbh", "height"))
+    print("-" * 128)
+
+    imported_by_group = {g: 0 for g in IMPORT_GROUPS}
+    for path in files:
+        rows = read_matlab_table(path)
+        if not rows:
+            print("%-28s  (no rows in this file - skipped)" % os.path.basename(path))
             continue
 
-        _tree_raw, _run, total, trunk, branch, std, n_cylinders = found
-        method = "TreeQSM mine (%s, %s)" % (run, group)
+        # Tree/Run are file-level (one MATLAB table per tree+run - see this
+        # file's header comment), not per-group, so they're read straight from
+        # the table's first row rather than via extract_group() - this lets
+        # dbh/height below be read ONCE per file, before the group loop, since
+        # neither depends on which group is currently being processed.
+        tree_raw = rows[0]["Tree"].strip()
+        run = rows[0]["Run"].strip()
+        tree = TREE_NAME_MAP.get(tree_raw, tree_raw)      # map short id -> full id
 
-        # branch_filter: "10cm" for any group whose NAME says it's
-        # restricted to branches >= 10 cm diameter (currently only
-        # group == "Filtered <10cm", from runsken.m's section 17b) - "none"
-        # for every other group (Estimated/Optimal/Optimal (single)/All
-        # inputs/Simplified/Simplified (no islands)), which use the full,
-        # unfiltered TreeQSM cylinder model. Computed PER GROUP (this now
-        # varies within one file's set of imported rows) BEFORE the
-        # trunk/branch length read below, so that read can reuse this exact
-        # same test to pick the right length file - see comment there.
-        branch_filter = "10cm" if "Filtered" in group else "none"
+        # Optional DBH/height/taper, read from "dbh_<tree>_<run>.txt" /
+        # "height_<tree>_<run>.txt" / "taper_<tree>_<run>.txt" next to the
+        # volumes table (single number each: metres for dbh/height, cm/m for
+        # taper). All three are exported by runsken.m section 18 using the SAME
+        # TAPER_H_LOWER/TAPER_H_UPPER reference heights defined above, which is
+        # what makes taper here comparable to taper_cm_per_m for every other
+        # method in volume_results.csv.
+        #
+        # taper has no "_filtered" counterpart (unlike trunk/branch LENGTH just
+        # below): it's the diameter narrowing of the STEM between 1.3 m and
+        # 10.0 m, and the stem at breast height is essentially always thicker
+        # than the 10 cm cut-off anyway - same reason DBH/height don't get a
+        # filtered variant either. So taper is read the same way regardless of
+        # branch_filter (computed per-group, in the loop below), and - like
+        # dbh/height - only once per file, reused for every group from it.
+        table_dir = os.path.dirname(path)
+        dbh = read_single_number(os.path.join(table_dir, "dbh_%s_%s.txt" % (tree, run)))
+        height = read_single_number(os.path.join(table_dir, "height_%s_%s.txt" % (tree, run)))
+        taper = read_single_number(os.path.join(table_dir, "taper_%s_%s.txt" % (tree, run)))
 
-        # Trunk/branch length: runsken.m section 18 exports TWO separate
-        # pairs of files - "trunklen_/branchlen_<tree>_<run>.txt" hold the
-        # UNFILTERED model's length (correct for Optimal/Estimated/...
-        # groups), while "trunklen_filtered_/branchlen_filtered_<tree>_<run>.txt"
-        # hold the length AFTER the same 10 cm cut-off as the "Filtered
-        # <10cm" group's volume. Reading the unfiltered file for a filtered
-        # group would silently pair a filtered VOLUME with an unfiltered
-        # LENGTH - so which file to read is decided by the SAME
-        # branch_filter test used just above, not a second, differently-
-        # worded check.
-        if branch_filter == "10cm":
-            trunk_len_file = "trunklen_filtered_%s_%s.txt" % (tree, run)
-            branch_len_file = "branchlen_filtered_%s_%s.txt" % (tree, run)
-        else:
-            trunk_len_file = "trunklen_%s_%s.txt" % (tree, run)
-            branch_len_file = "branchlen_%s_%s.txt" % (tree, run)
+        # Reconstruction parameters (mode/PD1/PD2Min/PD2Max/MinCylRad/simp_*),
+        # from "params_<tree>_<run>.csv" (runsken.m section 19) - read ONCE per
+        # file, same level/reasoning as dbh/height/taper above: these were
+        # fixed for the whole MATLAB run, they don't vary by Group. None
+        # (older runs written before this file existed) leaves every one of
+        # these columns blank for every group from this file, same convention
+        # as every other optional field here.
+        params = read_params_file(os.path.join(table_dir, "params_%s_%s.csv" % (tree, run)))
+        if params is None:
+            params = {"mode": "", "pd1_m": None, "pd2min_m": None, "pd2max_m": None,
+                       "mincylrad_m": None, "simp_maxorder": None, "simp_smallradii": None,
+                       "simp_replaceiterations": None}
 
-        trunk_len = read_single_number(os.path.join(table_dir, trunk_len_file))
-        branch_len = read_single_number(os.path.join(table_dir, branch_len_file))
-        if branch_filter == "10cm" and (trunk_len is None or branch_len is None):
-            # Don't crash - just flag it clearly so it's not silently wrong: an
-            # older MATLAB run (before this fix) won't have written these two
-            # files yet, and re-using the unfiltered length would be the exact
-            # bug this change fixes. Re-run runsken.m for this tree/run to get them.
-            print("  WARNING: missing filtered length file(s) for %s / %s (%s / %s) - "
-                  "trunk_len/branch_len left blank for this row. Re-run runsken.m "
-                  "for this tree/run to generate them."
-                  % (tree, run, trunk_len_file, branch_len_file))
+        for group in IMPORT_GROUPS:
+            found = extract_group(rows, group)
+            if found is None:
+                print("%-28s  (no group '%s' in this file - skipped)"
+                      % (os.path.basename(path), group))
+                continue
 
-        upsert_result(RESULTS_CSV, tree, method, total, trunk, branch, std, dbh, height, taper,
-                      trunk_len, branch_len, branch_filter=branch_filter,
-                      # n_cylinders: read straight from VolumeTable's own
-                      # N_cylinders column (runsken.m section 17, Task C) via
-                      # extract_group() above - None (-> blank) on an older
-                      # volumes_*.csv written before that column existed.
-                      n_cylinders=n_cylinders)
-        imported_by_group[group] += 1
+            _tree_raw, _run, total, trunk, branch, std, n_cylinders = found
+            method = "TreeQSM mine (%s, %s)" % (run, group)
 
-        def show(x):
-            return "%10.4f" % x if x is not None else "         -"
+            # branch_filter: "10cm" for any group whose NAME says it's
+            # restricted to branches >= 10 cm diameter (currently only
+            # group == "Filtered <10cm", from runsken.m's section 17b) - "none"
+            # for every other group (Estimated/Optimal/Optimal (single)/All
+            # inputs/Simplified/Simplified (no islands)), which use the full,
+            # unfiltered TreeQSM cylinder model. Computed PER GROUP (this now
+            # varies within one file's set of imported rows) BEFORE the
+            # trunk/branch length read below, so that read can reuse this exact
+            # same test to pick the right length file - see comment there.
+            branch_filter = "10cm" if "Filtered" in group else "none"
 
-        def show8(x):
-            return "%8.3f" % x if x is not None else "       -"
+            # Trunk/branch length: runsken.m section 18 exports TWO separate
+            # pairs of files - "trunklen_/branchlen_<tree>_<run>.txt" hold the
+            # UNFILTERED model's length (correct for Optimal/Estimated/...
+            # groups), while "trunklen_filtered_/branchlen_filtered_<tree>_<run>.txt"
+            # hold the length AFTER the same 10 cm cut-off as the "Filtered
+            # <10cm" group's volume. Reading the unfiltered file for a filtered
+            # group would silently pair a filtered VOLUME with an unfiltered
+            # LENGTH - so which file to read is decided by the SAME
+            # branch_filter test used just above, not a second, differently-
+            # worded check.
+            if branch_filter == "10cm":
+                trunk_len_file = "trunklen_filtered_%s_%s.txt" % (tree, run)
+                branch_len_file = "branchlen_filtered_%s_%s.txt" % (tree, run)
+            else:
+                trunk_len_file = "trunklen_%s_%s.txt" % (tree, run)
+                branch_len_file = "branchlen_%s_%s.txt" % (tree, run)
 
-        print("%-28s %-24s %-12s %s %s %s %s %s %s"
-              % (os.path.basename(path)[:28], group, tree, show(total), show(trunk),
-                 show(branch), show(std), show8(dbh), show8(height)))
+            trunk_len = read_single_number(os.path.join(table_dir, trunk_len_file))
+            branch_len = read_single_number(os.path.join(table_dir, branch_len_file))
+            if branch_filter == "10cm" and (trunk_len is None or branch_len is None):
+                # Don't crash - just flag it clearly so it's not silently wrong: an
+                # older MATLAB run (before this fix) won't have written these two
+                # files yet, and re-using the unfiltered length would be the exact
+                # bug this change fixes. Re-run runsken.m for this tree/run to get them.
+                print("  WARNING: missing filtered length file(s) for %s / %s (%s / %s) - "
+                      "trunk_len/branch_len left blank for this row. Re-run runsken.m "
+                      "for this tree/run to generate them."
+                      % (tree, run, trunk_len_file, branch_len_file))
 
-print("-" * 128)
-total_imported = sum(imported_by_group.values())
-print("Imported %d row(s) into %s:" % (total_imported, RESULTS_CSV))
-for group in IMPORT_GROUPS:
-    print("  %-24s : %d row(s)" % (group, imported_by_group[group]))
-print("Run compare_volumes.py to see them next to the other methods.")
+            upsert_result(RESULTS_CSV, tree, method, total, trunk, branch, std, dbh, height, taper,
+                          trunk_len, branch_len, branch_filter=branch_filter,
+                          # n_cylinders: read straight from VolumeTable's own
+                          # N_cylinders column (runsken.m section 17, Task C) via
+                          # extract_group() above - None (-> blank) on an older
+                          # volumes_*.csv written before that column existed.
+                          n_cylinders=n_cylinders,
+                          # Reconstruction parameters (see `params` above) -
+                          # same values for every group from this file, since
+                          # they were fixed for the whole MATLAB run, not
+                          # per-Group. Blank (None) on an older run with no
+                          # params_<tree>_<run>.csv, same convention as every
+                          # other optional field here.
+                          mode=params["mode"], pd1=params["pd1_m"], pd2min=params["pd2min_m"],
+                          pd2max=params["pd2max_m"], mincylrad=params["mincylrad_m"],
+                          simp_maxorder=params["simp_maxorder"], simp_smallradii=params["simp_smallradii"],
+                          simp_replaceiterations=params["simp_replaceiterations"])
+            imported_by_group[group] += 1
+
+            def show(x):
+                return "%10.4f" % x if x is not None else "         -"
+
+            def show8(x):
+                return "%8.3f" % x if x is not None else "       -"
+
+            print("%-28s %-24s %-12s %s %s %s %s %s %s"
+                  % (os.path.basename(path)[:28], group, tree, show(total), show(trunk),
+                     show(branch), show(std), show8(dbh), show8(height)))
+
+    print("-" * 128)
+    total_imported = sum(imported_by_group.values())
+    print("Imported %d row(s) into %s:" % (total_imported, RESULTS_CSV))
+    for group in IMPORT_GROUPS:
+        print("  %-24s : %d row(s)" % (group, imported_by_group[group]))
+    print("Run compare_volumes.py to see them next to the other methods.")

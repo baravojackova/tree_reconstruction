@@ -1,12 +1,12 @@
-%% ============================================================
+%% START ============================================================
 %  TreeQSM - reconstruction of tree structure from a point cloud
 %  All file names are defined in ONE place (USER SETTINGS below).
 %  Run the script cell by cell (Ctrl+Enter in each %% section).
 %  ============================================================
 clear
 clc
-%% ------------------------------------------------------------
-%  1) USER SETTINGS - directory
+%  ------------------------------------------------------------
+%  USER SETTINGS - directory
 %  ------------------------------------------------------------
 % Folder with the TreeQSM source code (contains treeqsm.m, +myfun, ...)
 src_dir = 'C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\scripts\matlab';
@@ -14,8 +14,8 @@ src_dir = 'C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\s
 % Folder with the point clouds and where all results will be written
 data_dir = 'C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\scripts\matlab';
 %
-%% ------------------------------------------------------------
-%  1b) CLEAN START (OPTIONAL) - delete ALL previously generated outputs
+%% 1) CLEAN START (OPTIONAL) ------------------------------------
+%     CLEAN START (OPTIONAL) - delete ALL previously generated outputs
 %     WHAT this block does: wipes every file this script has ever produced
 %     in data_dir, for EVERY tree_id and EVERY run_tag at once (not just
 %     the ones set above in section 1) - useful when you want to start
@@ -37,10 +37,19 @@ data_dir = 'C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\
 clean_start = true;
 
 % Switch 2 (dry run): with clean_start = true, this decides whether files
-% are only LISTED (true, the safe default) or actually DELETED (false).
-% Keep this true the first time you enable clean_start, so you can review
-% exactly what would be removed before committing to it.
+% are only LISTED (true, the safe default) or actually MOVED/DELETED
+% (false, depending on clean_delete_permanently below). Keep this true the
+% first time you enable clean_start, so you can review exactly what would
+% happen before committing to it.
 clean_dry_run = false;
+
+% Switch 3 (archive vs. delete): false (default, SAFE) = ARCHIVE - move
+% matched files into archive\<timestamp>\ instead of deleting them, fully
+% recoverable. true = actually DELETE permanently (the old behaviour) -
+% use this for genuine trial-run cleanups you want gone for good; leave it
+% false for a "starting a new tree" cleanup where you'd rather have a
+% safety net.
+clean_delete_permanently = false;
 
 if ~clean_start
     % Master switch is off - do nothing at all, not even list files.
@@ -62,6 +71,7 @@ else
         'trunklen_filtered_*.txt', ...
         'branchlen_*.txt', ...
         'branchlen_filtered_*.txt', ...
+        'params_*.csv', ...
         'geom_*.txt', ...
         '*.mat', ...                    % catches saved point clouds too, e.g. "IND07_083.mat"
         };
@@ -142,36 +152,76 @@ else
     end
     fprintf('Total: %d file(s), %.2f MB\n', numel(clean_files), total_bytes / (1024*1024));
 
+    % archive_dir: only actually needed (and only actually CREATED, via
+    % mkdir, in the real-move branch below) when clean_delete_permanently
+    % is false - computed here regardless so the dry-run preview text can
+    % name the exact folder that WOULD be used, without creating it.
+    archive_dir = fullfile(data_dir, 'archive', datestr(now, 'yyyy-mm-dd_HHMM'));
+
     if clean_dry_run
-        % ---- 5a. Dry run - list only, never touch the disk.
-        fprintf('DRY RUN - nothing deleted. Set clean_dry_run = false to actually delete.\n');
-    else
-        % ---- 5b. Real delete - require a typed confirmation first, so a
-        % stray re-run of this cell (e.g. Ctrl+Enter twice) cannot delete
-        % anything without the user explicitly typing the word again.
-        confirmation = input('Type SMAZAT (all caps) to permanently delete the files listed above: ', 's');
-        if ~strcmp(confirmation, 'SMAZAT')
-            fprintf('Confirmation not received - deletion cancelled, nothing was deleted.\n');
+        % ---- 5a. Dry run - list only, never touch the disk. Preview text
+        % describes whichever mode (archive/delete) is actually active, so
+        % it can never be mistaken for the other mode's behaviour.
+        if clean_delete_permanently
+            fprintf('DRY RUN - nothing deleted. Set clean_dry_run = false to actually PERMANENTLY DELETE.\n');
         else
+            fprintf('DRY RUN - nothing archived. Set clean_dry_run = false to actually MOVE these files to %s\n', archive_dir);
+        end
+    else
+        % ---- 5b. Real archive/delete - require a typed confirmation
+        % first, so a stray re-run of this cell (e.g. Ctrl+Enter twice)
+        % cannot touch anything without the user explicitly typing the
+        % word again. The word itself (and what it does) matches whichever
+        % mode is active, so Bara can't mistake one for the other right
+        % before confirming.
+        if clean_delete_permanently
+            confirmation = input('Type SMAZAT (all caps) to PERMANENTLY DELETE the files listed above: ', 's');
+            expected = 'SMAZAT';
+        else
+            confirmation = input('Type ARCHIVOVAT (all caps) to MOVE the files listed above to the archive folder: ', 's');
+            expected = 'ARCHIVOVAT';
+        end
+        if ~strcmp(confirmation, expected)
+            fprintf('Confirmation not received - nothing was touched.\n');
+        else
+            if ~clean_delete_permanently
+                % Real move (not dry run) - create the archive folder now,
+                % right before the first file actually needs it.
+                mkdir(archive_dir);
+            end
             for i = 1:numel(clean_files)
                 file_path = fullfile(clean_files(i).folder, clean_files(i).name);
                 try
-                    delete(file_path);
-                    fprintf('Deleted: %s\n', file_path);
+                    if clean_delete_permanently
+                        delete(file_path);
+                        fprintf('Deleted: %s\n', file_path);
+                    else
+                        movefile(file_path, fullfile(archive_dir, clean_files(i).name));
+                        fprintf('Archived to %s: %s\n', archive_dir, clean_files(i).name);
+                    end
                 catch ME
                     % try/catch per file so one locked/missing file cannot
-                    % abort deletion of the rest of the list.
-                    fprintf('FAILED to delete %s (%s)\n', file_path, ME.message);
+                    % abort the rest of the list.
+                    if clean_delete_permanently
+                        fprintf('FAILED to delete %s (%s)\n', file_path, ME.message);
+                    else
+                        fprintf('FAILED to archive %s (%s)\n', file_path, ME.message);
+                    end
                 end
             end
         end
     end
 end
-%% ------------------------------------------------------------
-%  1c) USER SETTINGS - all manual setting
+%% 1B) USER SETTINGS ------------------------------------------
+%  all manual setting
 %  ------------------------------------------------------------
 %
-run_tag = 'v1aut';    % change for every new settings variant
+% run_tag is now AUTO-GENERATED from manual_patchdiam/man_PD1/man_PD2Min/
+% man_PD2Max/simp_MaxOrder/simp_SmallRadii/simp_ReplaceIterations below
+% (see section 2, "DERIVED NAMES") - not set here by hand any more, so a
+% forgotten manual run_tag update can never silently overwrite a previous
+% run's results with different settings. See section 2 for the exact
+% auto-generation formula.
 % --- tree identification -------------------------------------
 tree_id   = 'IND01_054';           % short name used for ALL output files
 cloud_txt = 'IND01_054.txt';   % input point cloud (text file, 3 columns X Y Z)
@@ -179,6 +229,14 @@ cloud_txt = 'IND01_054.txt';   % input point cloud (text file, 3 columns X Y Z)
 % --- number of models ----------------------------------------
 n_models_first = 5;    % models per parameter combination, first (coarse) run
 n_models_opt   = 25;   % models with the optimal inputs, second run
+
+% false (default, SAFE) = if a res_file/res_new_file already exists for
+% this EXACT run_tag, SKIP make_models and just load the existing file
+% instead - protects against silently discarding an expensive
+% reconstruction by accidentally re-running with identical settings.
+% true = always recompute and overwrite, even if a matching file already
+% exists.
+overwrite_existing_reconstruction = false;
 
 % --- parallel computing --------------------------------------
 use_parallel = true;   % true  = make_models_parallel
@@ -210,6 +268,18 @@ model_index = 1;       % used only when use_optimal = false
 
 plot_optimal = true;   % true = plot the optimal QSM before simplification
 
+% --- simplification setting  -----------------
+% MaxOrder           Maximum branching order, higher order branches removed
+% SmallRadii         Minimum acceptable radius for a branch at its base
+% ReplaceIterations  Number of iterations for replacing two concecutive
+%                    cylinders inside one branch with one longer cylinder
+% --- simplification settings ---------------------------------
+simp_MaxOrder          = 8;
+simp_SmallRadii        = 0.005;
+simp_ReplaceIterations = 2;
+simp_Plot              = 1;
+simp_Disp              = 1;
+
 % Export the "Filtered <10cm" group (branches/trunk restricted to
 % diameter >= 10 cm, matching how the destructive field reference was
 % physically measured) into VolumeTable and into the
@@ -220,26 +290,64 @@ plot_optimal = true;   % true = plot the optimal QSM before simplification
 % way, only the CSV/text-file EXPORT is affected.
 export_filtered_10cm = true;
 
-% Indices of the optimal group (needed here and in 16b)
-%   OptModels{1} = indices of all models of the winning combination
-%   OptModels{2} = index of the single representative model (OptQSM)
-%
-% MaxOrder      Maximum branching order, higher order branches removed
-% SmallRadii    Minimum acceptable radius for a branch at its base
-% ReplaceIterations Number of iterations for replacing two concecutive
-%                     cylinders inside one branch with one longer cylinder
-%
-% --- simplification settings ---------------------------------
-simp_MaxOrder          = 8;
-simp_SmallRadii        = 0.005;
-simp_ReplaceIterations = 0;
-simp_Plot              = 1;
-simp_Disp              = 1;
+% Master switch for the ANSYS geometry export (section 20) - default OFF,
+% same "explicit opt-in" pattern as clean_start/export_filtered_10cm above,
+% so a normal cell-by-cell run does NOT write geom_*.txt files on every
+% single iteration (section 20 used to run unconditionally). Set to true
+% only when you actually want this run's geometry exported.
+export_to_ansys = false;
 
-%% ------------------------------------------------------------
-%  2) DERIVED NAMES - built automatically from tree_id + run_tag
+% Optional override for the ANSYS export's filename tag - if left blank
+% (''), the export falls back to whichever run's model is actually being
+% exported (run_tag for whatever's live in memory, or
+% EXPORT_FROM_SAVED_RUN_TAG below when that's set), so the geometry files
+% are clearly labeled with whichever reconstruction variant produced them.
+% Set to a non-blank string to use that instead (e.g. for a one-off export
+% you want named something more memorable). See section 20 for where this
+% is actually applied (as ansys_tag, not used directly).
+ansys_export_name = '';
+
+% Blank (default) = export whatever simplification is CURRENTLY LIVE in
+% memory (today's behaviour, via the ansys_source switch in section 20).
+% Non-blank = instead load 'simplified_<tree_id>_<THIS VALUE>.mat' from
+% disk (see section 16c's unconditional save) and export THAT, ignoring
+% ansys_source and whatever's currently live in memory - lets you
+% retroactively export any previously-saved simplification variant, even
+% one no longer in the workspace (e.g. after re-running section 2 + 16 for
+% a second variant, per the "Solution A" workflow).
+EXPORT_FROM_SAVED_RUN_TAG = '';
+
+%% 2) DERIVED NAMES -------------------------------------------
+%  - built automatically from tree_id + run_tag
 %     Normally you do NOT edit this block
 %  ------------------------------------------------------------
+% run_tag: AUTO-GENERATED from the actual settings above (manual_patchdiam/
+% man_PD1/man_PD2Min/man_PD2Max/simp_MaxOrder/simp_SmallRadii/
+% simp_ReplaceIterations), computed HERE (not up in section 1c, where those
+% settings are defined) so it always reflects whatever those variables are
+% actually set to for THIS run - a forgotten manual run_tag edit after
+% changing a setting can no longer silently overwrite a previous run's
+% results under the same name. No manual version prefix (v1/v2/...) - not
+% wanted; if you re-run with IDENTICAL settings, you'll get the identical
+% tag and legitimately overwrite that run's own results, which is correct.
+%
+% Auto mode's actual PatchDiam values are only known DURING the run (from
+% the auto-search inside define_input/treeqsm itself) - they intentionally
+% do NOT appear in this tag, which is built from settings known BEFORE the
+% run starts. They're captured separately, after the fact, in
+% params_<tree>_<run>.csv (section 19) - that file remains the source of
+% truth for auto mode's actual PD values, not this tag.
+%
+% Formula lives in compute_run_tag() (a local function at the end of this
+% file, same pattern as find_disconnected_islands) - NOT inlined here -
+% so section 16's sanity check (which needs the exact same formula, to
+% catch "changed a setting but forgot to re-run this section") can call
+% the identical code instead of a second, hand-copied formula that could
+% drift out of sync with this one.
+run_tag = compute_run_tag(manual_patchdiam, man_PD1, man_PD2Min, ...
+    man_PD2Max, simp_MaxOrder, simp_SmallRadii, simp_ReplaceIterations);
+fprintf('Auto-generated run_tag: %s\n', run_tag);
+
 mat_name     = tree_id;                        % .mat file with the point cloud
 res_name     = [tree_id '_res_'     run_tag];  % results of the first run
 res_new_name = [tree_id '_res_new_' run_tag];  % results of the second run
@@ -263,8 +371,8 @@ fprintf('Results 2    : %s\n', res_new_file);
 fprintf('Volume table : %s.mat / .csv\n', vol_file);
 fprintf('Geometry     : %s*.txt\n', export_prefix);
 
-%% ------------------------------------------------------------
-%  3) IMPORT the point cloud from the text file
+%% 3) IMPORT  ------------------------------------------------
+%  the point cloud from the text file
 %  ------------------------------------------------------------
 if ~isfile(cloud_txt)
     error('Input file not found: %s', fullfile(data_dir, cloud_txt));
@@ -272,8 +380,8 @@ end
 P = load(cloud_txt);
 fprintf('Loaded %d points.\n', size(P,1));
 
-%% ------------------------------------------------------------
-%  4) SHIFT the coordinate system so that the cloud starts at 0
+%% 4) SHIFT ---------------------------------------------------
+%  the coordinate system so that the cloud starts at 0
 %  ------------------------------------------------------------
 P(:,1) = P(:,1) - min(P(:,1));   % X
 P(:,2) = P(:,2) - min(P(:,2));   % Y
@@ -282,8 +390,8 @@ P(:,3) = P(:,3) - min(P(:,3));   % Z
 fprintf('Extent: X %.2f m, Y %.2f m, Z %.2f m\n', ...
     max(P(:,1)), max(P(:,2)), max(P(:,3)));
 
-%% ------------------------------------------------------------
-%  5) PLOT the point cloud for visual check
+%% 5) PLOT the point cloud ------------------------------------
+%  for visual check
 %  ------------------------------------------------------------
 % Explicit, high figure number (10) - NOT auto-numbered - so it can never
 % collide with figures 1/2, which simplify_qsm.m (a shared TreeQSM library
@@ -305,20 +413,19 @@ grid off;
 xlabel('X [m]'); ylabel('Y [m]'); zlabel('Z [m]');
 title(['Cleaned and positioned tree: ' tree_id], 'Interpreter', 'none');
 
-%% ------------------------------------------------------------
-%  6) SAVE the point cloud as a .mat file
+%% 6) SAVE the point cloud -----------------------------------
+%  as a .mat file
 %  ------------------------------------------------------------
 save(mat_file, 'P');
 fprintf('Point cloud saved as %s\n', mat_file);
 
-%% ------------------------------------------------------------
-%  7) RE-ENTRY POINT - start here if the .mat file already exists
+%% 7) RE-ENTRY POINT ------------------------------------------
+%   - start here if the .mat file already exists
 %  ------------------------------------------------------------
 load(mat_file);                  % loads variable P
 
-%% ------------------------------------------------------------
-%  8) DEFINE the input parameters automatically
-%     define_input first runs create_input, so ALL other fields
+%%  8) DEFINE the input parameters automatically----------------
+%    define_input first runs create_input, so ALL other fields
 %     (nmin1, TaperCor, ParentCor, ...) are already filled in.
 %     It then sets only PatchDiam1/2Min/2Max and BallRad1/2.
 %  ------------------------------------------------------------
@@ -343,9 +450,8 @@ fprintf('PatchDiam2Min = %.4f\n',                    auto.PD2Min);
 fprintf('PatchDiam2Max = %.4f    BallRad2 = %.4f\n', auto.PD2Max, auto.BR2);
 fprintf('Implied stem radius Rstem = %.3f m (PatchDiam1 * 3)\n', auto.PD1*3);   %estimate how big stem radius is estimated by QSM
 
-%% ------------------------------------------------------------
-%  9) MANUAL PatchDiam - BallRad derived with the SAME formulas
-%     that define_input uses:
+%% 9) MANUAL PatchDiam - BallRad derived with the SAME formulas------
+%       that define_input uses:
 %       BallRad1 = max( PD1    + 1.50*Res , min(1.25*PD1,    PD1    + 0.025) )
 %       BallRad2 = max( PD2Max + 1.25*Res , min(1.20*PD2Max, PD2Max + 0.025) )
 %     Res = point resolution, recovered from the automatic values.
@@ -405,9 +511,8 @@ else
     disp('Using PatchDiam and BallRad from define_input.');
 end
 
-%% ------------------------------------------------------------
-%  9b) START the parallel pool (run this BEFORE step 10)
-%      Doing it here separates pool problems from QSM problems
+%% 9b) START the parallel pool (run this BEFORE step 10)------
+%       Doing it here separates pool problems from QSM problems
 %  ------------------------------------------------------------
 if use_parallel
     n_tasks = nPD1 * nPD2Min * nPD2Max * n_models_first;
@@ -426,54 +531,59 @@ if use_parallel
     fprintf('Tasks: %d, pool: %d workers.\n', n_tasks, pool.NumWorkers);
 end
 
-%% ------------------------------------------------------------
-%  10) FIRST RUN - models over the parameter grid
+%% 10) FIRST RUN - models over the parameter grid------------
+%  
 %  ------------------------------------------------------------
 tic     % start time monitoring
-if use_parallel
-    QSMs = make_models_parallel(mat_name, res_name, n_models_first, inputs);
+if ~overwrite_existing_reconstruction && isfile(fullfile('results', res_file))
+    fprintf('res_file already exists (%s) - skipping first-run reconstruction.\n', res_file);
+    fprintf('(set overwrite_existing_reconstruction = true to force a fresh recompute)\n');
 else
-    QSMs = make_models(mat_name, res_name, n_models_first, inputs);
+    if use_parallel
+        QSMs = make_models_parallel(mat_name, res_name, n_models_first, inputs);
+    else
+        QSMs = make_models(mat_name, res_name, n_models_first, inputs);
+    end
+    fprintf('First QSM run finished in %.1f min.\n', toc/60);   % toc - stop time moniroting
 end
-fprintf('First QSM run finished in %.1f min.\n', toc/60);   % toc - stop time moniroting
 
-%% ------------------------------------------------------------
-%  11) LOAD the results of the first run
+%% 11) LOAD the results of the first run------------------------
+%  
 %  ------------------------------------------------------------
 res = load(res_file);
 fprintf('Loaded %d models from %s\n', numel(res.QSMs), res_file);
 
-%% ------------------------------------------------------------
-%  12) OPTIMISATION - select the best models
-%      (based on point-to-cylinder distances)
+%% 12) OPTIMISATION - select the best models--------------
+%  (based on point-to-cylinder distances)
 %  ------------------------------------------------------------
 [TreeData_O, OptModels, OptInputs, OptQSM] = select_optimum(res.QSMs);
 
-%% ------------------------------------------------------------
-%  13) SECOND RUN - more models with the optimal parameters
+%% 13) SECOND RUN - more models with the optimal parameters----
 %  ------------------------------------------------------------
 tic
-if use_parallel
-    QSMs_new = make_models_parallel(mat_name, res_new_name, n_models_opt, OptInputs);
+if ~overwrite_existing_reconstruction && isfile(fullfile('results', res_new_file))
+    fprintf('res_new_file already exists (%s) - skipping second-run reconstruction.\n', res_new_file);
+    fprintf('(set overwrite_existing_reconstruction = true to force a fresh recompute)\n');
 else
-    QSMs_new = make_models(mat_name, res_new_name, n_models_opt, OptInputs);
+    if use_parallel
+        QSMs_new = make_models_parallel(mat_name, res_new_name, n_models_opt, OptInputs);
+    else
+        QSMs_new = make_models(mat_name, res_new_name, n_models_opt, OptInputs);
+    end
+    fprintf('Second QSM run finished in %.1f min.\n', toc/60);
 end
-fprintf('Second QSM run finished in %.1f min.\n', toc/60);
 
-%% ------------------------------------------------------------
-%  14) LOAD the results of the second run
+%% 14) LOAD the results of the second run---------------------
 %  ------------------------------------------------------------
 res_new = load(res_new_file);
 fprintf('Loaded %d models from %s\n', numel(res_new.QSMs), res_new_file);
 
-%% ------------------------------------------------------------
-%  15) PRECISION - combine both runs to get better std estimates
+%% 15) PRECISION - combine both runs to get better std estimates---
 %  ------------------------------------------------------------
 [TreeData_E, OptQSMs_E, OptQSM_E] = estimate_precision( ...
     res.QSMs, res_new.QSMs, TreeData_O, OptModels);
 
-%% ------------------------------------------------------------
-%  16) SELECT the source model, then SIMPLIFY it
+%% 16) SELECT the source model, then SIMPLIFY it--------------
 %  ------------------------------------------------------------
 % Indices of the optimal group (needed here and in 16b)
 %   OptModels{1} = indices of all models of the winning combination
@@ -491,6 +601,26 @@ fprintf('Loaded %d models from %s\n', numel(res_new.QSMs), res_new_file);
 % simp_Plot              = 1;
 % simp_Disp              = 1;
 %-------------------------------------------------------------
+clear QSM_simple_clean   % avoid picking up a stale result from an
+                          % earlier simplification pass in this same
+                          % MATLAB session (see Solution A workflow -
+                          % this section is re-run multiple times
+                          % without clearing the whole workspace)
+
+% ---- SAFETY CHECK: run_tag must match CURRENT settings ------------
+% Catches "changed simp_*/manual_patchdiam/man_PD* but forgot to
+% re-run section 2" - every downstream export in this pass (16c's
+% simplified_file, volume table, dbh/height/params, geom_*.txt) would
+% otherwise silently be written under the WRONG (stale) run_tag.
+expected_run_tag = compute_run_tag(manual_patchdiam, man_PD1, man_PD2Min, ...
+    man_PD2Max, simp_MaxOrder, simp_SmallRadii, simp_ReplaceIterations);
+if ~strcmp(run_tag, expected_run_tag)
+    error(['run_tag (''%s'') does not match what your CURRENT settings ' ...
+           'would produce (''%s''). You changed manual_patchdiam/man_PD*/' ...
+           'simp_* since section 2 last ran - re-run section ' ...
+           '"2) DERIVED NAMES" before continuing.'], run_tag, expected_run_tag);
+end
+
 if iscell(OptModels)
     idx     = double(OptModels{1}(:))';
     idx_rep = double(OptModels{2}(1));
@@ -534,13 +664,13 @@ end
 QSM_simple = simplify_qsm(QSM_opt, simp_MaxOrder, ...
     simp_SmallRadii, simp_ReplaceIterations, simp_Plot, simp_Disp);
 
-%% ------------------------------------------------------------
-%  15b) DETECT DISCONNECTED BRANCH ISLANDS - REVIEW BEFORE REMOVING
+%% 16b) DETECT DISCONNECTED BRANCH ISLANDS ------
+%  - REVIEW BEFORE REMOVING
 % This section only DETECTS and PLOTS potential disconnected branch
 % fragments (cylinder.parent == 0 for a non-root cylinder) - it does
 % NOT remove anything. Look at the resulting figure: islands are
 % drawn in red on top of the tree in gray. Only run the NEXT section
-% (15c) if you decide, after reviewing the plot, that these really
+% (16c) if you decide, after reviewing the plot, that these really
 % are broken/noise fragments that should be removed.
 % MOVED here (after simplify_qsm) and now reads from QSM_simple(end)
 % instead of QSM_opt: the user's actual working model is the simplified
@@ -622,8 +752,8 @@ else
     hold off
 end
 
-%% ------------------------------------------------------------
-%  15c) REMOVE DISCONNECTED ISLANDS (run manually, only after reviewing the plot above)
+%% 16c) REMOVE DISCONNECTED ISLANDS-----------------------
+%   (run manually, only after reviewing the plot above)
 % Creates QSM_simple_clean - a COPY of QSM_simple(end) with the island
 % cylinders removed and every remaining cylinder's "parent" index
 % remapped to the new (shifted) row numbers. QSM_simple itself is left
@@ -682,8 +812,26 @@ else
         (total_tree_volume - total_vol_clean)/total_tree_volume*100);
 end
 
-%% ------------------------------------------------------------
-%  15d) PLOT the simplified (no islands) model for visual comparison
+% ---- PERSIST the final simplified model to disk, UNCONDITIONALLY -------
+% Runs in BOTH branches above (islands found -> QSM_simple_clean, no
+% islands -> QSM_simple_clean never created) and regardless of
+% export_to_ansys (section 20) - every simplification pass gets saved
+% automatically, so a second simplification variant (re-running section 2
+% + jumping back to section 16 with different simp_* settings) never
+% silently loses the FIRST variant's result from memory with no way to
+% recover it. Section 20's EXPORT_FROM_SAVED_RUN_TAG can later reload any
+% of these files by the run_tag that produced them.
+if exist('QSM_simple_clean', 'var')
+    QSM_final = QSM_simple_clean(1);
+else
+    QSM_final = QSM_simple(1);   % no islands - simplified alone IS the final result
+end
+simplified_file = ['simplified_' tree_id '_' run_tag '.mat'];
+save(simplified_file, 'QSM_final');
+fprintf('Simplified model saved to %s\n', simplified_file);
+
+%% 16d) PLOT the simplified-------------------------------------
+%   (no islands) model for visual comparison
 %       against the raw "Simplified" model and the islands plot (15b).
 %       Only meaningful when islands were actually found and removed
 %       (guard mirrors the exist('QSM_simple_clean','var') check used
@@ -711,8 +859,8 @@ else
     view(3)
 end
 
-%% ------------------------------------------------------------
-%  17) VOLUME TABLE with variability, in m^3
+%% 17) VOLUME TABLE with variability, in m^3------------------------
+%  
 %       All inputs              = all models of the first run
 %       Optimal                 = models of the winning parameter combination
 %       Optimal (single)        = the one model that gets simplified
@@ -928,8 +1076,8 @@ fprintf('TreeHeight = %.2f m\n',  QSM_opt.treedata.TreeHeight);
 save(vol_file, 'VolumeTable');
 writetable(VolumeTable, [vol_file '.csv']);
 fprintf('Volume table saved as %s.mat and %s.csv\n', vol_file, vol_file);
-%% ------------------------------------------------------------
-%  18) DBH AND HEIGHT FOR COMPARISON
+%% 18) DBH AND HEIGHT FOR COMPARISON----------------
+%  
 %  ------------------------------------------------------------
 dbh_file = ['dbh_' tree_id '_' run_tag '.txt'];
 fid = fopen(dbh_file, 'w');
@@ -1043,79 +1191,137 @@ if export_filtered_10cm
 else
     fprintf('export_filtered_10cm = false - skipping trunklen_filtered_*.txt and branchlen_filtered_*.txt\n');
 end
-%% ------------------------------------------------------------
-%  19) EXPORT - table with the input parameters of each model
+%% 19) EXPORT - the actual reconstruction parameters used for this run ----
 %  ------------------------------------------------------------
-% n = length(QSM_simple);
-% info = table('Size', [n 7], ...
-%     'VariableTypes', {'string','double','double','double','double','double','double'}, ...
-%     'VariableNames', {'Name','tree','model','PD1','PD2Min','PD2Max','Time'});
-% 
-% for i = 1:n
-%     info.Name(i)   = QSM_simple(i).rundata.inputs.name;
-%     info.tree(i)   = QSM_simple(i).rundata.inputs.tree;
-%     info.model(i)  = QSM_simple(i).rundata.inputs.model;
-%     info.PD1(i)    = QSM_simple(i).rundata.inputs.PatchDiam1;
-%     info.PD2Min(i) = QSM_simple(i).rundata.inputs.PatchDiam2Min;
-%     info.PD2Max(i) = QSM_simple(i).rundata.inputs.PatchDiam2Max;
-%     info.Time(i)   = QSM_simple(i).rundata.time(end,1)./60;   % minutes
-% end
-% 
-% time_sum      = sum(info.Time);       % total time in minutes
-% time_sum(1,2) = time_sum./60;         % total time in hours
+% Sidecar CSV (header + ONE data row) recording the ACTUAL values used for
+% THIS run - inputs.PatchDiam1/PatchDiam2Min/PatchDiam2Max/MinCylRad hold
+% the right value regardless of whether manual_patchdiam was true or false:
+% the auto branch (section 9's "else") never touches inputs.PatchDiam1/
+% PatchDiam2Min/PatchDiam2Max/MinCylRad at all, so they're always readable
+% straight off `inputs` here either way (see section 9's "define_input
+% (automatic)" vs. "MANUAL PatchDiam" blocks above) - no special-casing
+% needed for the auto case.
+%
+% simp_MaxOrder/simp_SmallRadii/simp_ReplaceIterations are always set
+% (section 16), regardless of manual/auto mode, so they're read straight
+% from those variables rather than from `inputs`.
+%
+% tree/run use the SAME tree_id/run_tag values already used to build
+% vol_file/export_prefix (section 2) - the whole point of this file is to
+% let import_matlab_results.py join it back to the right volumes_*.csv row
+% by that same (tree, run) pair, read ONCE per file (these values don't
+% vary by Group the way total/trunk/branch volume does - they were fixed
+% for the whole MATLAB run).
+mode_str = 'auto';
+if manual_patchdiam
+    mode_str = 'manual';
+end
+params_file = ['params_' tree_id '_' run_tag '.csv'];
+fid = fopen(params_file, 'w');
+fprintf(fid, 'tree,run,mode,pd1_m,pd2min_m,pd2max_m,mincylrad_m,simp_maxorder,simp_smallradii,simp_replaceiterations\n');
+fprintf(fid, '%s,%s,%s,%.6f,%.6f,%.6f,%.6f,%d,%.6f,%d\n', ...
+    tree_id, run_tag, mode_str, ...
+    inputs.PatchDiam1, inputs.PatchDiam2Min, inputs.PatchDiam2Max, inputs.MinCylRad, ...
+    simp_MaxOrder, simp_SmallRadii, simp_ReplaceIterations);
+fclose(fid);
+fprintf('Parameters exported to %s\n', params_file);
 
-%% ------------------------------------------------------------
-%  20) EXPORT geometry for ANSYS
+%% 20) EXPORT geometry for ANSYS----------------
 %  ------------------------------------------------------------
-% --- choose the SOURCE model ------------------------------------
-% 'simplified_clean' = QSM_simple_clean (simplified model, island cylinders
-%                       removed - section 15c). This is now the PRIMARY
-%                       model the user exports to ANSYS: it is both the
-%                       fewer-cylinder simplified geometry AND has any
-%                       disconnected branch-island noise stripped out.
-% 'simplified'        = QSM_simple (after simplify_qsm, section 16, BEFORE
-%                        island cleaning) - kept for occasional comparison
-%                        exports only.
-% 'optimal'           = QSM_opt (before simplification, section 16, output
-%                        of select_optimum) - kept for occasional
-%                        comparison exports only.
-ansys_source = 'simplified_clean';   % <-- default: simplified + islands removed
+% Gated behind export_to_ansys (section 1c, default false) - same
+% "explicit opt-in" pattern as clean_start/export_filtered_10cm - so this
+% does NOT run on every single cell-by-cell iteration, only when you
+% actually want geometry exported for this run.
+if export_to_ansys
 
-switch ansys_source
-    case 'simplified_clean'
-        % QSM_simple_clean only exists if section 15c actually ran AND
-        % found islands to remove (see its comment above). If it wasn't
-        % created, error out with a clear pointer to 'simplified' instead
-        % of silently exporting the wrong thing - in the no-islands case
-        % QSM_simple and QSM_simple_clean would be identical anyway, so
-        % nothing is lost by switching ansys_source manually.
-        if ~exist('QSM_simple_clean', 'var')
-            error(['ansys_source = ''simplified_clean'', but QSM_simple_clean does not exist ' ...
-                   '(no islands were found in section 15b/15c, so there was nothing to clean). ' ...
-                   'Set ansys_source = ''simplified'' instead - QSM_simple and QSM_simple_clean ' ...
-                   'would be identical anyway when no islands exist.']);
-        end
-        qsm_selected = QSM_simple_clean(1);   % single cleaned model (not an array)
-    case 'simplified'
-        ansys_export_idx = 1;                 % index into QSM_simple
-        qsm_selected = QSM_simple(ansys_export_idx);
-    case 'optimal'
-        qsm_selected = QSM_opt;               % QSM_opt is a single model (not an array)
-    otherwise
-        error('ansys_source must be ''simplified_clean'', ''simplified'' or ''optimal''.');
+% EXPORT_FROM_SAVED_RUN_TAG (section 1c): non-blank means "load a
+% previously-saved simplified_<tree_id>_<tag>.mat from disk (section 16c's
+% unconditional save) and export THAT" - skips the ansys_source switch
+% below entirely, ignoring whatever's currently live in memory. Blank
+% (default) keeps today's behaviour: export whatever's live in memory,
+% via the existing ansys_source switch.
+if ~isempty(EXPORT_FROM_SAVED_RUN_TAG)
+    saved_file = ['simplified_' tree_id '_' EXPORT_FROM_SAVED_RUN_TAG '.mat'];
+    if ~isfile(saved_file)
+        error('EXPORT_FROM_SAVED_RUN_TAG = ''%s'' but %s does not exist.', ...
+              EXPORT_FROM_SAVED_RUN_TAG, saved_file);
+    end
+    loaded = load(saved_file);
+    qsm_selected = loaded.QSM_final;
+    n_opt = 1;
+    ansys_tag_default = EXPORT_FROM_SAVED_RUN_TAG;
+    fprintf('Exporting from SAVED variant: %s\n', saved_file);
+else
+    % --- choose the SOURCE model ------------------------------------
+    % 'simplified_clean' = QSM_simple_clean (simplified model, island cylinders
+    %                       removed - section 15c). This is now the PRIMARY
+    %                       model the user exports to ANSYS: it is both the
+    %                       fewer-cylinder simplified geometry AND has any
+    %                       disconnected branch-island noise stripped out.
+    % 'simplified'        = QSM_simple (after simplify_qsm, section 16, BEFORE
+    %                        island cleaning) - kept for occasional comparison
+    %                        exports only.
+    % 'optimal'           = QSM_opt (before simplification, section 16, output
+    %                        of select_optimum) - kept for occasional
+    %                        comparison exports only.
+    ansys_source = 'simplified_clean';   % <-- default: simplified + islands removed
+
+    switch ansys_source
+        case 'simplified_clean'
+            % QSM_simple_clean only exists if section 15c actually ran AND
+            % found islands to remove (see its comment above). If it wasn't
+            % created, error out with a clear pointer to 'simplified' instead
+            % of silently exporting the wrong thing - in the no-islands case
+            % QSM_simple and QSM_simple_clean would be identical anyway, so
+            % nothing is lost by switching ansys_source manually.
+            if ~exist('QSM_simple_clean', 'var')
+                error(['ansys_source = ''simplified_clean'', but QSM_simple_clean does not exist ' ...
+                       '(no islands were found in section 15b/15c, so there was nothing to clean). ' ...
+                       'Set ansys_source = ''simplified'' instead - QSM_simple and QSM_simple_clean ' ...
+                       'would be identical anyway when no islands exist.']);
+            end
+            qsm_selected = QSM_simple_clean(1);   % single cleaned model (not an array)
+        case 'simplified'
+            ansys_export_idx = 1;                 % index into QSM_simple
+            qsm_selected = QSM_simple(ansys_export_idx);
+        case 'optimal'
+            qsm_selected = QSM_opt;               % QSM_opt is a single model (not an array)
+        otherwise
+            error('ansys_source must be ''simplified_clean'', ''simplified'' or ''optimal''.');
+    end
+
+    n_opt = length(qsm_selected);
+
+    fprintf('Exporting to ANSYS from source: %s (%d model(s))\n', ansys_source, n_opt);
+    ansys_tag_default = run_tag;
 end
 
-n_opt = length(qsm_selected);
-
-fprintf('Exporting to ANSYS from source: %s (%d model(s))\n', ansys_source, n_opt);
+% ansys_tag: ansys_export_name (section 1c) overrides ansys_tag_default
+% (EXPORT_FROM_SAVED_RUN_TAG when exporting a saved variant, run_tag
+% otherwise) when non-blank, so a one-off export can be clearly labeled
+% with something more memorable; blank (the default) just falls back to
+% ansys_tag_default, same as every other export in this file.
+if isempty(ansys_export_name)
+    ansys_tag = ansys_tag_default;
+else
+    ansys_tag = ansys_export_name;
+end
+% Built the SAME way export_prefix is built in section 2, just from
+% ansys_tag instead of run_tag directly - so a custom ansys_export_name
+% actually changes the exported filenames, not just a label.
+ansys_export_prefix = ['geom_' tree_id '_' ansys_tag '_'];
 
 geom_orig = myfun.result_ansys(qsm_selected, n_opt);
 
 for i = 1:n_opt
-    geom_table = geom_orig{i};                            % table of one model
-    file_name  = sprintf('%s%d.txt', export_prefix, i);   % e.g. geom_IND07_v3_1.txt
+    geom_table = geom_orig{i};                                   % table of one model
+    file_name  = sprintf('%s%d.txt', ansys_export_prefix, i);   % e.g. geom_IND07_v3_1.txt
     writematrix(geom_table, file_name, 'Delimiter', '\t');
     fprintf('Exported: %s\n', file_name);
+end
+
+else
+    fprintf('export_to_ansys = false - skipping ANSYS geometry export.\n');
 end
 
 % REMOVED: a duplicate, leftover second "20) EXPORT geometry for ANSYS"
@@ -1136,6 +1342,25 @@ end
 % after every other script statement - MATLAB would otherwise not know
 % where the script code ends and the function definitions begin.
 % ---------------------------------------------------------------
+
+function tag = compute_run_tag(manual_patchdiam, man_PD1, man_PD2Min, ...
+                                 man_PD2Max, simp_MaxOrder, simp_SmallRadii, ...
+                                 simp_ReplaceIterations)
+    % The ONE place run_tag's formula lives - called from section 2 (to
+    % actually SET run_tag) and from section 16's sanity check (to
+    % recompute what run_tag SHOULD be from current settings and compare)
+    % - so the two can never drift out of sync the way two independently
+    % hand-copied formulas eventually would.
+    if manual_patchdiam
+        mode_tag = sprintf('man_pd%02d-%02d-%02d', round(man_PD1*100), ...
+            round(man_PD2Min*100), round(man_PD2Max*100));
+    else
+        mode_tag = 'aut';
+    end
+    simp_tag = sprintf('mo%d_sr%03d_ri%d', simp_MaxOrder, ...
+        round(simp_SmallRadii*1000), simp_ReplaceIterations);
+    tag = [mode_tag '_' simp_tag];
+end
 
 function island_groups = find_disconnected_islands(parent_arr)
     % Finds every group of cylinders that got disconnected from the
