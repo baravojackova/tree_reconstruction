@@ -66,6 +66,7 @@
 #     pct_diff, compute_error_metrics, filter_by_branch_filter
 # =====================================================================
 
+import math      # used by plot_tree_overview() to compute its panel grid's row count
 import os
 import random   # used in plot_error_boxplot() to jitter the individual-tree scatter points sideways
 import re        # used by shorten_method_label() to parse the CSV's full method strings
@@ -87,6 +88,58 @@ from compare_volumes import (
 # Folder (relative to this script's working directory) where the PNG
 # charts are saved. Created automatically if it doesn't exist.
 PLOTS_DIR = "plots"
+
+# ---- plot_tree_overview() panel layout -------------------------------
+# Tune how plot_tree_overview()'s per-metric panels are sized and
+# labelled - added because with many method variants (many
+# RADIUS_THRESHOLDS x SEG_VARIANT_SUFFIX combos, or several
+# IMPORT_GROUPS all shown at once), the x-axis method labels in each
+# panel got cramped/overlapping.
+LABEL_FONTSIZE = 8      # x-axis method-label font size, in every panel
+LABEL_ROTATION = 45     # x-axis method-label rotation angle (degrees)
+BOTTOM_MARGIN = 0.1    # fraction of figure height reserved for x-axis labels (fig.subplots_adjust(bottom=...))
+
+OVERVIEW_NCOLS = 2       # fixed number of columns in the per-metric-field panel grid
+PANEL_WIDTH = 13     # inches, width of ONE panel (figure width = OVERVIEW_NCOLS * PANEL_WIDTH)
+PANEL_HEIGHT = 6        # inches, height of ONE panel (figure height = n_rows * PANEL_HEIGHT)
+
+# ---- plot_tree_overview() deviation annotations (the "+NN% (+x.xx m3)"
+# labels drawn above each bar) ------------------------------------------
+# ANNOTATION_FONTSIZE used to be hard-coded (5) directly in the ax.annotate()
+# call. The top-of-panel headroom (see set_ylim() in the annotation loop)
+# was tuned specifically against that old fontsize=5, so a BIGGER font here
+# needs correspondingly MORE headroom or the taller text clips into the
+# panel above - TOP_MARGIN_PER_FONTSIZE scales the margin automatically so
+# the two never have to be retuned by hand together.
+ANNOTATION_FONTSIZE = 9    # font size for the % / absolute-diff labels drawn above each bar
+REFERENCE_FONTSIZE = 5         # the fontsize TOP_MARGIN_BASE below was tuned/verified against (the old hard-coded value)
+TOP_MARGIN_BASE = 0.35         # base headroom fraction above the tallest bar, at REFERENCE_FONTSIZE (existing default)
+TOP_MARGIN_PER_FONTSIZE = 0.03 # extra headroom fraction per point of ANNOTATION_FONTSIZE above REFERENCE_FONTSIZE
+
+# Bar width/spacing (data units) in plot_tree_overview()'s per-metric
+# panels - widened from the old 0.7/1.6 defaults because at larger
+# ANNOTATION_FONTSIZE the rotated per-bar annotation text is wide enough
+# (after rotation=90) to overlap neighboring bars' annotations; widen
+# further still if that overlap persists with many methods/narrow fonts.
+BAR_WIDTH = 2    # width of each bar (data units) - was 0.7
+BAR_SPACING = 3 #distance between bar centers (data units) - was 1.6
+
+# ---- plot_tree_overview() method selection / output filename ----------
+# SELECTED_METHODS: None (default) = show every method present for the
+# tree/branch_filter being plotted, unchanged from before. Set it to a
+# list of EXACT method strings (the full, untouched volume_results.csv
+# "method" column value, not the shortened display label) to restrict the
+# chart to just those - e.g. for a focused side-by-side of a handful of
+# variants instead of everything in the CSV. Any name that matches no row
+# is printed as a warning and simply skipped, rather than crashing.
+SELECTED_METHODS = None   # e.g. ["AdTree raw r5mm_seg0.1-0.5-k0.5", "AdQSM (TreesParams) (AdQSM 05)"]
+
+# PNG_FILENAME_SUFFIX: appended to plot_tree_overview()'s output PNG
+# filename, right before the ".png" extension - "" (default) leaves the
+# filename exactly as before. Set it (e.g. "_addcomp") when saving a
+# SELECTED_METHODS-restricted variant, so it doesn't overwrite the
+# default all-methods PNG for the same tree/branch_filter.
+PNG_FILENAME_SUFFIX = ""   # e.g. "_addcomp"
 # =====================================================================
 
 
@@ -244,7 +297,9 @@ def shorten_method_label(method):
 
 # ----------------------------------------------------------------------
 # Shared colour scheme, used by EVERY chart in this file (plot_tree_overview,
-# plot_total_volume_by_tree, plot_error_boxplot, plot_error_metrics_bar).
+# plot_total_volume_by_tree, plot_error_boxplot, plot_error_metrics_bar) -
+# and importable by OTHER scripts too (e.g. plot_box.py), so a method's
+# family color never has to be re-derived/duplicated elsewhere.
 #
 # WHY a single shared function: before this change, each chart picked its
 # own colours independently (plot_tree_overview built its own ad-hoc
@@ -257,7 +312,65 @@ def shorten_method_label(method):
 # that decides "method -> colour", called once per branch_filter mode in the
 # RUN section below and threaded into every chart that needs it, so the
 # mapping is guaranteed identical everywhere it's used.
+#
+# FAMILY_GRADIENTS/classify_family() below are MODULE-LEVEL (not local to
+# build_method_color_map(), as they used to be) specifically so another
+# script (plot_box.py) can `from plot_volumes import FAMILY_GRADIENTS,
+# classify_family` and build its own family-consistent colors (e.g. for
+# GROUPS of methods) without duplicating the 4 gradients or the
+# startswith()-based classification logic by hand.
 # ----------------------------------------------------------------------
+
+# Hand-picked, pastel (light, low-saturation) hex stops per family - plain
+# hex-string lists (not compiled matplotlib Colormap objects) so a caller
+# that doesn't even use LinearSegmentedColormap can still reuse the raw
+# stops. "Reference" is a genuine 5th entry here (not the old hardcoded
+# "#ef476f" special case) for structural consistency with the other four -
+# its middle stop IS exactly the old flat highlight color, so a
+# single-member "Reference" family (today's only real case) still resolves
+# to the identical color as before (see classify_family()'s t=0.5 rule in
+# build_method_color_map() below).
+FAMILY_GRADIENTS = {
+    "AdTree raw":        ["#e1f5e1", "#b8e2b8", "#8fce8f", "#63b563"],  # pastel green: pale -> sage -> leaf -> deeper green
+    "AdTree calibrated": ["#dceaf9", "#b3d1f2", "#84b3e8", "#5a92d6"],  # pastel blue: pale -> sky -> mid -> deeper blue
+    "TreeQSM":           ["#eeeeee", "#d4d4d4", "#b8b8b8", "#98989a"],  # pastel grey: near-white -> light -> mid -> deeper grey
+    "AdQSM":             ["#fdf3c9", "#f8e08c", "#eec85a", "#d6a83f"],  # pastel yellow/ochre: pale -> gold -> ochre -> deeper ochre
+    "Reference":         ["#fbc3d0", "#ef476f", "#c9315a"],             # pink/red: pale -> #ef476f (the ORIGINAL flat highlight, at this list's middle stop) -> deeper red
+}
+
+# The four non-reference family prefixes, matched against a method's FULL,
+# untouched CSV string (see classify_family() below) - kept as its own
+# constant (not just FAMILY_GRADIENTS.keys()) because "Reference" is NOT a
+# prefix to match methods against; it's assigned by identity against
+# reference_method instead (see classify_family()).
+FAMILY_PREFIXES = ("AdTree raw", "AdTree calibrated", "TreeQSM", "AdQSM")
+
+
+def classify_family(method_string, reference_method):
+    """Classify one method string into a family name - one of
+    FAMILY_GRADIENTS's keys ("AdTree raw"/"AdTree calibrated"/"TreeQSM"/
+    "AdQSM"/"Reference"), or None if it matches none of them.
+
+    method_string == reference_method is checked FIRST: if it does NOT
+    also match one of FAMILY_PREFIXES (e.g. REFERENCE_METHOD, "Reference
+    (destructive)"), it's classified "Reference" regardless of its own
+    text. If it DOES also match a family prefix (e.g. REFERENCE_METHOD_NONE,
+    which literally IS an "AdQSM ..." method string, in the "none" mode),
+    that family wins over "Reference" - so the "none" mode's reference row
+    is grouped with its AdQSM siblings, not isolated (see
+    build_method_color_map()'s docstring for the full "why").
+    Every OTHER (non-reference) method is classified purely by
+    FAMILY_PREFIXES prefix matching, independent of reference_method.
+    """
+    if method_string == reference_method and not any(
+            method_string.startswith(p) for p in FAMILY_PREFIXES):
+        return "Reference"
+    for p in FAMILY_PREFIXES:
+        if method_string.startswith(p):
+            return p
+    return None
+
+
 def build_method_color_map(methods, reference_method):
     """Return a {method: color} dict for the given list of methods.
 
@@ -313,74 +426,65 @@ def build_method_color_map(methods, reference_method):
     shorten_method_label()'s own diagnostic table printed in the RUN
     section below.
     """
-    # Hand-picked, pastel (light, low-saturation) stops per group - four
-    # stops each, same style as this file's previous hand-built gradients,
-    # so a dozen+ methods in one group still stays readable instead of
-    # clashing the way matplotlib's default saturated cycle would.
-    green_gradient = mcolors.LinearSegmentedColormap.from_list(
-        "adtree_raw_gradient",
-        ["#e1f5e1", "#b8e2b8", "#8fce8f", "#63b563"],  # pastel green: pale -> sage -> leaf -> deeper green
-    )
-    blue_gradient = mcolors.LinearSegmentedColormap.from_list(
-        "adtree_calib_gradient",
-        ["#dceaf9", "#b3d1f2", "#84b3e8", "#5a92d6"],  # pastel blue: pale -> sky -> mid -> deeper blue
-    )
-    grey_gradient = mcolors.LinearSegmentedColormap.from_list(
-        "treeqsm_gradient",
-        ["#eeeeee", "#d4d4d4", "#b8b8b8", "#98989a"],  # pastel grey: near-white -> light -> mid -> deeper grey
-    )
-    yellow_gradient = mcolors.LinearSegmentedColormap.from_list(
-        "adqsm_gradient",
-        ["#fdf3c9", "#f8e08c", "#eec85a", "#d6a83f"],  # pastel yellow/ochre: pale -> gold -> ochre -> deeper ochre
-    )
+    # Compile each family's raw hex stops (FAMILY_GRADIENTS, module-level -
+    # see the "Shared colour scheme" section above) into a matplotlib
+    # Colormap, once per call. Display name for the diagnostic print below
+    # kept alongside each ("green"/"blue"/... - same words as before this
+    # refactor, so the printed diagnostic table is unchanged) since
+    # FAMILY_GRADIENTS' own keys ("AdTree raw" etc.) are the family names,
+    # not the colour words.
+    family_display_name = {
+        "AdTree raw": "green", "AdTree calibrated": "blue",
+        "TreeQSM": "grey", "AdQSM": "yellow", "Reference": "pink",
+    }
+    family_gradient = {
+        family: mcolors.LinearSegmentedColormap.from_list(
+            "%s_gradient" % family.lower().replace(" ", "_"), stops)
+        for family, stops in FAMILY_GRADIENTS.items()
+    }
 
-    family_prefixes = ("AdTree raw", "AdTree calibrated", "TreeQSM", "AdQSM")
-    reference_is_family_member = any(
-        reference_method.startswith(p) for p in family_prefixes) if reference_method else False
+    reference_family = classify_family(reference_method, reference_method) if reference_method else None
+    reference_is_family_member = reference_family is not None and reference_family != "Reference"
     print("  build_method_color_map(): reference '%s' %s a known family prefix - %s"
           % (reference_method,
              "matches" if reference_is_family_member else "does NOT match",
              "included within its family gradient (sorted first in that group), not isolated"
              if reference_is_family_member else "isolated with its own fixed highlight colour"))
 
-    non_ref_methods = [m for m in methods if m != reference_method]
-
     # Classify BEFORE assigning colors, so each group's `t = i/(n-1)`
     # spread is computed over ONLY that group's own count - a method being
     # added/removed in one group must never shift another group's shades.
-    # When the reference matches a family, it's put in the pool FIRST so it
-    # lands at the start of its family's group list (see docstring above).
-    classify_pool = ([reference_method] + non_ref_methods) if reference_is_family_member else non_ref_methods
-    groups = {"AdTree raw": [], "AdTree calibrated": [], "TreeQSM": [], "AdQSM": []}
+    # reference_method is put in the pool FIRST (when present in `methods`
+    # at all) so it lands at the start of its family's group list (see
+    # docstring above) - classify_family() itself decides whether that
+    # family is one of the four gradients or the "Reference" pseudo-family.
+    non_ref_methods = [m for m in methods if m != reference_method]
+    classify_pool = ([reference_method] + non_ref_methods) if reference_method in methods else non_ref_methods
+    groups = {family: [] for family in FAMILY_GRADIENTS}
     unclassified = []
     for m in classify_pool:
-        if m.startswith("AdTree raw"):
-            groups["AdTree raw"].append(m)
-        elif m.startswith("AdTree calibrated"):
-            groups["AdTree calibrated"].append(m)
-        elif m.startswith("TreeQSM"):
-            groups["TreeQSM"].append(m)
-        elif m.startswith("AdQSM"):
-            groups["AdQSM"].append(m)
-        else:
+        family = classify_family(m, reference_method)
+        if family is None:
             unclassified.append(m)
+        else:
+            groups[family].append(m)
 
     color_of = {}
     group_of_method = {}   # for the diagnostic print below only
-    for group_name, group_gradient, color_name in (
-            ("AdTree raw", green_gradient, "green"),
-            ("AdTree calibrated", blue_gradient, "blue"),
-            ("TreeQSM", grey_gradient, "grey"),
-            ("AdQSM", yellow_gradient, "yellow")):
-        group_methods = groups[group_name]
+    for family in FAMILY_GRADIENTS:
+        group_methods = groups[family]
         n = len(group_methods)
         for i, m in enumerate(group_methods):
             # Spread methods evenly across the gradient's full 0..1 range. With
             # only one method in this group, t=0.5 (the middle of the gradient)
-            # is used instead of dividing by (n - 1) = 0.
+            # is used instead of dividing by (n - 1) = 0. For "Reference" with
+            # its usual single member, t=0.5 lands exactly on FAMILY_GRADIENTS
+            # ["Reference"]'s middle stop, "#ef476f" - the SAME hex the old
+            # hardcoded flat highlight used, so this refactor doesn't shift
+            # the reference's color.
             t = (i / (n - 1)) if n > 1 else 0.5
-            color_of[m] = group_gradient(t)
-            group_of_method[m] = color_name
+            color_of[m] = family_gradient[family](t)
+            group_of_method[m] = family_display_name[family]
 
     if unclassified:
         print("WARNING: build_method_color_map(): %d method(s) matched none of "
@@ -390,10 +494,6 @@ def build_method_color_map(methods, reference_method):
         for m in unclassified:
             color_of[m] = "#9a9a9a"   # flat neutral grey - distinct from the TreeQSM grey GRADIENT
             group_of_method[m] = "grey (unclassified fallback)"
-
-    if reference_method in methods and not reference_is_family_member:
-        color_of[reference_method] = "#ef476f"   # fixed pink/red highlight (was "coral")
-        group_of_method[reference_method] = "pink (reference)"
 
     print("  build_method_color_map(): colour-group assignment for this mode "
           "(reference='%s'):" % reference_method)
@@ -585,6 +685,25 @@ def plot_tree_overview(rows, tree, branch_filter, color_map):
               % (tree, branch_filter))
         return
 
+    # SELECTED_METHODS (see PARAMETERS block): None (default) = show every
+    # method present for this tree/branch_filter, unchanged from before.
+    # When set, restrict tree_rows to just those exact method strings -
+    # applied here, before ANYTHING else derives from tree_rows (methods
+    # list, reference lookup, per-field values), so the rest of this
+    # function never needs to know SELECTED_METHODS exists.
+    if SELECTED_METHODS is not None:
+        present_methods_here = {r["method"] for r in tree_rows}
+        missing = [m for m in SELECTED_METHODS if m not in present_methods_here]
+        if missing:
+            print("WARNING: plot_tree_overview(): SELECTED_METHODS name(s) matched "
+                  "no row for tree '%s' branch_filter='%s' - skipping: %s"
+                  % (tree, branch_filter, missing))
+        tree_rows = [r for r in tree_rows if r["method"] in SELECTED_METHODS]
+        if not tree_rows:
+            print("No rows left for tree '%s' with branch_filter='%s' after applying "
+                  "SELECTED_METHODS - skipping this overview." % (tree, branch_filter))
+            return
+
     # WHICH method is "the reference" depends on branch_filter, same as
     # everywhere else in this file: the destructive field reference
     # (REFERENCE_METHOD) only ever has "10cm" rows, so it can never be found
@@ -629,13 +748,13 @@ def plot_tree_overview(rows, tree, branch_filter, color_map):
     # shape passed to plt.subplots() right below.
     #
     # ALL 8 fields load_results() provides are now shown (previously 6 - the
-    # "stem"/"branch" volume panels below are NEW, added because you asked to
-    # see per-method stem/branch volume side by side with everything else,
+    # "trunk"/"branch" volume panels below are NEW, added because you asked to
+    # see per-method trunk/branch volume side by side with everything else,
     # not just the combined total). Order groups the three VOLUME fields
-    # first (total, stem, branch), then the rest in the same order as before.
+    # first (total, trunk, branch), then the rest in the same order as before.
     fields = [
         ("total",      "Total volume [m^3]"),
-        ("stem",       "Stem volume [m^3]"),
+        ("trunk",      "Trunk volume [m^3]"),
         ("branch",     "Branch volume [m^3]"),
         ("dbh",        "DBH [m]"),
         ("height",     "Height [m]"),
@@ -657,25 +776,34 @@ def plot_tree_overview(rows, tree, branch_filter, color_map):
     # n_cylinders, which has no unit - see the annotation loop's "n_cylinders"
     # special case, which formats it as a plain signed integer instead).
     FIELD_UNITS = {
-        "total": "m3", "stem": "m3", "branch": "m3",
+        "total": "m3", "trunk": "m3", "branch": "m3",
         "dbh": "m", "height": "m",
         "taper": "cm/m",
         "trunk_len": "m", "branch_len": "m",
         "n_cylinders": "",
     }
 
-    # GRID SIZE CHOICE: 3x3 (9 slots), matches the 9 fields above exactly -
-    # no empty panel to explain away. (Previously 2x4/8 fields fit its own
-    # grid perfectly too, for the same reason - adding n_cylinders as a 9th
-    # field made 3x3 the new perfect fit instead of leaving an empty slot
-    # in a 2x5 grid.) figsize scaled to keep each panel roughly the same
-    # size as before (21/4 =~5.25 wide, 9/2 =~4.5 tall per panel before ->
-    # 3*5.25 =~16 wide, 3*4.5 =~13.5 tall now). Height bumped again to
-    # 3*5.3 =~16 tall (was 13.5) - taller panels give the rotated 90 deg
-    # deviation annotations (see the annotation loop below) more vertical
-    # room, on top of the ylim headroom fix, instead of relying on ylim
-    # headroom alone to keep them from crossing into the panel above.
-    fig, axes = plt.subplots(3, 3, figsize=(16, 16))
+    # GRID SIZE CHOICE: fixed OVERVIEW_NCOLS columns (2, per Bara's request -
+    # see the PARAMETERS block near the top of this file), with n_rows
+    # computed from the field count so every field still gets its own
+    # panel. This replaced a fixed 3x3 grid - with many method variants
+    # (many RADIUS_THRESHOLDS x SEG_VARIANT_SUFFIX combos, or several
+    # IMPORT_GROUPS shown together), a 3-wide panel left too little
+    # horizontal room per panel for all the method bars/labels to stay
+    # readable; fewer, wider columns (PANEL_WIDTH each) fixes that. Each
+    # panel is PANEL_WIDTH x PANEL_HEIGHT inches, so the whole figure is
+    # (OVERVIEW_NCOLS * PANEL_WIDTH) x (n_rows * PANEL_HEIGHT).
+    n_fields = len(fields)
+    n_rows = math.ceil(n_fields / OVERVIEW_NCOLS)
+    fig, axes = plt.subplots(n_rows, OVERVIEW_NCOLS,
+                              figsize=(OVERVIEW_NCOLS * PANEL_WIDTH, n_rows * PANEL_HEIGHT))
+
+    # n_rows * OVERVIEW_NCOLS can exceed n_fields (e.g. 9 fields in a
+    # 2-column grid needs 5 rows = 10 slots, leaving 1 unused) - blank any
+    # such trailing slot instead of leaving it as an empty-but-visible axes
+    # (which would otherwise show bare, unlabelled ticks/spines).
+    for ax in axes.flat[n_fields:]:
+        ax.axis("off")
 
     for ax, (field_key, subplot_title) in zip(axes.flat, fields):
         # Skip methods with no value (None) for THIS field entirely, instead
@@ -700,14 +828,15 @@ def plot_tree_overview(rows, tree, branch_filter, color_map):
         # Spacing factor > 1 widens the gap between bars (and thus between
         # their labels) without changing bar width itself - needed because
         # with many methods the rotated labels below start overlapping at
-        # spacing=1 (bars packed edge-to-edge).
-        bar_spacing = 1.6
-        bar_width = 0.7
-        x_positions = [i * bar_spacing for i in range(len(present_methods))]
-        ax.bar(x_positions, values, width=bar_width, color=colors)
+        # spacing=1 (bars packed edge-to-edge). BAR_WIDTH/BAR_SPACING (see
+        # PARAMETERS block) instead of hard-coded 0.7/1.6, so they can be
+        # widened further if the per-bar deviation annotations still
+        # collide at a larger ANNOTATION_FONTSIZE.
+        x_positions = [i * BAR_SPACING for i in range(len(present_methods))]
+        ax.bar(x_positions, values, width=BAR_WIDTH, color=colors)
         ax.set_xticks(x_positions)
         ax.set_xticklabels([shorten_method_label(m) for m in present_methods],
-                           rotation=40, ha="right", fontsize=8)
+                           rotation=LABEL_ROTATION, ha="right", fontsize=LABEL_FONTSIZE)
         ax.set_title(subplot_title)
 
         # Small FYI note (not the heavy AdQSM data-quality warning further
@@ -748,12 +877,22 @@ def plot_tree_overview(rows, tree, branch_filter, color_map):
         # running into subplot_title/the neighbouring panel. Based on
         # `values` (the actual bar heights) rather than whatever ylim
         # ax.bar() happened to autoscale to, so it's not sensitive to
-        # matplotlib's own default margin. Bumped from the previous 18% to
-        # 35% - 18% still left a few labels crossing into the panel above
-        # at small fontsize/rotation=90 in practice.
+        # matplotlib's own default margin.
+        #
+        # The margin fraction SCALES with ANNOTATION_FONTSIZE (see
+        # PARAMETERS block) instead of staying a fixed 35% - a bigger
+        # annotation font takes up more vertical space, so it needs more
+        # headroom or it clips into the panel above; this keeps the two in
+        # sync automatically instead of requiring both to be retuned by
+        # hand every time one changes. TOP_MARGIN_BASE (0.35) is the
+        # original fixed margin, tuned/verified at the old hard-coded
+        # fontsize=5 (REFERENCE_FONTSIZE) - it only grows for fonts LARGER
+        # than that (max(0, ...) below), so nothing changes at fontsize=5.
+        margin_fraction = TOP_MARGIN_BASE + TOP_MARGIN_PER_FONTSIZE * max(
+            0, ANNOTATION_FONTSIZE - REFERENCE_FONTSIZE)
         finite_values = [v for v in values if v is not None]
         if finite_values and max(finite_values) > 0:
-            ax.set_ylim(top=max(finite_values) * 1.35)
+            ax.set_ylim(top=max(finite_values) * (1 + margin_fraction))
 
         ref_value = ref_row[field_key] if ref_row is not None else None
         unit = FIELD_UNITS.get(field_key, "")
@@ -765,14 +904,31 @@ def plot_tree_overview(rows, tree, branch_filter, color_map):
             if d_pct is None:   # no reference value to compare against - leave blank
                 continue
             d_abs = value - ref_value   # ref_value is guaranteed non-None here (d_pct was not None)
+            # Bare numbers only here (no trailing "%"/unit repeated on every
+            # single bar) - the unit-aware %d-vs-%.2f branching itself is
+            # unchanged, only the appended unit string is dropped for THIS
+            # annotation. The units are now explained once per panel instead,
+            # via the top-left corner note added below (see "top: % diff...").
             if field_key == "n_cylinders":
-                abs_text = "%+d" % round(d_abs)   # a cylinder COUNT - never fractional
+                abs_text_no_unit = "%+d" % round(d_abs)   # a cylinder COUNT - never fractional
             else:
-                abs_text = ("%+.2f %s" % (d_abs, unit)).strip()
-            ax.annotate("%+.0f%%\n(%s)" % (d_pct, abs_text),
+                abs_text_no_unit = "%+.2f" % d_abs
+            ax.annotate("%+.0f\n(%s)" % (d_pct, abs_text_no_unit),
                         xy=(xi, value),
                         xytext=(0, 3), textcoords="offset points",   # 3 points above the bar top
-                        ha="center", va="bottom", fontsize=5, linespacing=1.15, rotation=90)
+                        ha="center", va="bottom", fontsize=ANNOTATION_FONTSIZE, linespacing=1.15, rotation=90)
+
+        # Explain the units ONCE per panel (rather than repeating "%"/unit
+        # on every bar's annotation above) - floating note in the top-left
+        # corner of the plot AREA, in axes-fraction coordinates
+        # (transform=ax.transAxes) so it stays fixed there regardless of
+        # bar heights/data values, not tied to any particular bar's data
+        # position. Confirmed (Step 1) nothing else occupies this corner in
+        # this panel. White, semi-transparent background box so it stays
+        # readable even if a tall bar passes behind it.
+        ax.text(0.02, 0.98, "top: %% diff from reference\nbottom: abs. diff [%s]" % unit,
+                transform=ax.transAxes, ha="left", va="top", fontsize=8,
+                bbox=dict(boxstyle="round", facecolor="white", alpha=0.8, edgecolor="lightgray"))
 
     # Subtitle spells out which methodology this figure shows, so it's clear
     # at a glance even without reading the filename.
@@ -820,7 +976,18 @@ def plot_tree_overview(rows, tree, branch_filter, color_map):
     # present, in "10cm" mode) and at the bottom for the legend.
     top_margin = 0.90 if branch_filter == "10cm" else 0.96
     fig.tight_layout(rect=(0, 0.06, 1, top_margin))
-    save_and_report(fig, "tree_overview_%s_%s.png" % (tree, branch_filter))
+
+    # Explicit bottom margin (BOTTOM_MARGIN, see PARAMETERS block), applied
+    # AFTER tight_layout() above on purpose: subplots_adjust() runs last, so
+    # it overrides tight_layout's automatic bottom spacing with this fixed
+    # value - simpler than reconciling both into tight_layout's single rect
+    # tuple, and guarantees consistent room for the (now longer, rotated)
+    # x-axis method labels regardless of what tight_layout guessed.
+    fig.subplots_adjust(bottom=BOTTOM_MARGIN)
+    # PNG_FILENAME_SUFFIX (see PARAMETERS block) - appended before the
+    # extension, "" by default (unchanged filename) so saved variants (e.g.
+    # a SELECTED_METHODS-restricted chart) don't overwrite the default one.
+    save_and_report(fig, "tree_overview_%s_%s%s.png" % (tree, branch_filter, PNG_FILENAME_SUFFIX))
 
 
 # ----------------------------------------------------------------------

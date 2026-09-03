@@ -73,13 +73,13 @@ if d_low is not None and d_high is not None and (TAPER_H_HIGH - TAPER_H_LOW) > 0
     taper = (d_low - d_high) * 100.0 / (TAPER_H_HIGH - TAPER_H_LOW)  # cm/m
 
 upsert_result(RESULTS_CSV, tree=name, method=METHOD_LABEL,
-              total=total_vol, stem=trunk_vol, branch=branch_vol, std=None,
+              total=total_vol, trunk=trunk_vol, branch=branch_vol, std=None,
               dbh=dbh, height=height, taper=taper,
               trunk_len=trunk_len, branch_len=branch_len,
               branch_filter=BRANCH_FILTER, n_cylinders=len(cyls))
 
 print("Added/updated row: tree=%s, method=%s" % (name, METHOD_LABEL))
-print("  total_m3=%.4f  stem_m3=%.4f  branch_m3=%.4f  n_cylinders=%d"
+print("  total_m3=%.4f  trunk_m3=%.4f  branch_m3=%.4f  n_cylinders=%d"
       % (total_vol, trunk_vol, branch_vol, len(cyls)))
 print("  dbh_m=%.3f  height_m=%.2f  taper_cm_per_m=%s"
       % (dbh, height, ("%.2f" % taper) if taper is not None else "n/a"))

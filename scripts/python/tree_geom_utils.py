@@ -968,7 +968,7 @@ def report_thin_branch_volume(lengths, radii, order_arr, cut_cm=10.0, source_lab
     return result
 
 
-def upsert_result(csv_path, tree, method, total, stem, branch, std, dbh=None, height=None, taper=None,
+def upsert_result(csv_path, tree, method, total, trunk, branch, std, dbh=None, height=None, taper=None,
                    trunk_len=None, branch_len=None, branch_filter="none", n_cylinders=None):
     """Insert/update one (tree, method) row in the shared master results CSV
     (see compare_volumes.py for its format). Reads csv_path if it exists
@@ -987,7 +987,7 @@ def upsert_result(csv_path, tree, method, total, stem, branch, std, dbh=None, he
     # n_cylinders is the LAST column (Task A), added after branch_filter so
     # every existing column keeps its position - old rows/readers relying
     # on column position elsewhere are unaffected.
-    header = ["tree", "method", "total_m3", "stem_m3", "branch_m3", "std_m3",
+    header = ["tree", "method", "total_m3", "trunk_m3", "branch_m3", "std_m3",
               "dbh_m", "height_m", "taper_cm_per_m", "trunk_len_m", "branch_len_m",
               "branch_filter", "n_cylinders"]
 
@@ -1008,7 +1008,7 @@ def upsert_result(csv_path, tree, method, total, stem, branch, std, dbh=None, he
 
     rows = [r for r in rows if not (r["tree"] == tree and r["method"] == method)]
     rows.append({"tree": tree, "method": method, "total_m3": fmt(total),
-                 "stem_m3": fmt(stem), "branch_m3": fmt(branch), "std_m3": fmt(std),
+                 "trunk_m3": fmt(trunk), "branch_m3": fmt(branch), "std_m3": fmt(std),
                  "dbh_m": fmt(dbh), "height_m": fmt(height), "taper_cm_per_m": fmt(taper),
                  "trunk_len_m": fmt(trunk_len), "branch_len_m": fmt(branch_len),
                  "branch_filter": branch_filter, "n_cylinders": fmt_int(n_cylinders)})

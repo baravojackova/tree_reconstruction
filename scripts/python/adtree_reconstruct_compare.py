@@ -99,7 +99,7 @@ AdQSM_DIR = os.path.join(DATA_ROOT, TREE_NAME, "05")
 # Each name in ADQSM_VARIANTS must be a subfolder of ADQSM_BASE_DIR that
 # contains its own taper.txt, BranchStructure.txt and TreesParams.txt.
 ADQSM_BASE_DIR = os.path.join(DATA_ROOT, TREE_NAME)
-ADQSM_VARIANTS = ["05", "06", "08"]   # e.g. ["05", "08"]
+ADQSM_VARIANTS = ["04", "05", "06","07", "08", "09","10"]   # e.g. ["05", "08"]
 
 AdTree_DIR = os.path.join(DATA_ROOT, TREE_NAME)
 
@@ -111,7 +111,10 @@ INPUT_PLY = os.path.join(AdTree_DIR, "%s - Cloud_skeleton.ply" % TREE_NAME)
 # Remove all branches whose radius is below this threshold. The trunk (branch order 0) is never removed, even if its radius is below the threshold.
 # Example of a single variant:   RADIUS_THRESHOLDS = [0.010]
 # Example of several variants:   RADIUS_THRESHOLDS = [0.010, 0.020, 0.030]
-RADIUS_THRESHOLDS = [0.005]        # 0.030 m = 30 mm radius (60 mm diameter)
+RADIUS_THRESHOLDS = [0.005,
+                     0.010,
+                     0.015,
+                     0.020]        # 0.030 m = 30 mm radius (60 mm diameter)
 
 # Fixed reference threshold(s) (in METERS) used to build the
 # "[calref=minXmm]" calibration factors (see the "FIXED calibration

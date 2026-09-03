@@ -123,7 +123,7 @@ def stem_diameter_at_height(stem_sections, h):
     return None
 
 
-def upsert_result(csv_path, tree, method, total, stem, branch, std, dbh=None, height=None, taper=None,
+def upsert_result(csv_path, tree, method, total, trunk, branch, std, dbh=None, height=None, taper=None,
                    trunk_len=None, branch_len=None, branch_filter="none", n_cylinders=None):
     """Insert/update one (tree, method) row in the shared master results CSV
     (see compare_volumes.py for its format). Reads csv_path if it exists
@@ -148,7 +148,7 @@ def upsert_result(csv_path, tree, method, total, stem, branch, std, dbh=None, he
     # every other upsert_result() copy (tree_geom_utils.py,
     # import_matlab_results.py, qsm_volume_mean.py) so they all write/read
     # the SAME shared volume_results.csv without column mismatches.
-    header = ["tree", "method", "total_m3", "stem_m3", "branch_m3", "std_m3",
+    header = ["tree", "method", "total_m3", "trunk_m3", "branch_m3", "std_m3",
               "dbh_m", "height_m", "taper_cm_per_m", "trunk_len_m", "branch_len_m",
               "branch_filter", "n_cylinders"]
 
@@ -168,7 +168,7 @@ def upsert_result(csv_path, tree, method, total, stem, branch, std, dbh=None, he
 
     rows = [r for r in rows if not (r["tree"] == tree and r["method"] == method)]
     rows.append({"tree": tree, "method": method, "total_m3": fmt(total),
-                 "stem_m3": fmt(stem), "branch_m3": fmt(branch), "std_m3": fmt(std),
+                 "trunk_m3": fmt(trunk), "branch_m3": fmt(branch), "std_m3": fmt(std),
                  "dbh_m": fmt(dbh), "height_m": fmt(height), "taper_cm_per_m": fmt(taper),
                  "trunk_len_m": fmt(trunk_len), "branch_len_m": fmt(branch_len),
                  "branch_filter": branch_filter, "n_cylinders": fmt_int(n_cylinders)})
@@ -265,14 +265,18 @@ print("Taper (%.1f-%.1f m)             : %s"
          ("%.2f cm/m" % taper_cm_per_m) if taper_cm_per_m is not None else "not resolved"))
 
 # ---- upsert this result into the shared master results CSV -----------------
-stem_included = INCLUDE_FRACTIONS.get("stem", False) and "stem" in volume_by_fraction
-stem_m3 = (volume_by_fraction["stem"] * VOLUME_TO_M3) if stem_included else None
-branch_m3 = (selected_total_m3 - stem_m3) if stem_m3 is not None else None
+# "stem" here is the SOURCE FILE's own "Fraction" column value (and
+# INCLUDE_FRACTIONS' matching key) - external data schema, not renamed. Our
+# OWN output variable (what gets written to the trunk_m3 column) is named
+# trunk_included/trunk_m3, consistent with the rest of the shared CSV.
+trunk_included = INCLUDE_FRACTIONS.get("stem", False) and "stem" in volume_by_fraction
+trunk_m3 = (volume_by_fraction["stem"] * VOLUME_TO_M3) if trunk_included else None
+branch_m3 = (selected_total_m3 - trunk_m3) if trunk_m3 is not None else None
 
-# trunk_len_m/branch_len_m: same "stem included?" / "everything else selected"
-# logic as stem_m3/branch_m3 above, just applied to length_by_fraction instead
+# trunk_len_m/branch_len_m: same "trunk included?" / "everything else selected"
+# logic as trunk_m3/branch_m3 above, just applied to length_by_fraction instead
 # of volume_by_fraction.
-trunk_len_m = (length_by_fraction["stem"] * LENGTH_TO_M) if (stem_included and "stem" in length_by_fraction) else None
+trunk_len_m = (length_by_fraction["stem"] * LENGTH_TO_M) if (trunk_included and "stem" in length_by_fraction) else None
 selected_total_len_m = sum(length_by_fraction[f] for f in length_by_fraction
                             if INCLUDE_FRACTIONS.get(f, False)) * LENGTH_TO_M
 branch_len_m = (selected_total_len_m - trunk_len_m) if trunk_len_m is not None else None
@@ -280,5 +284,5 @@ branch_len_m = (selected_total_len_m - trunk_len_m) if trunk_len_m is not None e
 # branch_filter = "10cm": the de Tanago field crew physically only measured
 # sections down to a 10 cm taper diameter (see AdQSM.pdf Appendix A) - this
 # reference NEVER has a "none" (full/unfiltered) version, by methodology.
-upsert_result(RESULTS_CSV, TREE_NAME, METHOD_LABEL, selected_total_m3, stem_m3, branch_m3, None,
+upsert_result(RESULTS_CSV, TREE_NAME, METHOD_LABEL, selected_total_m3, trunk_m3, branch_m3, None,
               dbh_m, height_m, taper_cm_per_m, trunk_len_m, branch_len_m, branch_filter="10cm")

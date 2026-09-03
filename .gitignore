@@ -20,6 +20,7 @@
 !scripts/python/check_adqsm_thin_branch_length.py
 !scripts/python/treegraph_add_to_comparison.py
 !scripts/python/treegraph_export_geom.py
+!scripts/python/plot_box.py
 
 !scripts/matlab/
 !scripts/matlab/runsken.m

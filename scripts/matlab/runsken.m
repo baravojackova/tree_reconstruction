@@ -171,7 +171,7 @@ end
 %  1c) USER SETTINGS - all manual setting
 %  ------------------------------------------------------------
 %
-run_tag = 'v1man';    % change for every new settings variant
+run_tag = 'v1aut';    % change for every new settings variant
 % --- tree identification -------------------------------------
 tree_id   = 'IND01_054';           % short name used for ALL output files
 cloud_txt = 'IND01_054.txt';   % input point cloud (text file, 3 columns X Y Z)
@@ -189,12 +189,12 @@ n_workers = 0;         % 0 = derive automatically from the number of tasks
 % define_input(P, nPD1, nPD2Min, nPD2Max) = how many values are tested
 % for each of the three patch-diameter parameters
 % !!! if manual input nPD = 1
-nPD1    = 1;
-nPD2Min = 1;
-nPD2Max = 1;
+nPD1    = 2;
+nPD2Min = 2;
+nPD2Max = 2;
 
 % --- MANUAL PatchDiam (see section 9) ------------------------
-manual_patchdiam = true;   % false = keep everything from define_input
+manual_patchdiam = false;   % false = keep everything from define_input
 
 % PatchDiam1 (rought first cover) has to be t ≥ PatchDiam2Max (gentle cover)
 

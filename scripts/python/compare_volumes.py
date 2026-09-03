@@ -5,13 +5,13 @@
 #  All results live in ONE simple "master" CSV (RESULTS_CSV below), one row
 #  per (tree, method). Columns:
 #
-#     tree, method, total_m3, stem_m3, branch_m3, std_m3, dbh_m, height_m,
+#     tree, method, total_m3, trunk_m3, branch_m3, std_m3, dbh_m, height_m,
 #     taper_cm_per_m, trunk_len_m, branch_len_m, branch_filter
 #
 #  - tree           : tree ID, e.g. "IND01_054"
 #  - method         : a free-text label, e.g. "AdQSM", "TreeQSM mine v2"
 #  - total_m3       : total wood volume [m^3]
-#  - stem_m3        : stem/trunk volume [m^3]   (may be blank)
+#  - trunk_m3       : trunk volume [m^3]   (may be blank)
 #  - branch_m3      : branch volume [m^3]        (may be blank)
 #  - std_m3         : standard deviation of the total, if known (may be blank)
 #  - dbh_m          : stem diameter at 1.3 m above the tree base [m] (may be blank)
@@ -99,7 +99,7 @@ REFERENCE_METHOD_NONE = "AdQSM (TreesParams) (AdQSM 05)"
 # upsert_result() writers - starter rows predate it too, so it's left
 # blank ("") here, same pattern already used for trunk_len_m/branch_len_m.
 STARTER_ROWS = [
-    ["tree", "method", "total_m3", "stem_m3", "branch_m3", "std_m3",
+    ["tree", "method", "total_m3", "trunk_m3", "branch_m3", "std_m3",
      "dbh_m", "height_m", "taper_cm_per_m", "trunk_len_m", "branch_len_m", "branch_filter", "n_cylinders"],
     ["IND01_054", "Reference (destructive)", "1.7169", "1.2557", "0.4612", "", "", "", "", "", "", "10cm", ""],
     ["IND01_054", "AdQSM (TreesParams)",     "1.6905", "1.1302", "0.5603", "", "", "", "", "", "", "none", ""],
@@ -127,7 +127,7 @@ def load_results(path):
                 "tree": r["tree"].strip(),
                 "method": r["method"].strip(),
                 "total": to_float(r.get("total_m3")),
-                "stem": to_float(r.get("stem_m3")),
+                "trunk": to_float(r.get("trunk_m3")),
                 "branch": to_float(r.get("branch_m3")),
                 "std": to_float(r.get("std_m3")),
                 "dbh": to_float(r.get("dbh_m")),
@@ -185,7 +185,7 @@ def print_tree_block(tree, rows, no_reference_note=None):
     print("Tree: %s" % tree)
     print("-" * 118)
     print("%-28s %10s %10s %10s %10s   %8s %8s   %8s %8s   %8s %8s" %
-          ("method", "total", "stem", "branch", "d(total)",
+          ("method", "total", "trunk", "branch", "d(total)",
            "DBH[m]", "d(DBH)", "H[m]", "d(H)", "taper", "d(taper)"))
     print("-" * 118)
 
@@ -209,7 +209,7 @@ def print_tree_block(tree, rows, no_reference_note=None):
         taper_pct = None if r is ref else pct_diff(r["taper"], ref["taper"] if ref else None)
 
         print("%-28s %s %s %s   %-16s %s %s   %s %s   %s %s" %
-              (r["method"][:28], fmt(r["total"]), fmt(r["stem"]),
+              (r["method"][:28], fmt(r["total"]), fmt(r["trunk"]),
                fmt(r["branch"]), dcol,
                fmt(r["dbh"], width=8, dec=3), fmt_pct(dbh_pct),
                fmt(r["height"], width=8, dec=2), fmt_pct(height_pct),

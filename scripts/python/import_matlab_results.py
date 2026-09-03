@@ -12,7 +12,7 @@
 #  (by default "Estimated", which combines both runs and has the best
 #  standard deviation), and writes one row per file into the shared
 #  master table used by compare_volumes.py:
-#     tree, method, total_m3, stem_m3, branch_m3, std_m3
+#     tree, method, total_m3, trunk_m3, branch_m3, std_m3
 #
 #  It handles MANY TREES and MANY RUNS at once: every matching file
 #  becomes its own row, labelled with its run tag, e.g.
@@ -100,7 +100,7 @@ def extract_group(rows, group):
         by_attr[attr] = (to_float(r["Mean_m3"]), to_float(r["Std_m3"]))
 
     total, std_total = by_attr.get("Total", (None, None))
-    stem = by_attr.get("Stem", (None, None))[0]
+    trunk = by_attr.get("Stem", (None, None))[0]   # "Stem" is the MATLAB table's own Attribute name - not renamed, that's external schema
     branch = by_attr.get("Branches", (None, None))[0]
 
     # N_cylinders (runsken.m section 17, Task C): ONE value per group, the
@@ -111,10 +111,10 @@ def extract_group(rows, group):
     # for a missing/blank cell, same as every other optional field here).
     n_cylinders = to_float(picked[0].get("N_cylinders"))
 
-    return tree, run, total, stem, branch, std_total, n_cylinders
+    return tree, run, total, trunk, branch, std_total, n_cylinders
 
 
-def upsert_result(csv_path, tree, method, total, stem, branch, std, dbh=None, height=None, taper=None,
+def upsert_result(csv_path, tree, method, total, trunk, branch, std, dbh=None, height=None, taper=None,
                    trunk_len=None, branch_len=None, branch_filter="none", n_cylinders=None):
     """Insert/update one (tree, method) row in the shared master results CSV.
     Re-running overwrites the previous row instead of duplicating it.
@@ -129,7 +129,7 @@ def upsert_result(csv_path, tree, method, total, stem, branch, std, dbh=None, he
     # n_cylinders is the LAST column (Task A) - kept in sync with
     # tree_geom_utils.py's upsert_result() so both writers produce the
     # exact same header/column order for the one shared CSV.
-    header = ["tree", "method", "total_m3", "stem_m3", "branch_m3", "std_m3",
+    header = ["tree", "method", "total_m3", "trunk_m3", "branch_m3", "std_m3",
               "dbh_m", "height_m", "taper_cm_per_m", "trunk_len_m", "branch_len_m",
               "branch_filter", "n_cylinders"]
 
@@ -149,7 +149,7 @@ def upsert_result(csv_path, tree, method, total, stem, branch, std, dbh=None, he
 
     rows = [r for r in rows if not (r["tree"] == tree and r["method"] == method)]
     rows.append({"tree": tree, "method": method, "total_m3": fmt(total),
-                 "stem_m3": fmt(stem), "branch_m3": fmt(branch), "std_m3": fmt(std),
+                 "trunk_m3": fmt(trunk), "branch_m3": fmt(branch), "std_m3": fmt(std),
                  "dbh_m": fmt(dbh), "height_m": fmt(height), "taper_cm_per_m": fmt(taper),
                  "trunk_len_m": fmt(trunk_len), "branch_len_m": fmt(branch_len),
                  "branch_filter": branch_filter, "n_cylinders": fmt_int(n_cylinders)})
@@ -183,7 +183,7 @@ if not files:
 
 print("Importing groups %s from %d file(s):\n" % (IMPORT_GROUPS, len(files)))
 print("%-28s %-24s %-12s %10s %10s %10s %10s %8s %8s" %
-      ("file", "group", "tree", "total", "stem", "branch", "std", "dbh", "height"))
+      ("file", "group", "tree", "total", "trunk", "branch", "std", "dbh", "height"))
 print("-" * 128)
 
 imported_by_group = {g: 0 for g in IMPORT_GROUPS}
@@ -229,7 +229,7 @@ for path in files:
                   % (os.path.basename(path), group))
             continue
 
-        _tree_raw, _run, total, stem, branch, std, n_cylinders = found
+        _tree_raw, _run, total, trunk, branch, std, n_cylinders = found
         method = "TreeQSM mine (%s, %s)" % (run, group)
 
         # branch_filter: "10cm" for any group whose NAME says it's
@@ -272,7 +272,7 @@ for path in files:
                   "for this tree/run to generate them."
                   % (tree, run, trunk_len_file, branch_len_file))
 
-        upsert_result(RESULTS_CSV, tree, method, total, stem, branch, std, dbh, height, taper,
+        upsert_result(RESULTS_CSV, tree, method, total, trunk, branch, std, dbh, height, taper,
                       trunk_len, branch_len, branch_filter=branch_filter,
                       # n_cylinders: read straight from VolumeTable's own
                       # N_cylinders column (runsken.m section 17, Task C) via
@@ -288,7 +288,7 @@ for path in files:
             return "%8.3f" % x if x is not None else "       -"
 
         print("%-28s %-24s %-12s %s %s %s %s %s %s"
-              % (os.path.basename(path)[:28], group, tree, show(total), show(stem),
+              % (os.path.basename(path)[:28], group, tree, show(total), show(trunk),
                  show(branch), show(std), show8(dbh), show8(height)))
 
 print("-" * 128)
