@@ -66,6 +66,7 @@ from plot_volumes import (
     OVERVIEW_NCOLS,
     shorten_method_label, FAMILY_GRADIENTS, classify_family,
     ensure_plots_dir,
+    treeqsm_pd_token,
 )
 
 # to_float is imported for parity with the other scripts' import lists (see
@@ -84,13 +85,23 @@ SELECT_TREE = "IND01_054"
 
 # "none" = full reconstruction, "10cm" = >=10cm-only comparison - switch
 # this to re-run for the other branch_filter variant.
-BRANCH_FILTER = "none"
+BRANCH_FILTER = "10cm"
 
 # Draw a horizontal dashed line at the destructive-reference value on every
 # panel where a reference row/value exists for that field. Silently skipped
 # (no warning) wherever it doesn't - that's expected for many fields (e.g.
 # "none" mode never has a REFERENCE_METHOD row at all), not a data problem.
-SHOW_REFERENCE_LINE = False
+SHOW_REFERENCE_LINE = True
+
+# Same treatment as SHOW_REFERENCE_LINE/REFERENCE_METHOD above, but for the
+# TreeQSM published mean from qsm_volume_mean.py - which method string
+# shows up depends on branch_filter (mutually exclusive, so at most ONE of
+# these two is ever present for a given BRANCH_FILTER): "TreeQSM de Tanago
+# (mean)" for "none", "TreeQSM de Tanago (mean, Filtered<10cm)" for "10cm".
+SHOW_TREEQSM_REF_LINE = True
+TREEQSM_REF_METHODS = ["TreeQSM de Tanago (mean)",
+                        "TreeQSM de Tanago (mean, Filtered<10cm)"]
+TREEQSM_REF_LINE_COLOR = "#2a9d8f"   # teal - visually distinct from the destructive reference's pink/#ef476f
 
 SHOW_PLOT = False
 SAVE_PLOT_PNG = True   # always save, consistent with this project's convention elsewhere
@@ -127,11 +138,58 @@ GROUP_RULES = [
     (r"^AT_Calib_\d+_04_",     "AdTree calib (seg 04)"),
     (r"^AT_Calib_\d+_05_",     "AdTree calib (seg 05)"),
     (r"^AT_Calib_\d+_06_",     "AdTree calib (seg 06)"),
-    (r"^AT_Calib_\d+_07_",     "AdTree calib (seg 07)"),
-    (r"^AT_Calib_\d+_08_",     "AdTree calib (seg 08)"),
-    (r"^AT_Calib_\d+_09_",     "AdTree calib (seg 09)"),
-    (r"^AT_Calib_\d+_10",     "AdTree calib (seg 10)"),
+    #(r"^AT_Calib_\d+_07_",     "AdTree calib (seg 07)"),
+    #(r"^AT_Calib_\d+_08_",     "AdTree calib (seg 08)"),
+    #(r"^AT_Calib_\d+_09_",     "AdTree calib (seg 09)"),
+    #(r"^AT_Calib_\d+_10",     "AdTree calib (seg 10)"),
+    #(r"TreeQSM mine.*Optimal", "TreeQSM manual/Optimal"),
+    #(r"TreeQSM mine.*Simplified (no islands)", "TreeQSM manual/Simplified"),
+    #(r"TreeQSM mine.*Filtered <10cm", "TreeQSM manual/Filtered")
 ]
+
+# ----------------------------------------------------------------------
+# STRUCTURED TreeQSM grouping - a SEPARATE mechanism from GROUP_RULES
+# above, parallel to it, for "TreeQSM mine (...)" rows specifically (any
+# row whose raw method string starts with "TreeQSM mine (" - the same
+# check plot_volumes.py's shorten_method_label() already uses to recognize
+# this row shape). GROUP_RULES itself is untouched and keeps handling
+# every AdTree/AdQSM row exactly as before; both mechanisms' resulting
+# groups are merged into ONE combined list that drives the same box-plot
+# panels, TreeQSM groups appended after the GROUP_RULES ones.
+#
+# WHY a separate, non-regex mechanism: TreeQSM rows written via the
+# params_*.csv pipeline (see runsken.m section 19 / compare_volumes.py's
+# load_results()) carry their ACTUAL reconstruction parameters as real
+# structured columns (mode, pd1, pd2min, pd2max, simp_maxorder,
+# simp_smallradii, simp_replaceiterations) - grouping/filtering on those
+# directly is simpler and less fragile than regex-parsing a text label.
+# Older "TreeQSM mine (v1aut, ...)"/"(v1man, ...)" rows predate that
+# pipeline (mode == "" for them) and are excluded from THIS mechanism with
+# one batched warning - same as today's silent exclusion by GROUP_RULES,
+# not a regression.
+TREEQSM_STAGE_FILTER = "Filtered <10cm"   # one of "Optimal", "Simplified", "Simplified (no islands)",
+                                            # "Filtered <10cm", or None (show all stages mixed - not
+                                            # recommended, but not blocked either)
+
+TREEQSM_VARY_BY = ["ri"]        # short param name(s) (see TREEQSM_PARAM_SHORT_NAMES below) that become
+                                  # the per-point spread INSIDE each box; every other short name becomes
+                                  # part of the box-defining group key
+
+TREEQSM_PARAM_FILTERS = {}      # optional: {short_name: value} - restrict to rows matching these exact
+                                  # values (numeric values matched with a +/-1e-4 tolerance, to absorb
+                                  # float round-tripping through the CSV's "%.6f" text - not to blur
+                                  # genuinely different settings, which in practice differ by >=0.01)
+                                  # only applied if this dict is non-empty. e.g. {"pd1": 0.08}
+
+TREEQSM_PARAM_SHORT_NAMES = {   # short name -> actual load_results() row dict key, used by both
+                                  # TREEQSM_VARY_BY and TREEQSM_PARAM_FILTERS above (and to build box/
+                                  # point labels - see treeqsm_param_tokens() below)
+    "mode": "mode", "pd1": "pd1", "pd2min": "pd2min", "pd2max": "pd2max",
+    "maxorder": "simp_maxorder", "sr": "simp_smallradii", "ri": "simp_replaceiterations",
+}
+# ----------------------------------------------------------------------
+
+
 
 # Label each jittered point with the specific varying parameter that
 # distinguishes it from its group-mates (e.g. the radius threshold for
@@ -237,6 +295,144 @@ def assign_groups(rows):
             print("    %s  (shortened: %s)" % (m, shorten_method_label(m)))
 
     group_order = [label for _, label in GROUP_RULES if label in groups]
+    return groups, group_order
+
+
+def parse_treeqsm_method(method):
+    """Split a "TreeQSM mine (run, stage)" method string into (run, stage),
+    or return None if `method` isn't shaped that way - the SAME parsing
+    plot_volumes.py's shorten_method_label() uses to recognize this row
+    shape (see its own "TreeQSM mine (" branch)."""
+    if not (method.startswith("TreeQSM mine (") and method.endswith(")")):
+        return None
+    inner = method[len("TreeQSM mine ("):-1]
+    if ", " not in inner:
+        return None
+    run, stage = inner.split(", ", 1)
+    return run, stage
+
+
+def format_treeqsm_param_token(short_name, value):
+    """Format ONE structured TreeQSM param into its compact label token
+    (e.g. "ri" + 0 -> "r0"), using format B's conventions (m/s/r instead
+    of the old mo/sr/ri) - shorten_method_label()'s TreeQSM branch and
+    plot_box.py's box/point labels stay consistent with each other this way."""
+    if short_name == "mode":
+        return str(value)[:3]   # "manual" -> "man", "auto" -> "aut"
+    if short_name == "maxorder":
+        return "m%d" % int(value)
+    if short_name == "sr":
+        return "s%d" % round(value * 1000)
+    if short_name == "ri":
+        return "r%d" % int(value)
+    if short_name in ("pd1", "pd2min", "pd2max"):
+        return "%s%d" % (short_name, round(value * 100))
+    return "%s%s" % (short_name, value)   # fallback for any future short name added later
+
+
+def treeqsm_param_tokens(row, short_names):
+    """Build the list of compact tokens for `short_names` (an ordered
+    subset of TREEQSM_PARAM_SHORT_NAMES' keys) from `row`'s actual values.
+
+    pd1/pd2min/pd2max are combined into ONE "p#-#-#" token, via the SAME
+    treeqsm_pd_token() shorten_method_label() uses (format B), when all
+    three are present together in `short_names` - the common case (they're
+    always fixed or all varied together in practice); if only SOME of the
+    three are present (an unusual TREEQSM_VARY_BY split), each present one
+    falls back to its own individual "pd#"-style token instead, since
+    there's no established combined format for a partial trio.
+    """
+    tokens = []
+    remaining = list(short_names)
+    if all(k in remaining for k in ("pd1", "pd2min", "pd2max")):
+        pd1 = row[TREEQSM_PARAM_SHORT_NAMES["pd1"]]
+        pd2min = row[TREEQSM_PARAM_SHORT_NAMES["pd2min"]]
+        pd2max = row[TREEQSM_PARAM_SHORT_NAMES["pd2max"]]
+        tokens.append(treeqsm_pd_token(pd1, pd2min, pd2max))
+        for k in ("pd1", "pd2min", "pd2max"):
+            remaining.remove(k)
+    for short in remaining:
+        value = row[TREEQSM_PARAM_SHORT_NAMES[short]]
+        if value is None:
+            continue
+        tokens.append(format_treeqsm_param_token(short, value))
+    return tokens
+
+
+def assign_treeqsm_groups(rows):
+    """Bucket "TreeQSM mine (...)" rows into groups via the STRUCTURED
+    TREEQSM_STAGE_FILTER/TREEQSM_VARY_BY/TREEQSM_PARAM_FILTERS mechanism -
+    parallel to (and independent of) assign_groups()/GROUP_RULES above.
+
+    Returns (groups, group_order) in the SAME shape as assign_groups(), so
+    the two can be merged into one combined groups dict / group_order list
+    by the caller: {group_label: [row, ...]} / [group_label, ...], the
+    latter in first-CSV-appearance order (there's no author-curated rule
+    list here the way GROUP_RULES has one - group labels are discovered
+    dynamically from whatever fixed-param combinations actually appear).
+
+    Rows are excluded (no error) when: their stage doesn't match
+    TREEQSM_STAGE_FILTER (silent - that's the filter's whole point), they
+    don't satisfy TREEQSM_PARAM_FILTERS (also silent, same reason), or
+    they have no structured params at all (mode == "", an older pre-
+    params_*.csv row) - THAT case is reported as one batched warning,
+    since it's a data-shape issue rather than an intentional filter.
+    """
+    fixed_short_names = [s for s in TREEQSM_PARAM_SHORT_NAMES if s not in TREEQSM_VARY_BY]
+
+    rows_by_key = {}
+    key_order = []
+    skipped_no_params = []
+    for r in rows:
+        parsed = parse_treeqsm_method(r["method"])
+        if parsed is None:
+            continue   # not actually "TreeQSM mine (...)" shaped - shouldn't happen given the caller's own routing check
+        _run, stage = parsed
+
+        if TREEQSM_STAGE_FILTER is not None and stage != TREEQSM_STAGE_FILTER:
+            continue
+
+        if not r["mode"]:
+            skipped_no_params.append(r["method"])
+            continue
+
+        if TREEQSM_PARAM_FILTERS:
+            matched = True
+            for short, target in TREEQSM_PARAM_FILTERS.items():
+                value = r[TREEQSM_PARAM_SHORT_NAMES[short]]
+                if isinstance(target, str):
+                    if value != target:
+                        matched = False
+                        break
+                else:
+                    if value is None or abs(value - target) >= 1e-4:
+                        matched = False
+                        break
+            if not matched:
+                continue
+
+        fixed_key = tuple(r[TREEQSM_PARAM_SHORT_NAMES[s]] for s in fixed_short_names)
+        if fixed_key not in rows_by_key:
+            rows_by_key[fixed_key] = []
+            key_order.append(fixed_key)
+        rows_by_key[fixed_key].append(r)
+
+    if skipped_no_params:
+        print("WARNING: plot_box.py: %d TreeQSM row(s) have no structured reconstruction "
+              "parameters (older import, from before params_*.csv existed) - excluded from "
+              "TreeQSM grouping: %s" % (len(skipped_no_params), skipped_no_params))
+
+    # Turn the (fixed_key -> rows) buckets into the {label: rows}/[label,...]
+    # shape assign_groups() already produces, using each group's formatted
+    # token string (treeqsm_param_tokens(), joined with spaces) as its
+    # actual label from here on.
+    groups = {}
+    group_order = []
+    for fixed_key in key_order:
+        members = rows_by_key[fixed_key]
+        label = " ".join(treeqsm_param_tokens(members[0], fixed_short_names))
+        groups[label] = members
+        group_order.append(label)
     return groups, group_order
 
 
@@ -348,11 +544,43 @@ def build_boxplot_figure(rows, tree, branch_filter):
     # excluded from grouping/boxing - it's a single destructive-reference
     # measurement, not a group of variants to build a box from.
     ref_row = next((r for r in tree_rows if r["method"] == REFERENCE_METHOD), None)
-    non_ref_rows = [r for r in tree_rows if r is not ref_row]
 
-    groups, group_order = assign_groups(non_ref_rows)
+    # TreeQSM published-mean row, same treatment as ref_row above - also
+    # set aside and excluded from grouping/boxing (it's a single mean
+    # value, not a group of variants). At most one of TREEQSM_REF_METHODS
+    # is ever present for a given branch_filter (mutually exclusive), so
+    # this is a single lookup, not a list.
+    treeqsm_ref_row = next((r for r in tree_rows if r["method"] in TREEQSM_REF_METHODS), None)
+
+    non_ref_rows = [r for r in tree_rows if r is not ref_row and r is not treeqsm_ref_row]
+
+    # Route each row to EITHER the existing regex-based GROUP_RULES
+    # mechanism (AdTree/AdQSM/anything else) OR the new structured
+    # TreeQSM mechanism (assign_treeqsm_groups()) - same
+    # "TreeQSM mine (" prefix check parse_treeqsm_method() itself uses, so
+    # a row can never accidentally go through both. Both mechanisms return
+    # the SAME {label: rows}/[label,...] shape, so their results merge into
+    # ONE combined groups/group_order that drives the box-drawing loop
+    # below - AdTree/AdQSM groups first, TreeQSM groups appended after
+    # (per Bara's request that they appear side by side, not as two
+    # separate charts). group_kind tracks which mechanism produced each
+    # label, so the per-point-label code further down knows which of the
+    # two label-building strategies to use for it.
+    group_rules_rows = [r for r in non_ref_rows if not r["method"].startswith("TreeQSM mine (")]
+    treeqsm_candidate_rows = [r for r in non_ref_rows if r["method"].startswith("TreeQSM mine (")]
+
+    groups, group_order = assign_groups(group_rules_rows)
+    treeqsm_groups, treeqsm_group_order = assign_treeqsm_groups(treeqsm_candidate_rows)
+
+    group_kind = {label: "rules" for label in group_order}
+    group_kind.update({label: "treeqsm" for label in treeqsm_group_order})
+
+    groups = {**groups, **treeqsm_groups}
+    group_order = group_order + treeqsm_group_order
+
     if not group_order:
-        print("No groups matched any GROUP_RULES pattern for tree '%s' branch_filter='%s' - "
+        print("No groups matched any GROUP_RULES pattern, and no TreeQSM row matched "
+              "TREEQSM_STAGE_FILTER/TREEQSM_PARAM_FILTERS, for tree '%s' branch_filter='%s' - "
               "skipping this boxplot." % (tree, branch_filter))
         return
 
@@ -376,7 +604,8 @@ def build_boxplot_figure(rows, tree, branch_filter):
         box_data = []
         box_labels = []
         box_colors = []
-        box_methods = []   # per-point raw CSV method strings, same shape/order as box_data - for point labels below
+        box_methods = []   # per-point raw CSV method strings, same shape/order as box_data - for GROUP_RULES-origin point labels below
+        box_rows = []      # per-point full row dicts, same shape/order as box_data - for TreeQSM-origin point labels below (needs actual param values, not just the method string)
         for label in group_order:
             present = [r for r in groups[label] if r[field_key] is not None]
             if not present:
@@ -388,6 +617,7 @@ def build_boxplot_figure(rows, tree, branch_filter):
             box_labels.append(label)
             box_colors.append(color_of_group[label])
             box_methods.append([r["method"] for r in present])
+            box_rows.append(present)
 
         ax.set_title(subplot_title, fontsize=BOX_TITLE_FONTSIZE)
         ax.grid(False)
@@ -429,8 +659,8 @@ def build_boxplot_figure(rows, tree, branch_filter):
         # as "which group" at a glance, rather than flat black/gray that
         # would look the same for every group.
         rng = np.random.default_rng()
-        for i, (values, edge, label, methods) in enumerate(
-                zip(box_data, edge_colors, box_labels, box_methods)):
+        for i, (values, edge, label, methods, rows_for_box) in enumerate(
+                zip(box_data, edge_colors, box_labels, box_methods, box_rows)):
             jitter = rng.uniform(-JITTER_RANGE, JITTER_RANGE, size=len(values))
             x_positions = np.full(len(values), i + 1) + jitter
             # Jitter point colour: darken_color() applied to this group's
@@ -474,7 +704,20 @@ def build_boxplot_figure(rows, tree, branch_filter):
             # any of those other elements.
             label_color = darken_color(box_colors[i], factor=LABEL_DARKEN_FACTOR)
 
-            if SHOW_POINT_LABELS and label in POINT_LABEL_PATTERNS:
+            if SHOW_POINT_LABELS and group_kind.get(label) == "treeqsm":
+                # TreeQSM-origin group: label built directly from
+                # TREEQSM_VARY_BY's actual value(s) on this point's own row
+                # (treeqsm_param_tokens(), same formatting as the box
+                # label) - no regex needed, we already have the real value.
+                for j, (x, y, row) in enumerate(zip(x_positions, values, rows_for_box)):
+                    point_label = "/".join(treeqsm_param_tokens(row, TREEQSM_VARY_BY))
+                    if point_label:
+                        ax.annotate(point_label, xy=(x, y),
+                                    xytext=(3, 3 + LABEL_VERTICAL_STAGGER * j),
+                                    textcoords="offset points",
+                                    fontsize=POINT_LABEL_FONTSIZE, ha="left", va="bottom",
+                                    color=label_color, zorder=4)
+            elif SHOW_POINT_LABELS and label in POINT_LABEL_PATTERNS:
                 pattern, fmt = POINT_LABEL_PATTERNS[label]
                 for j, (x, y, method) in enumerate(zip(x_positions, values, methods)):
                     m = re.search(pattern, shorten_method_label(method))
@@ -487,9 +730,31 @@ def build_boxplot_figure(rows, tree, branch_filter):
 
         ax.set_xticklabels(box_labels, rotation=BOX_LABEL_ROTATION, ha="right", fontsize=BOX_LABEL_FONTSIZE)
 
+        # Capture axhline()'s own Line2D return value for each line actually
+        # drawn, so the legend below can be built from real handles instead
+        # of re-deriving color/label - and so the legend is only added when
+        # at least one of the two lines exists for THIS field (skipped
+        # entirely otherwise, rather than showing an empty/misleading box).
+        ref_line = None
         if SHOW_REFERENCE_LINE and ref_row is not None and ref_row[field_key] is not None:
-            ax.axhline(ref_row[field_key], linestyle="--", color=reference_line_color,
-                       linewidth=1.5, label="Reference (destructive)")
+            ref_line = ax.axhline(ref_row[field_key], linestyle="--", color=reference_line_color,
+                                   linewidth=1.5, label="Reference (destructive)")
+
+        treeqsm_line = None
+        if SHOW_TREEQSM_REF_LINE and treeqsm_ref_row is not None and treeqsm_ref_row[field_key] is not None:
+            treeqsm_line = ax.axhline(treeqsm_ref_row[field_key], linestyle="--", color=TREEQSM_REF_LINE_COLOR,
+                                       linewidth=1.5, label=treeqsm_ref_row["method"])
+
+        ref_line_handles = [h for h in (ref_line, treeqsm_line) if h is not None]
+        if ref_line_handles:
+            # loc="best" (not a fixed corner like "upper right") - matplotlib
+            # picks whichever corner overlaps the LEAST with what's already
+            # drawn (boxes/whiskers/points), since those are already on the
+            # axes by this point - safer than hardcoding a corner on a panel
+            # with many groups (boxes can fill the full width, including the
+            # right edge). Check a busy panel (e.g. "Total volume") for
+            # placement that still looks awkward despite this.
+            ax.legend(handles=ref_line_handles, fontsize=BOX_LABEL_FONTSIZE, loc="best")
 
         # Top headroom (BOX_TOP_MARGIN): applied AFTER everything for this
         # panel is drawn (boxes, whiskers, jittered points, reference line),

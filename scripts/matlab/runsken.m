@@ -5,6 +5,7 @@
 %  ============================================================
 clear
 clc
+%%
 %  ------------------------------------------------------------
 %  USER SETTINGS - directory
 %  ------------------------------------------------------------
@@ -34,7 +35,7 @@ data_dir = 'C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\
 % Switch 1 (master switch): must be hand-edited to true, otherwise this
 % whole cell is a no-op. This is the main safety net against accidentally
 % running this cell - the default (false) guarantees nothing happens.
-clean_start = true;
+clean_start = false;
 
 % Switch 2 (dry run): with clean_start = true, this decides whether files
 % are only LISTED (true, the safe default) or actually MOVED/DELETED
@@ -276,7 +277,7 @@ plot_optimal = true;   % true = plot the optimal QSM before simplification
 % --- simplification settings ---------------------------------
 simp_MaxOrder          = 8;
 simp_SmallRadii        = 0.005;
-simp_ReplaceIterations = 2;
+simp_ReplaceIterations = 0;
 simp_Plot              = 1;
 simp_Disp              = 1;
 
@@ -296,6 +297,13 @@ export_filtered_10cm = true;
 % single iteration (section 20 used to run unconditionally). Set to true
 % only when you actually want this run's geometry exported.
 export_to_ansys = false;
+
+% Automatically save every figure this script generates (point cloud,
+% optimal model, simplified model, islands detection, simplified-no-
+% islands) as a PNG - matches the "always save" convention already used
+% on the Python side of this project. Can still be turned off if ever
+% needed (e.g. a quick interactive-only run).
+save_figures_png = true;
 
 % Optional override for the ANSYS export's filename tag - if left blank
 % (''), the export falls back to whichever run's model is actually being
@@ -344,13 +352,21 @@ EXPORT_FROM_SAVED_RUN_TAG = '';
 % catch "changed a setting but forgot to re-run this section") can call
 % the identical code instead of a second, hand-copied formula that could
 % drift out of sync with this one.
-run_tag = compute_run_tag(manual_patchdiam, man_PD1, man_PD2Min, ...
+%
+% recon_tag (mode+PD only) names res_name/res_new_name below - so
+% re-running with ONLY simp_MaxOrder/SmallRadii/ReplaceIterations changed
+% correctly reuses the SAME existing reconstruction (Risk #1's
+% skip-if-exists check on res_file/res_new_file) instead of an unnecessary
+% full recompute; run_tag (recon_tag + simp_tag) still names everything
+% else (vol_file/export_prefix/dbh_file/etc.), since THOSE genuinely
+% differ per simp_* variant even when they share the same reconstruction.
+[recon_tag, run_tag] = compute_run_tag(manual_patchdiam, man_PD1, man_PD2Min, ...
     man_PD2Max, simp_MaxOrder, simp_SmallRadii, simp_ReplaceIterations);
-fprintf('Auto-generated run_tag: %s\n', run_tag);
+fprintf('Auto-generated run_tag: %s  (reconstruction tag: %s)\n', run_tag, recon_tag);
 
-mat_name     = tree_id;                        % .mat file with the point cloud
-res_name     = [tree_id '_res_'     run_tag];  % results of the first run
-res_new_name = [tree_id '_res_new_' run_tag];  % results of the second run
+mat_name     = tree_id;                          % .mat file with the point cloud
+res_name     = [tree_id '_res_'     recon_tag];  % results of the first run
+res_new_name = [tree_id '_res_new_' recon_tag];  % results of the second run
 
 mat_file     = [mat_name     '.mat'];
 res_file     = [res_name     '.mat'];
@@ -412,6 +428,15 @@ axis equal;                      % same scale on all axes
 grid off;
 xlabel('X [m]'); ylabel('Y [m]'); zlabel('Z [m]');
 title(['Cleaned and positioned tree: ' tree_id], 'Interpreter', 'none');
+
+if save_figures_png
+    % tree_id only - shared across all run_tag/recon_tag variants, the
+    % point cloud itself doesn't depend on reconstruction/simplification
+    % settings.
+    pointcloud_png = ['pointcloud_' tree_id '.png'];
+    saveas(figure(10), pointcloud_png, 'png');
+    fprintf('Saved: %s\n', pointcloud_png);
+end
 
 %% 6) SAVE the point cloud -----------------------------------
 %  as a .mat file
@@ -612,7 +637,7 @@ clear QSM_simple_clean   % avoid picking up a stale result from an
 % re-run section 2" - every downstream export in this pass (16c's
 % simplified_file, volume table, dbh/height/params, geom_*.txt) would
 % otherwise silently be written under the WRONG (stale) run_tag.
-expected_run_tag = compute_run_tag(manual_patchdiam, man_PD1, man_PD2Min, ...
+[~, expected_run_tag] = compute_run_tag(manual_patchdiam, man_PD1, man_PD2Min, ...
     man_PD2Max, simp_MaxOrder, simp_SmallRadii, simp_ReplaceIterations);
 if ~strcmp(run_tag, expected_run_tag)
     error(['run_tag (''%s'') does not match what your CURRENT settings ' ...
@@ -663,6 +688,26 @@ end
 % silently overwritten by simplify_qsm's Figure 1 call).
 QSM_simple = simplify_qsm(QSM_opt, simp_MaxOrder, ...
     simp_SmallRadii, simp_ReplaceIterations, simp_Plot, simp_Disp);
+
+% Figures 1/2 above are drawn INSIDE simplify_qsm.m (hard-coded figure
+% numbers, a shared TreeQSM library function left untouched) - saved here
+% instead, right after the call returns, by referencing figure(1)/
+% figure(2) directly. Guarded by simp_Plot: when it's 0, simplify_qsm
+% never draws these figures, so saving them here would just capture a
+% blank/unrelated figure.
+if save_figures_png && simp_Plot
+    % Figure 1 = optimal (pre-simplification) model - depends only on the
+    % reconstruction (mode+PD), not on simp_* - named with recon_tag.
+    optimal_png = ['optimal_' tree_id '_' recon_tag '.png'];
+    saveas(figure(1), optimal_png, 'png');
+    fprintf('Saved: %s\n', optimal_png);
+
+    % Figure 2 = simplified (post-simplification) model - depends on
+    % simp_* too - named with the full run_tag.
+    simplified_png = ['simplified_' tree_id '_' run_tag '.png'];
+    saveas(figure(2), simplified_png, 'png');
+    fprintf('Saved: %s\n', simplified_png);
+end
 
 %% 16b) DETECT DISCONNECTED BRANCH ISLANDS ------
 %  - REVIEW BEFORE REMOVING
@@ -736,7 +781,7 @@ if isempty(island_groups)
     fprintf('No disconnected islands found.\n');
 else
     % --- plot: whole tree in light gray, islands in red on top ---
-    figure('Name', ['Disconnected branch islands - ' tree_id]);
+    fig_islands = figure('Name', ['Disconnected branch islands - ' tree_id]);
     plot3(start_arr(:,1), start_arr(:,2), start_arr(:,3), '.', ...
           'Color', [0.3 0.3 0.3], 'MarkerSize', 6);
     hold on
@@ -750,6 +795,14 @@ else
     grid off
     view(3)
     hold off
+
+    if save_figures_png
+        % Depends on simp_* (islands are detected on QSM_simple) - named
+        % with the full run_tag.
+        islands_png = ['islands_' tree_id '_' run_tag '.png'];
+        saveas(fig_islands, islands_png, 'png');
+        fprintf('Saved: %s\n', islands_png);
+    end
 end
 
 %% 16c) REMOVE DISCONNECTED ISLANDS-----------------------
@@ -857,6 +910,14 @@ else
     axis equal
     grid off
     view(3)
+
+    if save_figures_png
+        % Depends on simp_* (built from QSM_simple_clean) - named with
+        % the full run_tag.
+        simplified_no_islands_png = ['simplified_no_islands_' tree_id '_' run_tag '.png'];
+        saveas(fig_clean, simplified_no_islands_png, 'png');
+        fprintf('Saved: %s\n', simplified_no_islands_png);
+    end
 end
 
 %% 17) VOLUME TABLE with variability, in m^3------------------------
@@ -1194,17 +1255,34 @@ end
 %% 19) EXPORT - the actual reconstruction parameters used for this run ----
 %  ------------------------------------------------------------
 % Sidecar CSV (header + ONE data row) recording the ACTUAL values used for
-% THIS run - inputs.PatchDiam1/PatchDiam2Min/PatchDiam2Max/MinCylRad hold
-% the right value regardless of whether manual_patchdiam was true or false:
-% the auto branch (section 9's "else") never touches inputs.PatchDiam1/
-% PatchDiam2Min/PatchDiam2Max/MinCylRad at all, so they're always readable
-% straight off `inputs` here either way (see section 9's "define_input
-% (automatic)" vs. "MANUAL PatchDiam" blocks above) - no special-casing
-% needed for the auto case.
+% THIS run - read from OptInputs (section 12's select_optimum() output),
+% NOT the raw pre-optimization `inputs` struct. WHY: `inputs.PatchDiam1/
+% PatchDiam2Min/PatchDiam2Max` can be MULTI-ELEMENT ARRAYS whenever
+% nPD1/nPD2Min/nPD2Max > 1 (define_input.m's auto-search tries several
+% candidate values) - feeding an array into this fprintf's scalar %.6f
+% specifiers silently scrambled the whole row (MATLAB flattens all numeric
+% arguments into one stream and cycles the format string across it,
+% shifting every field after the array argument - confirmed root cause of
+% the corrupted params_*.csv files seen for nPD>1 auto-mode runs).
+% OptInputs.PatchDiam1/PatchDiam2Min/PatchDiam2Max are ALWAYS scalar
+% instead - select_optimum() copies them from the SINGLE winning model's
+% own rundata.inputs (treeqsm.m resolves each model to one indexed scalar
+% combination internally, regardless of how many candidates were searched)
+% - and OptInputs is also what section 13's second run reuses as its own
+% input, so it's not just "a" candidate, it's the ACTUAL parameters behind
+% QSM_opt. OptInputs.MinCylRad is included here too, for the same reason
+% and with the same guarantee (create_input.m's MinCylRad is never an
+% array to begin with, so it passes through this same struct unchanged) -
+% no need to fall back to inputs.MinCylRad separately.
+%
+% Manual mode is unaffected by this change: inputs.PatchDiam1 = man_PD1
+% (section 9) is already a scalar, and flows through the exact same
+% single-candidate resolution inside treeqsm() either way, so
+% OptInputs.PatchDiam1 there is just that same man_PD1 value again.
 %
 % simp_MaxOrder/simp_SmallRadii/simp_ReplaceIterations are always set
 % (section 16), regardless of manual/auto mode, so they're read straight
-% from those variables rather than from `inputs`.
+% from those variables rather than from `inputs`/`OptInputs`.
 %
 % tree/run use the SAME tree_id/run_tag values already used to build
 % vol_file/export_prefix (section 2) - the whole point of this file is to
@@ -1221,7 +1299,7 @@ fid = fopen(params_file, 'w');
 fprintf(fid, 'tree,run,mode,pd1_m,pd2min_m,pd2max_m,mincylrad_m,simp_maxorder,simp_smallradii,simp_replaceiterations\n');
 fprintf(fid, '%s,%s,%s,%.6f,%.6f,%.6f,%.6f,%d,%.6f,%d\n', ...
     tree_id, run_tag, mode_str, ...
-    inputs.PatchDiam1, inputs.PatchDiam2Min, inputs.PatchDiam2Max, inputs.MinCylRad, ...
+    OptInputs.PatchDiam1, OptInputs.PatchDiam2Min, OptInputs.PatchDiam2Max, OptInputs.MinCylRad, ...
     simp_MaxOrder, simp_SmallRadii, simp_ReplaceIterations);
 fclose(fid);
 fprintf('Parameters exported to %s\n', params_file);
@@ -1343,23 +1421,37 @@ end
 % where the script code ends and the function definitions begin.
 % ---------------------------------------------------------------
 
-function tag = compute_run_tag(manual_patchdiam, man_PD1, man_PD2Min, ...
+function [recon_tag, run_tag] = compute_run_tag(manual_patchdiam, man_PD1, man_PD2Min, ...
                                  man_PD2Max, simp_MaxOrder, simp_SmallRadii, ...
                                  simp_ReplaceIterations)
-    % The ONE place run_tag's formula lives - called from section 2 (to
-    % actually SET run_tag) and from section 16's sanity check (to
-    % recompute what run_tag SHOULD be from current settings and compare)
-    % - so the two can never drift out of sync the way two independently
-    % hand-copied formulas eventually would.
+    % The ONE place run_tag's (and recon_tag's) formula lives - called from
+    % section 2 (to actually SET recon_tag/run_tag) and from section 16's
+    % sanity check (to recompute what they SHOULD be from current settings
+    % and compare) - so the two can never drift out of sync the way two
+    % independently hand-copied formulas eventually would.
+    %
+    % TWO separate tags, not one, because they identify DIFFERENT things:
+    % recon_tag depends ONLY on mode+PD (manual_patchdiam/man_PD1/2Min/
+    % 2Max) - the RECONSTRUCTION itself (section 10/13's expensive
+    % make_models calls) - so res_name/res_new_name are named from
+    % recon_tag alone, and re-running with ONLY simp_* changed correctly
+    % reuses the existing reconstruction (Risk #1's skip-if-exists check)
+    % instead of triggering a full recompute for a change that only
+    % affects simplification. run_tag = recon_tag + simp_tag identifies
+    % THIS SPECIFIC variant (reconstruction + simplification together) -
+    % used for everything else (vol_file, export_prefix, dbh/height/
+    % params, simplified_file), since those genuinely differ whenever
+    % simp_* differs, even with the same underlying reconstruction.
     if manual_patchdiam
         mode_tag = sprintf('man_pd%02d-%02d-%02d', round(man_PD1*100), ...
             round(man_PD2Min*100), round(man_PD2Max*100));
     else
         mode_tag = 'aut';
     end
+    recon_tag = mode_tag;
     simp_tag = sprintf('mo%d_sr%03d_ri%d', simp_MaxOrder, ...
         round(simp_SmallRadii*1000), simp_ReplaceIterations);
-    tag = [mode_tag '_' simp_tag];
+    run_tag = [recon_tag '_' simp_tag];
 end
 
 function island_groups = find_disconnected_islands(parent_arr)
