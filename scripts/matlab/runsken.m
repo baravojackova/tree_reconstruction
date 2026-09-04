@@ -248,12 +248,12 @@ n_workers = 0;         % 0 = derive automatically from the number of tasks
 % define_input(P, nPD1, nPD2Min, nPD2Max) = how many values are tested
 % for each of the three patch-diameter parameters
 % !!! if manual input nPD = 1
-nPD1    = 2;
-nPD2Min = 2;
-nPD2Max = 2;
+nPD1    = 1;
+nPD2Min = 1;
+nPD2Max = 1;
 
 % --- MANUAL PatchDiam (see section 9) ------------------------
-manual_patchdiam = false;   % false = keep everything from define_input
+manual_patchdiam = true;   % false = keep everything from define_input
 
 % PatchDiam1 (rought first cover) has to be t ≥ PatchDiam2Max (gentle cover)
 
@@ -276,7 +276,7 @@ plot_optimal = true;   % true = plot the optimal QSM before simplification
 %                    cylinders inside one branch with one longer cylinder
 % --- simplification settings ---------------------------------
 simp_MaxOrder          = 8;
-simp_SmallRadii        = 0.005;
+simp_SmallRadii        = 0.02;          %def 0.005
 simp_ReplaceIterations = 0;
 simp_Plot              = 1;
 simp_Disp              = 1;
@@ -313,7 +313,7 @@ save_figures_png = true;
 % Set to a non-blank string to use that instead (e.g. for a one-off export
 % you want named something more memorable). See section 20 for where this
 % is actually applied (as ansys_tag, not used directly).
-ansys_export_name = '';
+ansys_export_name = 'simplified_IND01_054_aut_mo8_sr005_ri1';
 
 % Blank (default) = export whatever simplification is CURRENTLY LIVE in
 % memory (today's behaviour, via the ansys_source switch in section 20).
@@ -323,7 +323,7 @@ ansys_export_name = '';
 % retroactively export any previously-saved simplification variant, even
 % one no longer in the workspace (e.g. after re-running section 2 + 16 for
 % a second variant, per the "Solution A" workflow).
-EXPORT_FROM_SAVED_RUN_TAG = '';
+EXPORT_FROM_SAVED_RUN_TAG = 'aut_mo8_sr005_ri0';
 
 %% 2) DERIVED NAMES -------------------------------------------
 %  - built automatically from tree_id + run_tag

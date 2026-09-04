@@ -21,6 +21,9 @@
 !scripts/python/treegraph_add_to_comparison.py
 !scripts/python/treegraph_export_geom.py
 !scripts/python/plot_box.py
+!scripts/python/parameter_sensitivity.py
+!scripts/python/volume_results.csv
+
 
 !scripts/matlab/
 !scripts/matlab/runsken.m

@@ -61,7 +61,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 
-from compare_volumes import RESULTS_CSV, REFERENCE_METHOD, load_results, to_float
+from compare_volumes import RESULTS_CSV, REFERENCE_METHOD, load_results, to_float, resolve_reference_method_none
 from plot_volumes import (
     OVERVIEW_NCOLS,
     shorten_method_label, FAMILY_GRADIENTS, classify_family,
@@ -103,6 +103,22 @@ TREEQSM_REF_METHODS = ["TreeQSM de Tanago (mean)",
                         "TreeQSM de Tanago (mean, Filtered<10cm)"]
 TREEQSM_REF_LINE_COLOR = "#2a9d8f"   # teal - visually distinct from the destructive reference's pink/#ef476f
 
+# Small per-panel table showing each group's deviation from the SAME
+# reference row the panel's reference line (SHOW_REFERENCE_LINE) points at -
+# REFERENCE_METHOD for branch_filter="10cm", the dynamically-resolved
+# smallest-numbered AdQSM variant (resolve_reference_method_none()) for
+# "none". Skipped entirely (no table) for a panel with no reference row at
+# all for that mode; a group with no reference VALUE for that specific
+# field gets a blank deviation cell (not "0.0"). If both SHOW_DEVIATION_*
+# switches below are False, no table is drawn at all.
+SHOW_DEVIATION_TABLE = False
+SHOW_DEVIATION_PERCENT = True
+SHOW_DEVIATION_ABSOLUTE = True
+DEVIATION_TABLE_HSPACE = 1.15   # multiplier applied to the tallest deviation table's ACTUAL measured
+                                  # footprint (see max_table_extent in build_boxplot_figure()) to get
+                                  # matplotlib's hspace - 1.0 would size the gap to EXACTLY the
+                                  # tallest table with zero visual breathing room; >1.0 adds a margin
+
 SHOW_PLOT = False
 SAVE_PLOT_PNG = True   # always save, consistent with this project's convention elsewhere
 
@@ -134,17 +150,14 @@ BOX_TITLE_FONTSIZE = 12 # per-panel title font size
 #   (r"^AQ_Params_",           "AdQSM"
 GROUP_RULES = [
     # (regex matched against shorten_method_label(method), group label)
-    (r"^AT_Raw_",              "AdTree raw"),
-    (r"^AT_Calib_\d+_04_",     "AdTree calib (seg 04)"),
-    (r"^AT_Calib_\d+_05_",     "AdTree calib (seg 05)"),
-    (r"^AT_Calib_\d+_06_",     "AdTree calib (seg 06)"),
+    #(r"^AT_Raw_",              "AdTree raw"),
+    #(r"^AT_Calib_\d+_04_",     "AdTree calib (seg 04)"),
+    #(r"^AT_Calib_\d+_05_",     "AdTree calib (seg 05)"),
+    #(r"^AT_Calib_\d+_06_",     "AdTree calib (seg 06)"),
     #(r"^AT_Calib_\d+_07_",     "AdTree calib (seg 07)"),
     #(r"^AT_Calib_\d+_08_",     "AdTree calib (seg 08)"),
     #(r"^AT_Calib_\d+_09_",     "AdTree calib (seg 09)"),
-    #(r"^AT_Calib_\d+_10",     "AdTree calib (seg 10)"),
-    #(r"TreeQSM mine.*Optimal", "TreeQSM manual/Optimal"),
-    #(r"TreeQSM mine.*Simplified (no islands)", "TreeQSM manual/Simplified"),
-    #(r"TreeQSM mine.*Filtered <10cm", "TreeQSM manual/Filtered")
+    #(r"^AT_Calib_\d+_10",      "AdTree calib (seg 10)"),
 ]
 
 # ----------------------------------------------------------------------
@@ -167,7 +180,7 @@ GROUP_RULES = [
 # pipeline (mode == "" for them) and are excluded from THIS mechanism with
 # one batched warning - same as today's silent exclusion by GROUP_RULES,
 # not a regression.
-TREEQSM_STAGE_FILTER = "Filtered <10cm"   # one of "Optimal", "Simplified", "Simplified (no islands)",
+TREEQSM_STAGE_FILTER = "none"    # one of "Optimal", "Simplified", "Simplified (no islands)", "Filtered <10cm",
                                             # "Filtered <10cm", or None (show all stages mixed - not
                                             # recommended, but not blocked either)
 
@@ -190,6 +203,45 @@ TREEQSM_PARAM_SHORT_NAMES = {   # short name -> actual load_results() row dict k
 # ----------------------------------------------------------------------
 
 
+# ----------------------------------------------------------------------
+# STRUCTURED AdTree grouping - a SEPARATE mechanism from GROUP_RULES above
+# and parallel to the STRUCTURED TreeQSM mechanism above, for AdTree rows
+# specifically (any row with adqsm_variant/radius_threshold_mm actually set -
+# see adtree_reconstruct_compare.py's upsert_result() calls, STEP 2). Unlike
+# TREEQSM_PARAM_SHORT_NAMES, no short-name indirection is used here - the 5
+# new CSV columns (adqsm_variant, radius_threshold_mm, seg_min_mm,
+# seg_max_mm, seg_k_pct) are referenced directly by their own column names.
+#
+# GROUP_RULES itself is untouched and keeps handling every AdTree/AdQSM row
+# exactly as before (regex against shorten_method_label()) - this is an
+# ADDITIONAL, alternative way to group the SAME rows by their real
+# structured parameters instead of by parsing the display label. Both
+# mechanisms can be active at once; a row that matches a GROUP_RULES pattern
+# is NOT automatically excluded from this one (they're independent, unlike
+# the TreeQSM routing which is exclusive-or by method-string prefix) -
+# review the merged output if you enable both together, since the SAME row
+# could then appear in two different boxes.
+ADTREE_PARAM_NAMES = ["seg_min_mm","adqsm_variant"]     #"adqsm_variant", "radius_threshold_mm", "seg_min_mm", "seg_max_mm", "seg_k_pct"
+
+ADTREE_VARY_BY = ["seg_min_mm"]   # which of ADTREE_PARAM_NAMES become the per-point spread
+                                             # INSIDE each box; every other one becomes part of the
+                                             # box-defining group key
+
+ADTREE_PARAM_FILTERS = {}   # optional: {column_name: value} - restrict to rows matching these exact
+                              # values (numeric values matched with a +/-1e-4 tolerance, same rule as
+                              # TREEQSM_PARAM_FILTERS) - only applied if this dict is non-empty.
+                              # e.g. {"seg_max_mm": 1000}
+
+SHOW_ADTREE_RAW_GROUP = True   # False = exclude "AdTree raw" rows (adqsm_variant is None) from
+                                 # assign_adtree_groups() entirely - calibrated rows (always a real
+                                 # adqsm_variant string) are unaffected either way. True (default): raw
+                                 # rows form their OWN group, keyed (None, seg_min_mm, seg_max_mm,
+                                 # seg_k_pct) - this key can never collide with a calibrated group's key
+                                 # (those always have a real variant number, never None), so raw and
+                                 # calibrated groups can no longer mix regardless of this toggle.
+# ----------------------------------------------------------------------
+
+
 
 # Label each jittered point with the specific varying parameter that
 # distinguishes it from its group-mates (e.g. the radius threshold for
@@ -197,7 +249,7 @@ TREEQSM_PARAM_SHORT_NAMES = {   # short name -> actual load_results() row dict k
 # purely cosmetic, so a group/member with no entry (or a member whose
 # shorten_method_label(method) doesn't match its group's regex) simply
 # gets no point label, with no warning.
-SHOW_POINT_LABELS = True    # master on/off switch
+SHOW_POINT_LABELS = False    # master on/off switch
 POINT_LABEL_FONTSIZE = 6    # smaller than BOX_LABEL_FONTSIZE - many dense small labels next to each other
 
 JITTER_RANGE = 0.08            # half-width of horizontal point jitter (data units)
@@ -232,6 +284,10 @@ POINT_LABEL_PATTERNS = {
     "AdTree calib (seg 04)":   (r"^AT_Calib_(\d+)_04_", "r%s"),   # "AT_Calib_5_04_..." -> "r5"
     "AdTree calib (seg 05)":   (r"^AT_Calib_(\d+)_05_", "r%s"),
     "AdTree calib (seg 06)":   (r"^AT_Calib_(\d+)_06_", "r%s"),
+    "AdTree calib (seg 07)": (r"^AT_Calib_(\d+)_07_", "r%s"),
+    "AdTree calib (seg 08)": (r"^AT_Calib_(\d+)_08_", "r%s"),
+    "AdTree calib (seg 09)": (r"^AT_Calib_(\d+)_09_", "r%s"),
+    "AdTree calib (seg 10)": (r"^AT_Calib_(\d+)_10",  "r%s"),
     "AdQSM":                   (r"^AQ_Params_(\d+)$",   "v%s"),   # "AQ_Params_04" -> "v04"
     # TreeQSM entries intentionally omitted - add once real TreeQSM rows
     # exist in volume_results.csv and shorten_method_label()'s actual
@@ -449,6 +505,131 @@ def assign_treeqsm_groups(rows):
     return groups, group_order
 
 
+def format_adtree_param_token(col, value):
+    """Format ONE structured AdTree param into its compact label token
+    (e.g. "adqsm_variant" + "05" -> "v05"), using the SAME conventions
+    adtree_reconstruct_compare.py's own filenames already establish for
+    these exact parameters (r%dmm, seg%d-%d-k%d) - kept consistent with
+    that rather than inventing a second format."""
+    if col == "adqsm_variant":
+        return "v%s" % value
+    if col == "radius_threshold_mm":
+        return "r%d" % int(value)
+    return "%s%s" % (col, value)   # fallback for any future column added later
+
+
+def adtree_param_tokens(row, col_names):
+    """Build the list of compact tokens for `col_names` (an ordered subset
+    of ADTREE_PARAM_NAMES) from `row`'s actual values, in `col_names`' OWN
+    ORDER - same "caller's order wins" convention treeqsm_param_tokens()
+    uses.
+
+    seg_min_mm/seg_max_mm/seg_k_pct are combined into ONE "seg#-#-k#" token
+    (matching adtree_reconstruct_compare.py's own SEG_VARIANT_SUFFIX
+    naming) when all three are present together in `col_names` - emitted at
+    the position of the FIRST of the three. If only SOME of the three are
+    present (an unusual ADTREE_VARY_BY split), each present one falls back
+    to its own individual token instead, since there's no established
+    combined format for a partial trio.
+    """
+    seg_trio_present = all(k in col_names for k in ("seg_min_mm", "seg_max_mm", "seg_k_pct"))
+    tokens = []
+    seg_emitted = False
+    for col in col_names:
+        if seg_trio_present and col in ("seg_min_mm", "seg_max_mm", "seg_k_pct"):
+            if seg_emitted:
+                continue   # already emitted the combined token at the trio's first position
+            seg_min, seg_max, seg_k = row["seg_min_mm"], row["seg_max_mm"], row["seg_k_pct"]
+            tokens.append("seg%d-%d-k%d" % (int(seg_min), int(seg_max), int(seg_k)))
+            seg_emitted = True
+            continue
+        value = row[col]
+        if value is None or value == "":
+            continue
+        tokens.append(format_adtree_param_token(col, value))
+    return tokens
+
+
+def assign_adtree_groups(rows):
+    """Bucket AdTree rows (adqsm_variant/radius_threshold_mm actually set -
+    see adtree_reconstruct_compare.py's upsert_result() calls) into groups
+    via the STRUCTURED ADTREE_VARY_BY/ADTREE_PARAM_FILTERS mechanism -
+    parallel to (and independent of) assign_groups()/GROUP_RULES and
+    assign_treeqsm_groups() above.
+
+    Returns (groups, group_order) in the SAME shape as assign_groups()/
+    assign_treeqsm_groups(). Rows are excluded (no error) when they don't
+    satisfy ADTREE_PARAM_FILTERS (silent - that's the filter's whole
+    point) or SHOW_ADTREE_RAW_GROUP is False (silent - a deliberate on/off
+    switch, not a data problem), or included in one batched warning when
+    they have no structured AdTree params at all (adqsm_variant == "" AND
+    radius_threshold_mm is None - an older row from before these columns
+    existed, or simply not an AdTree row, e.g. AdQSM-direct/reference rows
+    passed in alongside real AdTree ones).
+
+    "AdTree raw ..." rows have adqsm_variant == "" (never a real variant
+    string - see adtree_reconstruct_compare.py's upsert_result() calls,
+    STEP 5) but DO have radius_threshold_mm/seg_* set, so they form their
+    OWN group here, keyed with "" in the adqsm_variant slot - this can
+    never collide with a calibrated group's key (always a real variant
+    number), so raw and calibrated rows can no longer end up sharing one
+    group by accident (the bug STEP 4 surfaced).
+
+    UNLIKE assign_treeqsm_groups(), this is NOT exclusive-or with
+    GROUP_RULES by method-string prefix - the caller decides which row list
+    to pass in, and the SAME row could in principle be picked up by both
+    mechanisms if both are active.
+    """
+    fixed_names = [c for c in ADTREE_PARAM_NAMES if c not in ADTREE_VARY_BY]
+
+    rows_by_key = {}
+    key_order = []
+    skipped_no_params = []
+    for r in rows:
+        if not r["adqsm_variant"] and r["radius_threshold_mm"] is None:
+            skipped_no_params.append(r["method"])
+            continue
+
+        if not SHOW_ADTREE_RAW_GROUP and not r["adqsm_variant"]:
+            continue   # "AdTree raw" row (no real adqsm_variant) - toggle says exclude it
+
+        if ADTREE_PARAM_FILTERS:
+            matched = True
+            for col, target in ADTREE_PARAM_FILTERS.items():
+                value = r[col]
+                if isinstance(target, str):
+                    if value != target:
+                        matched = False
+                        break
+                else:
+                    if value is None or abs(value - target) >= 1e-4:
+                        matched = False
+                        break
+            if not matched:
+                continue
+
+        fixed_key = tuple(r[c] for c in fixed_names)
+        if fixed_key not in rows_by_key:
+            rows_by_key[fixed_key] = []
+            key_order.append(fixed_key)
+        rows_by_key[fixed_key].append(r)
+
+    if skipped_no_params:
+        print("WARNING: plot_box.py: %d row(s) have no structured AdTree reconstruction "
+              "parameters (older row, from before these columns existed, or not an AdTree "
+              "row) - excluded from AdTree structured grouping: %s"
+              % (len(skipped_no_params), skipped_no_params))
+
+    groups = {}
+    group_order = []
+    for fixed_key in key_order:
+        members = rows_by_key[fixed_key]
+        label = "AT_" + "_".join(adtree_param_tokens(members[0], fixed_names))
+        groups[label] = members
+        group_order.append(label)
+    return groups, group_order
+
+
 def classify_groups(groups, group_order):
     """Return {group_label: family_name} - one family per group, derived
     from classify_family() on the group's FIRST member's raw, untouched CSV
@@ -553,10 +734,22 @@ def build_boxplot_figure(rows, tree, branch_filter):
               % (tree, branch_filter))
         return
 
-    # Reference row set aside (for the horizontal reference lines) and
-    # excluded from grouping/boxing - it's a single destructive-reference
+    # Reference row set aside (for the horizontal reference line AND the
+    # deviation table) and excluded from grouping/boxing - it's a single
     # measurement, not a group of variants to build a box from.
-    ref_row = next((r for r in tree_rows if r["method"] == REFERENCE_METHOD), None)
+    #
+    # WHICH row depends on branch_filter: the destructive reference
+    # (REFERENCE_METHOD) only ever has a "10cm" row, so it can never appear
+    # for "none" - there, the dynamically-resolved smallest-numbered AdQSM
+    # variant (resolve_reference_method_none(), same function
+    # compare_volumes.py's own RUN section uses) stands in as the yardstick
+    # instead, same reasoning as plot_volumes.py's plot_tree_overview().
+    if branch_filter == "10cm":
+        ref_method_for_mode = REFERENCE_METHOD
+    else:
+        ref_method_for_mode = resolve_reference_method_none(tree_rows)
+    ref_row = (next((r for r in tree_rows if r["method"] == ref_method_for_mode), None)
+               if ref_method_for_mode else None)
 
     # TreeQSM published-mean row, same treatment as ref_row above - also
     # set aside and excluded from grouping/boxing (it's a single mean
@@ -584,16 +777,24 @@ def build_boxplot_figure(rows, tree, branch_filter):
 
     groups, group_order = assign_groups(group_rules_rows)
     treeqsm_groups, treeqsm_group_order = assign_treeqsm_groups(treeqsm_candidate_rows)
+    # AdTree structured grouping (ADTREE_VARY_BY/ADTREE_PARAM_FILTERS) - NOT
+    # exclusive-or with GROUP_RULES (unlike the TreeQSM routing above), so
+    # it's given the SAME group_rules_rows GROUP_RULES itself sees (AdTree/
+    # AdQSM-direct rows; AdQSM-direct rows simply have no adqsm_variant/
+    # radius_threshold_mm set and get silently batched into
+    # assign_adtree_groups()'s own "no structured params" warning).
+    adtree_groups, adtree_group_order = assign_adtree_groups(group_rules_rows)
 
     group_kind = {label: "rules" for label in group_order}
     group_kind.update({label: "treeqsm" for label in treeqsm_group_order})
+    group_kind.update({label: "adtree" for label in adtree_group_order})
 
-    groups = {**groups, **treeqsm_groups}
-    group_order = group_order + treeqsm_group_order
+    groups = {**groups, **treeqsm_groups, **adtree_groups}
+    group_order = group_order + treeqsm_group_order + adtree_group_order
 
     if not group_order:
-        print("No groups matched any GROUP_RULES pattern, and no TreeQSM row matched "
-              "TREEQSM_STAGE_FILTER/TREEQSM_PARAM_FILTERS, for tree '%s' branch_filter='%s' - "
+        print("No groups matched any GROUP_RULES pattern, and no TreeQSM/AdTree row matched "
+              "the structured grouping settings, for tree '%s' branch_filter='%s' - "
               "skipping this boxplot." % (tree, branch_filter))
         return
 
@@ -612,6 +813,14 @@ def build_boxplot_figure(rows, tree, branch_filter):
                               figsize=(OVERVIEW_NCOLS * BOX_PANEL_WIDTH, n_rows * BOX_PANEL_HEIGHT))
     for ax in axes.flat[n_fields:]:
         ax.axis("off")
+
+    # Tracks the tallest deviation-table footprint (in axes-fraction units
+    # below the axis) seen across ALL panels - used AFTER this loop to size
+    # hspace dynamically (see the DEVIATION_TABLE_HSPACE comment further
+    # down) so a fixed guess doesn't have to be re-tuned by hand every time
+    # the number of groups changes (GROUP_RULES/ADTREE_VARY_BY edits, more
+    # trees, etc.).
+    max_table_extent = 0.0
 
     for ax, (field_key, subplot_title) in zip(axes.flat, FIELDS):
         box_data = []
@@ -730,6 +939,18 @@ def build_boxplot_figure(rows, tree, branch_filter):
                                     textcoords="offset points",
                                     fontsize=POINT_LABEL_FONTSIZE, ha="left", va="bottom",
                                     color=label_color, zorder=4)
+            elif SHOW_POINT_LABELS and group_kind.get(label) == "adtree":
+                # AdTree-structured-origin group: same idea as the "treeqsm"
+                # branch above, built from ADTREE_VARY_BY's actual value(s)
+                # on this point's own row (adtree_param_tokens()).
+                for j, (x, y, row) in enumerate(zip(x_positions, values, rows_for_box)):
+                    point_label = "/".join(adtree_param_tokens(row, ADTREE_VARY_BY))
+                    if point_label:
+                        ax.annotate(point_label, xy=(x, y),
+                                    xytext=(3, 3 + LABEL_VERTICAL_STAGGER * j),
+                                    textcoords="offset points",
+                                    fontsize=POINT_LABEL_FONTSIZE, ha="left", va="bottom",
+                                    color=label_color, zorder=4)
             elif SHOW_POINT_LABELS and label in POINT_LABEL_PATTERNS:
                 pattern, fmt = POINT_LABEL_PATTERNS[label]
                 for j, (x, y, method) in enumerate(zip(x_positions, values, methods)):
@@ -750,8 +971,14 @@ def build_boxplot_figure(rows, tree, branch_filter):
         # entirely otherwise, rather than showing an empty/misleading box).
         ref_line = None
         if SHOW_REFERENCE_LINE and ref_row is not None and ref_row[field_key] is not None:
+            # label is the ACTUAL resolved reference method (ref_row["method"]),
+            # not a hard-coded "Reference (destructive)" string - ref_row now
+            # varies by branch_filter (see ref_method_for_mode above): the
+            # destructive reference for "10cm", the dynamically-resolved
+            # AdQSM variant for "none". A hard-coded label would be flatly
+            # wrong for "none" mode once ref_row points at an AdQSM row.
             ref_line = ax.axhline(ref_row[field_key], linestyle="--", color=reference_line_color,
-                                   linewidth=1.5, label="Reference (destructive)")
+                                   linewidth=1.5, label=ref_row["method"])
 
         treeqsm_line = None
         if SHOW_TREEQSM_REF_LINE and treeqsm_ref_row is not None and treeqsm_ref_row[field_key] is not None:
@@ -785,12 +1012,87 @@ def build_boxplot_figure(rows, tree, branch_filter):
         y_min, y_max = ax.get_ylim()
         ax.set_ylim(y_min, y_max + BOX_TOP_MARGIN * (y_max - y_min))
 
+        # Deviation-from-reference table, BELOW the (already-rotated)
+        # x-axis group labels - uses the SAME ref_row this panel's
+        # reference line points at (branch-filter-aware, see
+        # ref_method_for_mode above), so both always agree on which row is
+        # "the reference" for this mode. Skipped entirely for this panel
+        # when there's no reference row at all for this mode (nothing
+        # meaningful to compare against for ANY group) - not drawn as an
+        # all-blank table. A group whose reference VALUE for this specific
+        # field is missing (covered by the `ref_val is None` check below,
+        # though ref_row[field_key] not-None is already guaranteed by
+        # ref_row being non-None here since every group shares one ref_row)
+        # would get blank cells rather than "0.0" - see the loop below.
+        if (SHOW_DEVIATION_TABLE and (SHOW_DEVIATION_PERCENT or SHOW_DEVIATION_ABSOLUTE)
+                and ref_row is not None):
+            ref_val = ref_row[field_key]
+            col_labels = ["Group"]
+            if SHOW_DEVIATION_ABSOLUTE:
+                col_labels.append("Abs dev")
+            if SHOW_DEVIATION_PERCENT:
+                col_labels.append("% dev")
+
+            table_rows = []
+            for label, values in zip(box_labels, box_data):
+                group_mean = sum(values) / len(values)
+                row_cells = [label]
+                if ref_val is None:
+                    # Reference row exists, but has no value for THIS field -
+                    # blank deviation cells, not a computed "0.0".
+                    if SHOW_DEVIATION_ABSOLUTE:
+                        row_cells.append("")
+                    if SHOW_DEVIATION_PERCENT:
+                        row_cells.append("")
+                else:
+                    abs_dev = group_mean - ref_val
+                    if SHOW_DEVIATION_ABSOLUTE:
+                        row_cells.append("%+.3f" % abs_dev)
+                    if SHOW_DEVIATION_PERCENT:
+                        pct_dev = (100.0 * abs_dev / ref_val) if ref_val != 0 else None
+                        row_cells.append("%+.1f%%" % pct_dev if pct_dev is not None else "")
+                table_rows.append(row_cells)
+
+            if table_rows:
+                # bbox=[left, bottom, width, height] in AXES-fraction units
+                # (0 = axis bottom, negative = below it) - NOT a separate
+                # subplot, so the rest of this panel's layout code above is
+                # untouched. Height scales with row count so a group with
+                # many boxes doesn't get a squashed, unreadable table; the
+                # fixed -0.35 offset clears BOX_LABEL_ROTATION's rotated
+                # x-tick labels below the axis - if labels/table still
+                # overlap for a very long group name, widen this offset.
+                clearance = 0.5
+                row_h = 0.06
+                table_height = row_h * (len(table_rows) + 1)   # +1 for the header row
+                tbl = ax.table(cellText=table_rows, colLabels=col_labels,
+                                bbox=[0, -clearance - table_height, 1, table_height])
+                tbl.auto_set_font_size(False)
+                tbl.set_fontsize(BOX_LABEL_FONTSIZE)
+
+                # Track this panel's total below-axis footprint (label
+                # clearance + table itself) - the tallest one across all
+                # panels drives hspace below (see max_table_extent above).
+                max_table_extent = max(max_table_extent, clearance + table_height)
+
     filter_label = ("full reconstruction, branch_filter='none'" if branch_filter == "none"
                      else "diameter >= 10 cm only, branch_filter='10cm'")
     fig.suptitle("Group comparison: %s  (%s)" % (tree, filter_label), fontsize=14)
 
     fig.tight_layout(rect=(0, 0.02, 1, 0.95))
-    fig.subplots_adjust(bottom=BOX_BOTTOM_MARGIN)
+    # Extra vertical gap between subplot ROWS when the deviation table is
+    # shown - each table is drawn well below its own panel's x-axis (see
+    # the bbox math above), and without extra hspace it would overlap the
+    # NEXT row's panels down. Sized from max_table_extent (the actual
+    # tallest table footprint seen across all panels this run, tracked
+    # during the loop above) rather than a fixed guess, so this stays
+    # correct whether there are 3 groups or 30 - DEVIATION_TABLE_HSPACE is
+    # a multiplier on top of that measured extent, purely for a bit of
+    # visual breathing room, not the primary sizing mechanism.
+    if max_table_extent > 0:
+        fig.subplots_adjust(bottom=BOX_BOTTOM_MARGIN, hspace=max_table_extent * DEVIATION_TABLE_HSPACE)
+    else:
+        fig.subplots_adjust(bottom=BOX_BOTTOM_MARGIN)
 
     if SAVE_PLOT_PNG:
         out_path = os.path.join(ensure_plots_dir(), "%s_boxplot_%s.png" % (tree, branch_filter))

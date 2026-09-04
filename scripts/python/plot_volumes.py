@@ -132,7 +132,17 @@ BAR_SPACING = 3 #distance between bar centers (data units) - was 1.6
 # chart to just those - e.g. for a focused side-by-side of a handful of
 # variants instead of everything in the CSV. Any name that matches no row
 # is printed as a warning and simply skipped, rather than crashing.
-SELECTED_METHODS = None   # e.g. ["AdTree raw r5mm_seg0.1-0.5-k0.5", "AdQSM (TreesParams) (AdQSM 05)"]
+SELECTED_METHODS = [ "Reference (destructive)",
+                    "AdTree calibrated r5mm (AdQSM 04) [calmethod=regression-perorder] (>=10cm only)_seg100-500-k50",
+                    "AdTree calibrated r10mm (AdQSM 04) [calmethod=regression-perorder] (>=10cm only)_seg100-500-k50",
+                    "AdTree calibrated r15mm (AdQSM 04) [calmethod=regression-perorder] (>=10cm only)_seg100-500-k50",
+                    "AdTree calibrated r20mm (AdQSM 04) [calmethod=regression-perorder] (>=10cm only)_seg100-500-k50",
+                    "AdTree calibrated r5mm (AdQSM 05) [calmethod=regression-perorder] (>=10cm only)_seg100-500-k50",
+                    "AdTree calibrated r10mm (AdQSM 05) [calmethod=regression-perorder] (>=10cm only)_seg100-500-k50", 
+                    "AdTree calibrated r15mm (AdQSM 05) [calmethod=regression-perorder] (>=10cm only)_seg100-500-k50", 
+                    "AdTree calibrated r20mm (AdQSM 05) [calmethod=regression-perorder] (>=10cm only)_seg100-500-k50", 
+                    ]
+# e.g. ["AdTree raw r5mm_seg0.1-0.5-k0.5", "AdQSM (TreesParams) (AdQSM 05)"]
 
 # PNG_FILENAME_SUFFIX: appended to plot_tree_overview()'s output PNG
 # filename, right before the ".png" extension - "" (default) leaves the

@@ -165,7 +165,10 @@ MIN_PAIRS_PER_ORDER = 15
 # If SEG_LEN_MIN == SEG_LEN_MAX, this reduces to the old constant-length
 # resampling (that fixed value, regardless of radius).
 # Set SEG_LEN_MIN to 0 or None to disable resampling entirely (keep every point).
-SEG_LEN_MIN = 0.1                # shortest allowed segment (m), for thin twigs
+# TODO: Check if seglen mim influence the regresion - see changes doc 
+# CLAMPED DIAMETER [mm] = 2 × SEG_LEN_MIN [mm] / SEG_LEN_K
+# LENGTH ≈ SEG_LEN_MIN
+SEG_LEN_MIN = 0.01                # shortest allowed segment (m), for thin twigs
 SEG_LEN_MAX = 0.5                # longest allowed segment (m), for the trunk
 SEG_LEN_K = 0.5                   # target length = SEG_LEN_K * local_radius
 
@@ -216,6 +219,7 @@ RECENTER_XY = True
 # its two neighbours by SMOOTH_ALPHA. The root, junctions (degree >= 3), and
 # branch tips (leaves) are never moved, so topology and branch endpoints stay
 # fixed. Radii are not affected.
+# TODO: Sensitivity analysis of SMOOTH_ITERS/SMOOTH_ALPHA - how much smoothing is too much?
 SMOOTH_ITERS = 5                  # number of smoothing passes (0 = off)
 SMOOTH_ALPHA = 0.5                # 0..1 strength per pass
 
@@ -263,6 +267,16 @@ WRITE_THIN_BRANCH_FILTERED_ROW = True
 # is True, each generated threshold variant upserts its own row into this CSV
 # so results from all methods live in one place.
 RESULTS_CSV = "volume_results.csv"
+
+# Output folders, so the working directory doesn't fill up with dozens of
+# .npz/.png files mixed in with the scripts. NPZ_DIR is this script's own
+# new folder; FIGURES_DIR reuses the project's existing "plots/" convention
+# (already used by plot_box.py/plot_volumes.py for their own charts),
+# grouped under a per-tree subfolder. export_geom_ansys.py has its OWN
+# matching NPZ_DIR parameter (see that file) - keep both in sync by hand if
+# this one ever changes.
+NPZ_DIR = "npz"
+FIGURES_DIR = os.path.join("plots", TREE_NAME)
 
 # Reference heights [m] used for DBH (lower) and the taper metric (lower/
 # upper). DBH is the stem diameter at TAPER_H_LOWER (1.3 m = breast height).
@@ -319,7 +333,7 @@ else:
 # =====================  VISUALIZATION  ================================
 # Show an interactive 3D preview of the reduced beam model (one window per
 # radius threshold) so you can check it before importing into ANSYS.
-SHOW_PLOT = True
+SHOW_PLOT = False
 
 # Also save the preview as a PNG next to each output file (True/False).
 # The PNG name is derived from the output file name (.txt -> .png).
@@ -328,6 +342,9 @@ SAVE_PLOT_PNG = True
 
 
 # =========================  RUN  =====================================
+os.makedirs(NPZ_DIR, exist_ok=True)
+os.makedirs(FIGURES_DIR, exist_ok=True)
+
 print("Reading:", INPUT_PLY)
 xyz, rad, edges = read_ply(INPUT_PLY)
 print("  vertices: %d, edges: %d" % (len(xyz), len(edges)))
@@ -680,7 +697,8 @@ for variant_label, taper_file, branch_file, params_file in ADQSM_VARIANT_LIST:
         # of the name" placement as the method names above) - a run with
         # different SEG_LEN_MIN/MAX/K settings now writes a DIFFERENT .npz
         # file on disk instead of silently overwriting the previous run's one.
-        npz_name = "calib_%s_r%dmm%s%s.npz" % (TREE_NAME, round(thr * 1000), variant_suffix, SEG_VARIANT_SUFFIX)
+        npz_name = os.path.join(
+            NPZ_DIR, "calib_%s_r%dmm%s%s.npz" % (TREE_NAME, round(thr * 1000), variant_suffix, SEG_VARIANT_SUFFIX))
         cyl_array = np.array([(a, b, r, pid) for a, b, r, pid in cyl], dtype=np.float64)
         np.savez(npz_name,
                  xyz=xyz,
@@ -734,7 +752,23 @@ for variant_label, taper_file, branch_file, params_file in ADQSM_VARIANT_LIST:
                           # radii, it never adds, removes, or splits cylinders,
                           # so len(cyl) here is identical to len(cyl) at every
                           # calibrated row below.
-                          n_cylinders=len(cyl))
+                          n_cylinders=len(cyl),
+                          # adqsm_variant=None (not variant_label): raw AdTree
+                          # geometry never touches AdQSM at all, so it doesn't
+                          # actually depend on which variant happened to be
+                          # active during this loop iteration - the method
+                          # name itself already confirms this (no variant
+                          # suffix). Passing variant_label here would make
+                          # assign_adtree_groups() (plot_box.py) accidentally
+                          # lump raw rows into a calibrated row's group
+                          # whenever their radius_threshold_mm/seg_* happen to
+                          # match (see STEP 5's fix). radius_threshold_mm/
+                          # seg_min_mm/seg_max_mm/seg_k_pct are kept - raw
+                          # AdTree DOES genuinely depend on the pruning
+                          # threshold and resampling settings.
+                          adqsm_variant=None, radius_threshold_mm=round(thr * 1000),
+                          seg_min_mm=round(SEG_LEN_MIN * 1000), seg_max_mm=round(SEG_LEN_MAX * 1000),
+                          seg_k_pct=round(SEG_LEN_K * 100))
 
             if WRITE_THIN_BRANCH_FILTERED_ROW:
                 # Same idea as the calibrated (>=10cm only) rows further below,
@@ -761,7 +795,12 @@ for variant_label, taper_file, branch_file, params_file in ADQSM_VARIANT_LIST:
                               # n_cylinders (Task B): same idea as the calibrated
                               # row above, using orig_thin's "n_cyl_kept" (the raw/
                               # uncalibrated cylinder set's filtered count) instead.
-                              n_cylinders=orig_thin["n_cyl_kept"])
+                              n_cylinders=orig_thin["n_cyl_kept"],
+                              # adqsm_variant=None - same reasoning as the
+                              # plain "AdTree raw" row above (STEP 5 fix).
+                              adqsm_variant=None, radius_threshold_mm=round(thr * 1000),
+                              seg_min_mm=round(SEG_LEN_MIN * 1000), seg_max_mm=round(SEG_LEN_MAX * 1000),
+                              seg_k_pct=round(SEG_LEN_K * 100))
 
             # ---- SECONDARY calibration variant: calref=min5mm - upsert 2 rows --
             # (one "none"/full, one "(>=10cm only)") for the retained secondary
@@ -782,7 +821,10 @@ for variant_label, taper_file, branch_file, params_file in ADQSM_VARIANT_LIST:
                               fr["dbh"], height_m, fr["taper"],
                               fr["stats"]["trunk_len"], fr["stats"]["branch_len"],
                               branch_filter="none",
-                              n_cylinders=fr["n_cylinders"])
+                              n_cylinders=fr["n_cylinders"],
+                              adqsm_variant=variant_label, radius_threshold_mm=round(thr * 1000),
+                              seg_min_mm=round(SEG_LEN_MIN * 1000), seg_max_mm=round(SEG_LEN_MAX * 1000),
+                              seg_k_pct=round(SEG_LEN_K * 100))
                 if WRITE_THIN_BRANCH_FILTERED_ROW:
                     fr_thin = fr["thin"]
                     upsert_result(RESULTS_CSV, TREE_NAME,
@@ -794,7 +836,10 @@ for variant_label, taper_file, branch_file, params_file in ADQSM_VARIANT_LIST:
                                   fr["dbh"], height_m, fr["taper"],
                                   fr_thin["trunk_len_kept"], fr_thin["branch_len_kept"],
                                   branch_filter="10cm",
-                                  n_cylinders=fr_thin["n_cyl_kept"])
+                                  n_cylinders=fr_thin["n_cyl_kept"],
+                                  adqsm_variant=variant_label, radius_threshold_mm=round(thr * 1000),
+                                  seg_min_mm=round(SEG_LEN_MIN * 1000), seg_max_mm=round(SEG_LEN_MAX * 1000),
+                                  seg_k_pct=round(SEG_LEN_K * 100))
 
             # ---- PRIMARY calibration variant: per-order regression - upsert 2 rows --
             # Mirrors the "none"/"(>=10cm only)" pattern above exactly, using
@@ -810,7 +855,10 @@ for variant_label, taper_file, branch_file, params_file in ADQSM_VARIANT_LIST:
                           regperorder_dbh, height_m, regperorder_taper,
                           regperorder_stats["trunk_len"], regperorder_stats["branch_len"],
                           branch_filter="none",
-                          n_cylinders=regperorder_n_cylinders)
+                          n_cylinders=regperorder_n_cylinders,
+                          adqsm_variant=variant_label, radius_threshold_mm=round(thr * 1000),
+                          seg_min_mm=round(SEG_LEN_MIN * 1000), seg_max_mm=round(SEG_LEN_MAX * 1000),
+                          seg_k_pct=round(SEG_LEN_K * 100))
             if WRITE_THIN_BRANCH_FILTERED_ROW:
                 upsert_result(RESULTS_CSV, TREE_NAME,
                               "AdTree calibrated r%dmm%s [calmethod=regression-perorder] (>=%.0fcm only)%s"
@@ -821,7 +869,10 @@ for variant_label, taper_file, branch_file, params_file in ADQSM_VARIANT_LIST:
                               regperorder_dbh, height_m, regperorder_taper,
                               regperorder_thin["trunk_len_kept"], regperorder_thin["branch_len_kept"],
                               branch_filter="10cm",
-                              n_cylinders=regperorder_thin["n_cyl_kept"])
+                              n_cylinders=regperorder_thin["n_cyl_kept"],
+                              adqsm_variant=variant_label, radius_threshold_mm=round(thr * 1000),
+                              seg_min_mm=round(SEG_LEN_MIN * 1000), seg_max_mm=round(SEG_LEN_MAX * 1000),
+                              seg_k_pct=round(SEG_LEN_K * 100))
 
             print("  DBH (at %.1f m)   : raw AdTree = %s   |   calibrated = %s"
                   % (TAPER_H_LOWER, _fmt_dbh(raw_dbh), _fmt_dbh(cal_dbh)))
@@ -836,7 +887,10 @@ for variant_label, taper_file, branch_file, params_file in ADQSM_VARIANT_LIST:
         print()
 
         if SHOW_PLOT or SAVE_PLOT_PNG:
-            # `out` is only used here to derive the PNG name (out.txt -> out.png) -
-            # plot_model() never writes `out` itself, so this is unaffected by
-            # geom_*.txt no longer being written directly by this script.
-            plot_model(xyz, cyl, root, RECENTER_XY, thr, out, SHOW_PLOT, SAVE_PLOT_PNG)
+            # `out` itself is NOT touched here (see the NPZ_DIR/FIGURES_DIR
+            # comment above) - it's also stored verbatim as `geom_filename`
+            # inside the .npz below, for export_geom_ansys.py to read back
+            # later as the bare (no-folder) name it should write. FIGURES_DIR
+            # is prefixed ONLY at this call site, purely to steer where
+            # plot_model() derives its PNG path from (out.txt -> out.png).
+            plot_model(xyz, cyl, root, RECENTER_XY, thr, os.path.join(FIGURES_DIR, out), SHOW_PLOT, SAVE_PLOT_PNG)

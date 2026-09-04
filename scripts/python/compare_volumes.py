@@ -64,6 +64,7 @@
 import csv
 import os
 import math
+import re
 
 # =====================  PARAMETERS  ==================================
 # The master results table. Edit this file to add trees/methods.
@@ -84,6 +85,17 @@ REFERENCE_METHOD = "Reference (destructive)"
 # Bias/MAE/RMSE/field-error tables have SOME baseline to express every other
 # method's difference against. This is NOT an accuracy claim about AdQSM -
 # it's just "how far is each method from AdQSM", nothing more.
+#
+# This is a STATIC fallback/default only - the RUN section below (this
+# file's own __main__ block) overwrites it with resolve_reference_method_none()'s
+# result once `rows` is actually loaded (variant availability differs per
+# tree, so the "smallest AdQSM variant number present" is resolved from real
+# data, not hard-coded). Left in place at module level (not deleted, not
+# moved inside the __main__ guard) specifically so other scripts that
+# `import` this module (e.g. plot_volumes.py's
+# `from compare_volumes import REFERENCE_METHOD_NONE`) still get a usable
+# value at IMPORT time, before/without that RUN section ever executing -
+# moving this assignment itself into __main__ would break those imports.
 REFERENCE_METHOD_NONE = "AdQSM (TreesParams) (AdQSM 05)"
 # =====================================================================
 
@@ -162,6 +174,16 @@ def load_results(path):
                 "simp_maxorder": to_float(r.get("simp_maxorder")),
                 "simp_smallradii": to_float(r.get("simp_smallradii")),
                 "simp_replaceiterations": to_float(r.get("simp_replaceiterations")),
+                # AdTree reconstruction parameters (adqsm_variant/
+                # radius_threshold_mm/seg_min_mm/seg_max_mm/seg_k_pct) - see
+                # adtree_reconstruct_compare.py's upsert_result() calls.
+                # Same optional-column convention as mode/pd1/... above:
+                # blank/missing -> "" for the string, None for the numbers.
+                "adqsm_variant": (r.get("adqsm_variant") or "").strip(),
+                "radius_threshold_mm": to_float(r.get("radius_threshold_mm")),
+                "seg_min_mm": to_float(r.get("seg_min_mm")),
+                "seg_max_mm": to_float(r.get("seg_max_mm")),
+                "seg_k_pct": to_float(r.get("seg_k_pct")),
             })
     return rows
 
@@ -344,6 +366,24 @@ def field_error_summary(rows, key, label, reference_method):
     print()
 
 
+def resolve_reference_method_none(rows):
+    """Return the exact 'AdQSM (TreesParams) (AdQSM XX)' method string with
+    the smallest AdQSM variant number present in `rows`, or None if no such
+    row exists. Dynamic counterpart to the static REFERENCE_METHOD_NONE
+    default above - variant availability (which AdQSM variant has valid
+    TreesParams.txt data) differs per tree, so this resolves it from the
+    ACTUAL rows at hand instead of assuming a fixed variant number. Also
+    used directly by plot_box.py (STEP 4) for its own per-tree resolution."""
+    candidates = []
+    for r in rows:
+        m = re.match(r"^AdQSM \(TreesParams\) \(AdQSM (\d+)\)$", r["method"])
+        if m:
+            candidates.append((int(m.group(1)), r["method"]))
+    if not candidates:
+        return None
+    return min(candidates, key=lambda c: c[0])[1]
+
+
 def filter_by_branch_filter(rows, value):
     """Keep only the rows whose branch_filter equals `value` ("none" or
     "10cm"). This is the ONLY new filtering step for the two-mode RUN
@@ -434,6 +474,14 @@ if __name__ == "__main__":
 
     rows_none = filter_by_branch_filter(rows, "none")
     trees_none = sorted({r["tree"] for r in rows_none})
+
+    # Resolve REFERENCE_METHOD_NONE dynamically from the actual rows just
+    # loaded (smallest AdQSM variant number present), instead of trusting
+    # the static module-level default above - falls back to that default
+    # (rather than None) if no "AdQSM (TreesParams) (AdQSM XX)" row exists
+    # at all, so the rest of this section still has SOME value to work with.
+    REFERENCE_METHOD_NONE = resolve_reference_method_none(rows_none) or REFERENCE_METHOD_NONE
+    print("Resolved REFERENCE_METHOD_NONE for this run: %s\n" % REFERENCE_METHOD_NONE)
     no_ref_note = ("(No destructive-reference row here BY DESIGN - the reference only ever\n"
                    " measured branches >= 10 cm, see the '10cm' section above. This is a pure\n"
                    " method-vs-method comparison, not an accuracy evaluation.)")

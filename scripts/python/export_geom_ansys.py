@@ -30,9 +30,10 @@ from tree_geom_utils import write_geom
 #   NPZ_FILE = "calib_IND01_054_r5mm.npz"
 NPZ_FILE = "calib_IND01_054_r10mm_adqsm05_seg100-500-k50.npz"
 
-# Folder to look for "calib_*.npz" files in. "." means "the folder this
-# script is run from" (matches how adtree_reconstruct_compare.py writes them).
-NPZ_DIR = "."
+# Folder to look for "calib_*.npz" files in - matches
+# adtree_reconstruct_compare.py's own NPZ_DIR, which now writes .npz files
+# into "npz/" instead of the working directory.
+NPZ_DIR = "npz"
 # =====================================================================
 
 
