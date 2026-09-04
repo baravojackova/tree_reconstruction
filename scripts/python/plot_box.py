@@ -332,26 +332,34 @@ def format_treeqsm_param_token(short_name, value):
 
 def treeqsm_param_tokens(row, short_names):
     """Build the list of compact tokens for `short_names` (an ordered
-    subset of TREEQSM_PARAM_SHORT_NAMES' keys) from `row`'s actual values.
+    subset of TREEQSM_PARAM_SHORT_NAMES' keys) from `row`'s actual values,
+    IN `short_names`' OWN ORDER (e.g. "mode" first if it's first in
+    `short_names`) - so the caller's chosen order (TREEQSM_PARAM_SHORT_NAMES'
+    declared order, by default) is what ends up in the label, matching
+    shorten_method_label()'s "mode, pd, m, s, r" format.
 
     pd1/pd2min/pd2max are combined into ONE "p#-#-#" token, via the SAME
     treeqsm_pd_token() shorten_method_label() uses (format B), when all
     three are present together in `short_names` - the common case (they're
-    always fixed or all varied together in practice); if only SOME of the
-    three are present (an unusual TREEQSM_VARY_BY split), each present one
-    falls back to its own individual "pd#"-style token instead, since
+    always fixed or all varied together in practice) - emitted at the
+    position of the FIRST of the three in `short_names`. If only SOME of
+    the three are present (an unusual TREEQSM_VARY_BY split), each present
+    one falls back to its own individual "pd#"-style token instead, since
     there's no established combined format for a partial trio.
     """
+    pd_trio_present = all(k in short_names for k in ("pd1", "pd2min", "pd2max"))
     tokens = []
-    remaining = list(short_names)
-    if all(k in remaining for k in ("pd1", "pd2min", "pd2max")):
-        pd1 = row[TREEQSM_PARAM_SHORT_NAMES["pd1"]]
-        pd2min = row[TREEQSM_PARAM_SHORT_NAMES["pd2min"]]
-        pd2max = row[TREEQSM_PARAM_SHORT_NAMES["pd2max"]]
-        tokens.append(treeqsm_pd_token(pd1, pd2min, pd2max))
-        for k in ("pd1", "pd2min", "pd2max"):
-            remaining.remove(k)
-    for short in remaining:
+    pd_emitted = False
+    for short in short_names:
+        if pd_trio_present and short in ("pd1", "pd2min", "pd2max"):
+            if pd_emitted:
+                continue   # already emitted the combined token at the trio's first position
+            pd1 = row[TREEQSM_PARAM_SHORT_NAMES["pd1"]]
+            pd2min = row[TREEQSM_PARAM_SHORT_NAMES["pd2min"]]
+            pd2max = row[TREEQSM_PARAM_SHORT_NAMES["pd2max"]]
+            tokens.append(treeqsm_pd_token(pd1, pd2min, pd2max))
+            pd_emitted = True
+            continue
         value = row[TREEQSM_PARAM_SHORT_NAMES[short]]
         if value is None:
             continue
@@ -430,7 +438,12 @@ def assign_treeqsm_groups(rows):
     group_order = []
     for fixed_key in key_order:
         members = rows_by_key[fixed_key]
-        label = " ".join(treeqsm_param_tokens(members[0], fixed_short_names))
+        # "TQ_" prefix + underscore-joined tokens, matching
+        # shorten_method_label()'s TreeQSM format (e.g. "TQ_man_p7-2-7_m8_s5") -
+        # fixed_short_names is TREEQSM_PARAM_SHORT_NAMES' own declared order
+        # (mode, pd1/pd2min/pd2max, maxorder, sr) minus whatever's in
+        # TREEQSM_VARY_BY, so "mode" naturally comes first.
+        label = "TQ_" + "_".join(treeqsm_param_tokens(members[0], fixed_short_names))
         groups[label] = members
         group_order.append(label)
     return groups, group_order

@@ -236,17 +236,25 @@ def treeqsm_pd_token(pd1, pd2min, pd2max):
     return "p%d-%d-%d" % (round(pd1 * 100), round(pd2min * 100), round(pd2max * 100))
 
 
+def treeqsm_mode_short(mode):
+    """TreeQSM reconstruction mode -> its compact marker ("manual" -> "man",
+    "auto" -> "aut"). An unrecognized value is returned unchanged rather
+    than crashing - degrade gracefully, same policy as treeqsm_stage_short()."""
+    return {"manual": "man", "auto": "aut"}.get(mode, mode)
+
+
 def _treeqsm_kwargs(row):
-    """Pull shorten_method_label()'s 6 optional pd/simp kwargs out of a
+    """Pull shorten_method_label()'s 7 optional mode/pd/simp kwargs out of a
     load_results() row dict - shared by every call site below that has
-    (or looks up) a full row, so the same 6 field names aren't repeated
+    (or looks up) a full row, so the same 7 field names aren't repeated
     at each one."""
-    return dict(pd1=row.get("pd1"), pd2min=row.get("pd2min"), pd2max=row.get("pd2max"),
+    return dict(mode=row.get("mode"),
+                pd1=row.get("pd1"), pd2min=row.get("pd2min"), pd2max=row.get("pd2max"),
                 simp_maxorder=row.get("simp_maxorder"), simp_smallradii=row.get("simp_smallradii"),
                 simp_replaceiterations=row.get("simp_replaceiterations"))
 
 
-def shorten_method_label(method, pd1=None, pd2min=None, pd2max=None,
+def shorten_method_label(method, mode=None, pd1=None, pd2min=None, pd2max=None,
                           simp_maxorder=None, simp_smallradii=None,
                           simp_replaceiterations=None):
     """Map a full volume_results.csv method string to a short display
@@ -287,10 +295,10 @@ def shorten_method_label(method, pd1=None, pd2min=None, pd2max=None,
         return "AT_Raw_%s_%s/%s/%s" % (n_mm, seg_min, seg_max, seg_k)
 
     # "TreeQSM mine ({run}, {stage})" -> format B compact label, e.g.
-    # "TQ_p8-2-7_m8_s5_r0_Filt", when the 6 optional numeric kwargs above
-    # are all supplied (the caller has row-level pd1/pd2min/pd2max/
-    # simp_maxorder/simp_smallradii/simp_replaceiterations data for this
-    # method). `stage` can itself contain parentheses (e.g.
+    # "TQ_man_p8-2-7_m8_s5_r0_Filt", when `mode` PLUS the 6 optional numeric
+    # kwargs above are all supplied (the caller has row-level mode/pd1/
+    # pd2min/pd2max/simp_maxorder/simp_smallradii/simp_replaceiterations
+    # data for this method). `stage` can itself contain parentheses (e.g.
     # "Optimal (single)"), so this is parsed by stripping the outer
     # "TreeQSM mine (...)" wrapper and splitting on the FIRST ", " rather
     # than with one regex.
@@ -299,17 +307,17 @@ def shorten_method_label(method, pd1=None, pd2min=None, pd2max=None,
         if ", " in inner:
             run, stage = inner.split(", ", 1)
             stage_short = treeqsm_stage_short(stage)
-            have_params = None not in (pd1, pd2min, pd2max, simp_maxorder,
-                                        simp_smallradii, simp_replaceiterations)
+            have_params = None not in (mode, pd1, pd2min, pd2max, simp_maxorder,
+                                        simp_smallradii, simp_replaceiterations) and mode != ""
             if have_params:
-                return "TQ_%s_m%d_s%d_r%d_%s" % (
-                    treeqsm_pd_token(pd1, pd2min, pd2max),
+                return "TQ_%s_%s_m%d_s%d_r%d_%s" % (
+                    treeqsm_mode_short(mode), treeqsm_pd_token(pd1, pd2min, pd2max),
                     int(simp_maxorder), round(simp_smallradii * 1000),
                     int(simp_replaceiterations), stage_short)
             # Old v1aut/v1man rows (blank params) or a caller with no row
             # data reachable at this call site - degrade to the old
             # "TQ_{run}_{stage}" shape rather than crash or show
-            # "TQ_pNone-None-None_...".
+            # "TQ_None_pNone-None-None_...".
             return "TQ_%s_%s" % (run, stage_short)
 
     # "TreeQSM de Tanago (mean)" / "TreeQSM de Tanago (mean, Filtered<10cm)"
