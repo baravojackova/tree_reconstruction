@@ -9,8 +9,15 @@
 *afun,deg   			!use degrees
 !
 !----------vstupni parametry
-n_sl=10					!pocet sloupcu
+
 n_rad=2354				!number of rows - keep the same number without first row (0)
+!
+!nacteni tabulky s geometrii ze skenu (x,y,z,lenght,radius,xaxis,yaxis,zaxis,parent,branchorder)
+*dim,geom,table,n_rad,n_sl,1,poradi,vlast
+*tread,geom,geom_IND01_054_v1auto_1,txt
+!
+!
+n_sl=10					!pocet sloupcu
 d_kmen=0.64
 t_ks=2*d_kmen				!tloustka KS
 e_sizetree=0.1
@@ -21,10 +28,6 @@ lev3_height=4.8
 f_stat=7990
 f_dyn=7990
 alfa=14.2
-!
-!nacteni tabulky s geometrii ze skenu (x,y,z,lenght,radius,xaxis,yaxis,zaxis,parent,branchorder)
-*dim,geom,table,n_rad,n_sl,1,poradi,vlast
-*tread,geom,geom_IND01_054_v1auto_1,txt
 !
 !vypocet pozice druhehu bodu strednice valce
 *dim,geom_2,array,n_rad,5,1,poradi,vlast

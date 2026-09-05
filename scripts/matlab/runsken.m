@@ -74,7 +74,8 @@ else
         'branchlen_filtered_*.txt', ...
         'params_*.csv', ...
         'geom_*.txt', ...
-        '*.mat', ...                    % catches saved point clouds too, e.g. "IND07_083.mat"
+        '*.mat', ...   
+        '*.png', ...   % catches saved point clouds too, e.g. "IND07_083.mat"
         };
 
     % ---- 2. Scan for every pattern above and collect matches, skipping
@@ -224,8 +225,8 @@ end
 % run's results with different settings. See section 2 for the exact
 % auto-generation formula.
 % --- tree identification -------------------------------------
-tree_id   = 'IND01_054';           % short name used for ALL output files
-cloud_txt = 'IND01_054.txt';   % input point cloud (text file, 3 columns X Y Z)
+tree_id   = 'IND07_083';           % short name used for ALL output files
+cloud_txt = 'IND07_083.txt';   % input point cloud (text file, 3 columns X Y Z)
 
 % --- number of models ----------------------------------------
 n_models_first = 5;    % models per parameter combination, first (coarse) run
@@ -276,8 +277,8 @@ plot_optimal = true;   % true = plot the optimal QSM before simplification
 %                    cylinders inside one branch with one longer cylinder
 % --- simplification settings ---------------------------------
 simp_MaxOrder          = 8;
-simp_SmallRadii        = 0.02;          %def 0.005
-simp_ReplaceIterations = 0;
+simp_SmallRadii        = 0.005;          %def 0.005
+simp_ReplaceIterations = 2;              %def 0
 simp_Plot              = 1;
 simp_Disp              = 1;
 
@@ -313,7 +314,7 @@ save_figures_png = true;
 % Set to a non-blank string to use that instead (e.g. for a one-off export
 % you want named something more memorable). See section 20 for where this
 % is actually applied (as ansys_tag, not used directly).
-ansys_export_name = 'simplified_IND01_054_aut_mo8_sr005_ri1';
+ansys_export_name = '';
 
 % Blank (default) = export whatever simplification is CURRENTLY LIVE in
 % memory (today's behaviour, via the ansys_source switch in section 20).
@@ -323,7 +324,7 @@ ansys_export_name = 'simplified_IND01_054_aut_mo8_sr005_ri1';
 % retroactively export any previously-saved simplification variant, even
 % one no longer in the workspace (e.g. after re-running section 2 + 16 for
 % a second variant, per the "Solution A" workflow).
-EXPORT_FROM_SAVED_RUN_TAG = 'aut_mo8_sr005_ri0';
+EXPORT_FROM_SAVED_RUN_TAG = '';
 
 %% 2) DERIVED NAMES -------------------------------------------
 %  - built automatically from tree_id + run_tag

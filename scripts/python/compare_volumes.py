@@ -184,6 +184,12 @@ def load_results(path):
                 "seg_min_mm": to_float(r.get("seg_min_mm")),
                 "seg_max_mm": to_float(r.get("seg_max_mm")),
                 "seg_k_pct": to_float(r.get("seg_k_pct")),
+                # calmethod: which AdTree radius-calibration method produced
+                # this row (e.g. "regression-perorder", "min5mm") - see
+                # adtree_reconstruct_compare.py's upsert_result() calls.
+                # Same blank-or-missing-column convention as adqsm_variant
+                # above (blank string, not None, when not given/missing).
+                "calmethod": (r.get("calmethod") or "").strip(),
             })
     return rows
 
@@ -264,7 +270,7 @@ def print_tree_block(tree, rows, no_reference_note=None):
     print()
 
 
-def compute_error_metrics(rows, reference_method):
+def compute_error_metrics(rows, reference_method, field="total"):
     """Same Bias/MAE/RMSE/CV-RMSE calculation as error_metrics() below, but
     RETURNS the numbers instead of printing them (one dict per method), so
     other scripts (e.g. plot_volumes.py) can reuse this exact calculation
@@ -277,13 +283,18 @@ def compute_error_metrics(rows, reference_method):
     REFERENCE_METHOD (the destructive field reference, branch_filter=="10cm"),
     MODE B passes REFERENCE_METHOD_NONE (AdQSM, branch_filter=="none") -
     without this parameter the two modes would need two near-duplicate
-    copies of this function, one per hard-coded reference."""
+    copies of this function, one per hard-coded reference.
+
+    `field`: which load_results() row key to compare - "total" (default,
+    preserves every existing call site's behavior unchanged), "trunk", or
+    "branch". Same generalization pattern field_error_summary() already
+    uses via its own `key` parameter."""
     trees = sorted({r["tree"] for r in rows})
     methods = [m for m in dict.fromkeys(r["method"] for r in rows)
                if m != reference_method]
 
-    # quick lookup: (tree, method) -> total
-    total_of = {(r["tree"], r["method"]): r["total"] for r in rows}
+    # quick lookup: (tree, method) -> field's value
+    total_of = {(r["tree"], r["method"]): r[field] for r in rows}
 
     results = []
     for m in methods:
@@ -306,7 +317,7 @@ def compute_error_metrics(rows, reference_method):
     return results
 
 
-def error_metrics(rows, reference_method):
+def error_metrics(rows, reference_method, field="total"):
     """Across all trees, compute (via compute_error_metrics) and PRINT
     Bias/MAE/RMSE/CV-RMSE of each method vs `reference_method`.
 
@@ -314,11 +325,15 @@ def error_metrics(rows, reference_method):
     why) - it also appears literally in the printed header line, so MODE B's
     call (reference_method=REFERENCE_METHOD_NONE) automatically prints
     "Error metrics vs 'AdQSM (TreesParams)'" instead of the destructive
-    reference's name, with no separate wording needed."""
-    results = compute_error_metrics(rows, reference_method)
+    reference's name, with no separate wording needed.
+
+    `field`: passed straight through to compute_error_metrics() - "total"
+    (default, unchanged behavior) / "trunk" / "branch". The printed header
+    reflects whichever field was actually used."""
+    results = compute_error_metrics(rows, reference_method, field)
 
     print("=" * 78)
-    print("Error metrics vs '%s'  (total volume, across trees)" % reference_method)
+    print("Error metrics vs '%s'  (%s volume, across trees)" % (reference_method, field))
     print("-" * 78)
     print("%-28s %5s %9s %9s %9s %9s" %
           ("method", "n", "Bias", "MAE", "RMSE", "CV-RMSE%"))

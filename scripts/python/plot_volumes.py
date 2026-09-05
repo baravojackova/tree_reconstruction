@@ -73,6 +73,7 @@ import re        # used by shorten_method_label() to parse the CSV's full method
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors     # used in _darken_color() and build_method_color_map()
 import matplotlib.patches as mpatches   # used to build the shared legend in plot_tree_overview()
+import matplotlib.lines as mlines       # used for the tree-marker legend proxy handles in plot_error_boxplot()
 
 from compare_volumes import (
     RESULTS_CSV,
@@ -82,6 +83,7 @@ from compare_volumes import (
     pct_diff,
     compute_error_metrics,
     filter_by_branch_filter,
+    resolve_reference_method_none,
 )
 
 # =====================  PARAMETERS  ==================================
@@ -132,17 +134,36 @@ BAR_SPACING = 3 #distance between bar centers (data units) - was 1.6
 # chart to just those - e.g. for a focused side-by-side of a handful of
 # variants instead of everything in the CSV. Any name that matches no row
 # is printed as a warning and simply skipped, rather than crashing.
-SELECTED_METHODS = [ "Reference (destructive)",
-                    "AdTree calibrated r5mm (AdQSM 04) [calmethod=regression-perorder] (>=10cm only)_seg100-500-k50",
-                    "AdTree calibrated r10mm (AdQSM 04) [calmethod=regression-perorder] (>=10cm only)_seg100-500-k50",
-                    "AdTree calibrated r15mm (AdQSM 04) [calmethod=regression-perorder] (>=10cm only)_seg100-500-k50",
-                    "AdTree calibrated r20mm (AdQSM 04) [calmethod=regression-perorder] (>=10cm only)_seg100-500-k50",
-                    "AdTree calibrated r5mm (AdQSM 05) [calmethod=regression-perorder] (>=10cm only)_seg100-500-k50",
-                    "AdTree calibrated r10mm (AdQSM 05) [calmethod=regression-perorder] (>=10cm only)_seg100-500-k50", 
-                    "AdTree calibrated r15mm (AdQSM 05) [calmethod=regression-perorder] (>=10cm only)_seg100-500-k50", 
-                    "AdTree calibrated r20mm (AdQSM 05) [calmethod=regression-perorder] (>=10cm only)_seg100-500-k50", 
-                    ]
-# e.g. ["AdTree raw r5mm_seg0.1-0.5-k0.5", "AdQSM (TreesParams) (AdQSM 05)"]
+SELECTED_METHODS = ["Reference (destructive)"]
+# e.g. ["AdTree raw r5mm_seg0.1-0.5-k0.5", "AdQSM (TreesParams) (AdQSM 05)", "Reference (destructive)"]
+# none  = # SELECTED_METHODS = ["none"]
+
+# METHOD_FILTERS: an alternative/additional way to build SELECTED_METHODS
+# from structured columns instead of typing exact method strings. Each
+# entry is a dict of {structured_column_name: value_or_list_of_values} -
+# a row matches an entry if EVERY key in that entry matches (list values
+# mean "any of these"; a key can be omitted to mean "any value accepted"
+# for that column). The final selection is the UNION of every entry's
+# matches, plus whatever's in SELECTED_METHODS (both apply together, not
+# either/or).
+#
+# "family" must be "adtree" or "treeqsm" - select_rows() only knows these
+# two. One-off named rows that are NOT part of either structured family -
+# "Reference (destructive)", "AdQSM (TreesParams) (AdQSM 05)", "TreeQSM de
+# Tanago (mean)" - can't be reached via METHOD_FILTERS at all (by design,
+# see parameter_sensitivity.py's own docstring on why they're excluded
+# from both families). Put those in SELECTED_METHODS instead - the two
+# lists UNION together, so a structured filter and a few named rows work
+# together in the same chart:
+#
+# METHOD_FILTERS = [
+#     {"family": "adtree", "calmethod": "regression-perorder",
+#      "adqsm_variant": ["04", "05"], "radius_threshold_mm": [5, 10, 15, 20],
+#      "seg_min_mm": 100, "seg_max_mm": 500, "seg_k_pct": 50},
+# ]
+METHOD_FILTERS = [{"family": "treeqsm"}]
+
+# [] = no additional filter-based selection, SELECTED_METHODS alone still works exactly as before
 
 # PNG_FILENAME_SUFFIX: appended to plot_tree_overview()'s output PNG
 # filename, right before the ".png" extension - "" (default) leaves the
@@ -150,7 +171,82 @@ SELECTED_METHODS = [ "Reference (destructive)",
 # SELECTED_METHODS-restricted variant, so it doesn't overwrite the
 # default all-methods PNG for the same tree/branch_filter.
 PNG_FILENAME_SUFFIX = ""   # e.g. "_addcomp"
+
+# PLOT_DPI: resolution (dots per inch) used when saving every PNG in
+# this file (see save_and_report()). Lower = faster to draw/save and
+# smaller file size, but less sharp. 80-100 is enough for a quick
+# look; use 200-300 for a final/print-quality image.
+PLOT_DPI = 100   # was hard-coded to 200 in save_and_report()
+
+# TREES_TO_PLOT: which trees get a tree_overview_<tree>_<mode>.png.
+# None (default) = every tree in the CSV, same as before. Set it to a
+# list of exact tree names (e.g. ["IND01_054"]) to only render
+# tree_overview charts for those trees - useful for a fast, focused
+# re-render of one tree at higher PLOT_DPI after an initial full,
+# low-res pass. Does NOT affect plot_total_volume_by_tree(),
+# plot_error_boxplot(), or plot_error_metrics_bar() - those always
+# need every tree in the CSV to be a meaningful cross-tree comparison.
+TREES_TO_PLOT = ["IND01_054","IND03_088","IND07_083"]   # e.g. ["IND01_054"]
+
+# BRANCH_FILTERS_TO_PLOT: which branch_filter mode(s) ("10cm"/"none")
+# get charts drawn AT ALL this run - applies to every chart in this
+# file (tree_overview, total_volume_by_tree, error_boxplot,
+# error_metrics_bar). Default ["10cm", "none"] = both modes, same
+# behavior as before. Set to e.g. ["10cm"] to skip every "none"-mode
+# chart entirely for this run.
+BRANCH_FILTERS_TO_PLOT = ["10cm", "none"]
 # =====================================================================
+
+
+def resolve_method_filters(rows, tree, branch_filter, method_filters):
+    """Translate METHOD_FILTERS (see PARAMETERS block) into a set of exact
+    method strings, for one tree/branch_filter. `rows` should be the FULL,
+    unfiltered row list (as returned by load_results()) - each filter dict's
+    base population comes from parameter_sensitivity.py's select_rows(),
+    which itself filters down to `tree`/`branch_filter`.
+
+    Imports parameter_sensitivity lazily (inside this function, not at
+    module load time) because parameter_sensitivity.py itself imports
+    FAMILY_GRADIENTS/classify_family/ensure_plots_dir/shorten_method_label
+    from THIS module - a top-level import here would be circular.
+    """
+    from parameter_sensitivity import select_rows, _rowkey
+
+    methods = set()
+    for filt in method_filters:
+        family = filt["family"]
+        base = select_rows(rows, family, tree, branch_filter)
+        for key, want in filt.items():
+            if key == "family":
+                continue
+            row_key = _rowkey(key)
+            wanted = want if isinstance(want, list) else [want]
+            base = [r for r in base if r.get(row_key) in wanted]
+        print("METHOD_FILTERS entry %r matched %d method(s) for tree '%s' branch_filter='%s'."
+              % (filt, len(base), tree, branch_filter))
+        methods.update(r["method"] for r in base)
+    return methods
+
+
+def resolve_selected_methods_multi_tree(rows, branch_filter, selected_methods, method_filters):
+    """Tree-agnostic version of the SELECTED_METHODS/METHOD_FILTERS union
+    Phase A built for plot_tree_overview() - for charts (plot_error_boxplot,
+    plot_error_metrics_bar) that compare across ALL trees at once rather
+    than rendering one tree at a time. Calls resolve_method_filters() once
+    per distinct tree present in `rows` (that function's own signature
+    stays per-tree, unchanged, so plot_tree_overview() keeps working
+    exactly as before) and unions the results - if the trees' parameter
+    grids are consistent (see tree_coverage_check.py from earlier this
+    project), every tree will resolve to the same method set anyway; this
+    just stays correct even if that ever isn't quite true. Returns None
+    (meaning "no restriction, show everything") when both inputs are
+    empty/None, matching plot_tree_overview()'s existing default."""
+    if selected_methods is None and not method_filters:
+        return None
+    methods = set(selected_methods or [])
+    for tree in sorted({r["tree"] for r in rows}):
+        methods |= resolve_method_filters(rows, tree, branch_filter, method_filters)
+    return methods
 
 
 def ensure_plots_dir():
@@ -164,7 +260,7 @@ def save_and_report(fig, filename):
     """Save one matplotlib figure into PLOTS_DIR, close it (frees memory),
     and print the full path so you know where to look for it."""
     out_path = os.path.join(ensure_plots_dir(), filename)
-    fig.savefig(out_path, dpi=200, bbox_inches="tight")
+    fig.savefig(out_path, dpi=PLOT_DPI, bbox_inches="tight")
     plt.close(fig)
     print("Saved:", out_path)
 
@@ -742,6 +838,25 @@ def plot_total_volume_by_tree(rows, color_map):
 #    different branch_len scale especially - see compare_volumes.py's
 #    header comment for why they're kept apart everywhere else too).
 # ----------------------------------------------------------------------
+
+# Display names for the three volume fields compute_error_metrics()/
+# plot_error_boxplot()/plot_error_metrics_bar() can compare - used in
+# those charts' titles below, so a field="trunk" call correctly says
+# "Trunk volume" instead of a hard-coded "Total".
+FIELD_DISPLAY_NAMES = {
+    "total": "Total volume",
+    "trunk": "Trunk volume",
+    "branch": "Branch volume",
+}
+
+# Marker shapes cycled across trees in plot_error_boxplot()'s overlay
+# dots - color there already encodes METHOD (via color_map), so shape
+# is used for TREE identity instead. Cycles (via modulo) if there are
+# ever more trees than shapes - two trees would then share a shape,
+# degrading gracefully rather than crashing.
+TREE_MARKERS = ["o", "s", "^", "D", "v", "P", "X", "*"]
+
+
 def plot_tree_overview(rows, tree, branch_filter, color_map):
     # Filter to THIS tree AND THIS branch_filter before anything else, so
     # every method/color/field computed below only ever sees rows from one
@@ -752,23 +867,26 @@ def plot_tree_overview(rows, tree, branch_filter, color_map):
               % (tree, branch_filter))
         return
 
-    # SELECTED_METHODS (see PARAMETERS block): None (default) = show every
-    # method present for this tree/branch_filter, unchanged from before.
-    # When set, restrict tree_rows to just those exact method strings -
-    # applied here, before ANYTHING else derives from tree_rows (methods
-    # list, reference lookup, per-field values), so the rest of this
-    # function never needs to know SELECTED_METHODS exists.
-    if SELECTED_METHODS is not None:
+    # SELECTED_METHODS / METHOD_FILTERS (see PARAMETERS block): both None-
+    # equivalent (SELECTED_METHODS is None AND METHOD_FILTERS is empty) =
+    # show every method present for this tree/branch_filter, unchanged from
+    # before. Otherwise restrict tree_rows to the UNION of SELECTED_METHODS'
+    # literal strings and whatever METHOD_FILTERS resolves to - applied
+    # here, before ANYTHING else derives from tree_rows (methods list,
+    # reference lookup, per-field values), so the rest of this function
+    # never needs to know either mechanism exists.
+    if SELECTED_METHODS is not None or METHOD_FILTERS:
+        selected = set(SELECTED_METHODS or []) | resolve_method_filters(rows, tree, branch_filter, METHOD_FILTERS)
         present_methods_here = {r["method"] for r in tree_rows}
-        missing = [m for m in SELECTED_METHODS if m not in present_methods_here]
+        missing = [m for m in (SELECTED_METHODS or []) if m not in present_methods_here]
         if missing:
             print("WARNING: plot_tree_overview(): SELECTED_METHODS name(s) matched "
                   "no row for tree '%s' branch_filter='%s' - skipping: %s"
                   % (tree, branch_filter, missing))
-        tree_rows = [r for r in tree_rows if r["method"] in SELECTED_METHODS]
+        tree_rows = [r for r in tree_rows if r["method"] in selected]
         if not tree_rows:
             print("No rows left for tree '%s' with branch_filter='%s' after applying "
-                  "SELECTED_METHODS - skipping this overview." % (tree, branch_filter))
+                  "SELECTED_METHODS/METHOD_FILTERS - skipping this overview." % (tree, branch_filter))
             return
 
     # WHICH method is "the reference" depends on branch_filter, same as
@@ -1071,14 +1189,27 @@ def plot_tree_overview(rows, tree, branch_filter, color_map):
 #    The output filename includes branch_filter (see save_and_report() call
 #    below) so the two modes' PNGs never overwrite each other.
 # ----------------------------------------------------------------------
-def plot_error_boxplot(rows, branch_filter, reference_method, color_map):
+def plot_error_boxplot(rows, branch_filter, reference_method, color_map, field="total"):
     # Restrict to the requested branch_filter mode - same reasoning as
     # plot_total_volume_by_tree above: mixing "10cm" and "none" rows here
     # would compute a percent error against a reference method that isn't
     # even the right one for half the rows.
     rows = filter_by_branch_filter(rows, branch_filter)
 
+    # SELECTED_METHODS / METHOD_FILTERS (see PARAMETERS block and
+    # resolve_selected_methods_multi_tree()'s own docstring) - reference_method
+    # is always kept regardless of the restriction, since this chart still
+    # needs it internally (the per-tree % error calculation below looks it
+    # up even though it's never drawn as its own box).
+    allowed = resolve_selected_methods_multi_tree(rows, branch_filter, SELECTED_METHODS, METHOD_FILTERS)
+    if allowed is not None:
+        rows = [r for r in rows if r["method"] in allowed or r["method"] == reference_method]
+
     trees = sorted({r["tree"] for r in rows})
+    # TREE_MARKERS (see near FIELD_DISPLAY_NAMES) cycled across trees for
+    # the overlay dots below - shape encodes TREE identity there, since
+    # color already encodes METHOD via color_map.
+    tree_marker_map = {t: TREE_MARKERS[i % len(TREE_MARKERS)] for i, t in enumerate(trees)}
     # reference_method is already excluded here (this chart never draws a
     # box for it, only the axhline(0.0) below stands in for "perfect match
     # with the reference"), so group_order_methods()'s "group 1" is a no-op
@@ -1088,7 +1219,7 @@ def plot_error_boxplot(rows, branch_filter, reference_method, color_map):
     methods = group_order_methods(
         [m for m in dict.fromkeys(r["method"] for r in rows) if m != reference_method],
         reference_method)
-    total_of = {(r["tree"], r["method"]): r["total"] for r in rows}
+    total_of = {(r["tree"], r["method"]): r[field] for r in rows}
 
     # method -> its own row (for shorten_method_label()'s optional pd/simp
     # kwargs, format B compact TreeQSM label).
@@ -1102,15 +1233,19 @@ def plot_error_boxplot(rows, branch_filter, reference_method, color_map):
 
     data = []     # one list of % errors per method (only methods with >=1 value)
     labels = []
+    trees_of_data = []   # parallel to `data` - which tree each errors_pct value came from
     for m in methods:
         errors_pct = []
+        trees_here = []
         for t in trees:
             d = pct_diff(total_of.get((t, m)), total_of.get((t, reference_method)))
             if d is not None:
                 errors_pct.append(d)
+                trees_here.append(t)
         if errors_pct:
             data.append(errors_pct)
             labels.append(m)
+            trees_of_data.append(trees_here)
 
     if not data:
         print("No method has both a total_m3 value and a reference value "
@@ -1158,27 +1293,51 @@ def plot_error_boxplot(rows, branch_filter, reference_method, color_map):
     # together in the loop above), so zip()-ing them here lines up each
     # method's dots with its own box automatically.
     jitter_width = 0.08   # small horizontal spread, in the same x units as the boxes (box width = 0.5 by default)
-    for i, (m, errors_pct) in enumerate(zip(labels, data)):
+    for i, (m, errors_pct, trees_here) in enumerate(zip(labels, data, trees_of_data)):
         # random.uniform() jitters each point sideways by a small random
         # amount so points with the same (or very close) y-value don't all
         # stack up in one indistinguishable vertical line - purely a visual
         # spread, it does NOT change any actual data value being plotted.
-        x_jittered = [(i + 1) + random.uniform(-jitter_width, jitter_width) for _ in errors_pct]
         dot_color = _darken_color(color_map.get(m, "#999999"), factor=0.6)
-        ax.plot(x_jittered, errors_pct, "o", color=dot_color, markersize=5,
-                markeredgewidth=0, alpha=0.9, zorder=3)   # zorder=3: draw dots ON TOP of the (semi-transparent) boxes
+        # Plotted ONE POINT AT A TIME (rather than one ax.plot() call for
+        # the whole method) so each point can get its own tree's marker
+        # SHAPE (tree_marker_map, built above) - color still encodes
+        # METHOD via dot_color, unchanged from before this fix.
+        for y_val, t in zip(errors_pct, trees_here):
+            x_jittered = (i + 1) + random.uniform(-jitter_width, jitter_width)
+            ax.plot(x_jittered, y_val, marker=tree_marker_map[t], color=dot_color,
+                    markersize=6, markeredgewidth=0, alpha=0.9, zorder=3)   # zorder=3: draw dots ON TOP of the (semi-transparent) boxes
     ax.set_ylabel("Error vs. reference [%]")
     ax.set_title(
-        "Total-volume error distribution by method (across trees)\n"
+        "%s error distribution by method (across trees)\n"
         "vs. '%s'  (branch_filter='%s')" % (
+            FIELD_DISPLAY_NAMES[field],
             shorten_method_label(reference_method, **_treeqsm_kwargs(method_lookup.get(reference_method, {}))),
             branch_filter))
-    ax.tick_params(axis="x", rotation=30)
+    plt.setp(ax.get_xticklabels(), rotation=30, ha="right")
+
+    # Legend mapping marker SHAPE -> tree name (color already has its own
+    # meaning here - METHOD, via the boxes/color_map - so this is a
+    # separate legend, not merged into one). Placed OUTSIDE the plot area
+    # (to the right) so it never overlaps the boxes; save_and_report()'s
+    # bbox_inches="tight" expands the saved PNG to include it.
+    tree_legend_handles = [
+        mlines.Line2D([0], [0], marker=tree_marker_map[t], color="none",
+                      markerfacecolor="#555555", markeredgewidth=0,
+                      markersize=8, label=t)
+        for t in trees
+    ]
+    ax.legend(handles=tree_legend_handles, title="Tree", loc="upper left",
+              bbox_to_anchor=(1.01, 1.0), borderaxespad=0)
     fig.tight_layout()
     # Filename includes branch_filter so the "10cm" and "none" versions of
     # this chart are two separate files, e.g. error_boxplot_10cm.png /
     # error_boxplot_none.png, instead of the second run overwriting the first.
-    save_and_report(fig, "error_boxplot_%s.png" % branch_filter)
+    # field=="total" keeps the EXACT original filename (no suffix) for
+    # backward compatibility - "trunk"/"branch" get a suffix instead, so
+    # all three fields' PNGs coexist without overwriting each other.
+    suffix = "" if field == "total" else "_%s" % field
+    save_and_report(fig, "error_boxplot_%s%s.png" % (branch_filter, suffix))
 
 
 # ----------------------------------------------------------------------
@@ -1188,11 +1347,19 @@ def plot_error_boxplot(rows, branch_filter, reference_method, color_map):
 #    branch_filter/reference_method - same reasoning as plot_error_boxplot()
 #    above: this one function now draws both comparison modes.
 # ----------------------------------------------------------------------
-def plot_error_metrics_bar(rows, branch_filter, reference_method, color_map):
+def plot_error_metrics_bar(rows, branch_filter, reference_method, color_map, field="total"):
     # Restrict to the requested branch_filter mode - see plot_error_boxplot().
     rows = filter_by_branch_filter(rows, branch_filter)
 
-    metrics = compute_error_metrics(rows, reference_method)   # reuses compare_volumes.py's own calculation
+    # SELECTED_METHODS / METHOD_FILTERS - see plot_error_boxplot()'s own
+    # comment above (same reasoning: reference_method is always kept, since
+    # compute_error_metrics() below needs it present in `rows` to compute
+    # anything against, even though it's excluded from its own results).
+    allowed = resolve_selected_methods_multi_tree(rows, branch_filter, SELECTED_METHODS, METHOD_FILTERS)
+    if allowed is not None:
+        rows = [r for r in rows if r["method"] in allowed or r["method"] == reference_method]
+
+    metrics = compute_error_metrics(rows, reference_method, field=field)   # reuses compare_volumes.py's own calculation
     if not metrics:
         print("No method could be compared to '%s' (branch_filter='%s') - "
               "skipping error-metrics chart." % (reference_method, branch_filter))
@@ -1243,13 +1410,17 @@ def plot_error_metrics_bar(rows, branch_filter, reference_method, color_map):
         tick_label.set_color(color_map.get(m, "#333333"))
     ax.set_ylabel("Volume error [m^3]")
     ax.set_title(
-        "Error metrics vs. '%s'  (branch_filter='%s')" % (
+        "%s error metrics vs. '%s'  (branch_filter='%s')" % (
+            FIELD_DISPLAY_NAMES[field],
             shorten_method_label(reference_method, **_treeqsm_kwargs(method_lookup.get(reference_method, {}))),
             branch_filter))
     ax.legend()
     fig.tight_layout()
     # Filename includes branch_filter, same reason as plot_error_boxplot() above.
-    save_and_report(fig, "error_metrics_bar_%s.png" % branch_filter)
+    # field=="total" keeps the EXACT original filename (backward compat) -
+    # see plot_error_boxplot()'s own comment for why.
+    suffix = "" if field == "total" else "_%s" % field
+    save_and_report(fig, "error_metrics_bar_%s%s.png" % (branch_filter, suffix))
 
 
 # =========================  RUN  =====================================
@@ -1288,6 +1459,16 @@ if __name__ == "__main__":
     rows_10cm = filter_by_branch_filter(rows, "10cm")
     rows_none = filter_by_branch_filter(rows, "none")
 
+    # REFERENCE_METHOD_NONE (AdQSM) resolved dynamically from the actual
+    # rows just loaded (smallest AdQSM variant number present), instead of
+    # trusting the static module-level default imported above - mirrors
+    # compare_volumes.py's own RUN section exactly (same variable name,
+    # same fallback-to-default-if-none-found pattern). Must happen BEFORE
+    # methods_none/color_map_none below, since every "none"-mode chart
+    # reads this module-level name as a global at call time.
+    REFERENCE_METHOD_NONE = resolve_reference_method_none(rows_none) or REFERENCE_METHOD_NONE
+    print("Resolved REFERENCE_METHOD_NONE for this run: %s" % REFERENCE_METHOD_NONE)
+
     # Build the TWO shared colour maps used by every chart below - one per
     # branch_filter mode, since the "reference" method (and therefore which
     # method gets the highlight colour, and which methods share the
@@ -1305,7 +1486,10 @@ if __name__ == "__main__":
     color_map_none = build_method_color_map(methods_none, REFERENCE_METHOD_NONE)
 
     # Always makes sense, regardless of how many trees are in the CSV.
-    plot_total_volume_by_tree(rows_10cm, color_map_10cm)
+    # Gated by BRANCH_FILTERS_TO_PLOT (see PARAMETERS block) - this chart is
+    # "10cm"-only to begin with, so "none" isn't a relevant gate for it.
+    if "10cm" in BRANCH_FILTERS_TO_PLOT:
+        plot_total_volume_by_tree(rows_10cm, color_map_10cm)
 
     # TWO overview PNGs per tree currently in the CSV - one per branch_filter
     # value, so "10cm" (vs.-reference) and "none" (full reconstruction) rows
@@ -1313,9 +1497,17 @@ if __name__ == "__main__":
     # docstring for why mixing them would be misleading). If a tree has no
     # rows for one of the two filters, plot_tree_overview() just prints a
     # skip message for that one and moves on - harmless.
-    for tree in all_trees:
-        plot_tree_overview(rows, tree, "10cm", color_map_10cm)
-        plot_tree_overview(rows, tree, "none", color_map_none)
+    #
+    # TREES_TO_PLOT/BRANCH_FILTERS_TO_PLOT (see PARAMETERS block) narrow
+    # WHICH tree_overview PNGs get drawn this run - color_map_10cm/
+    # color_map_none themselves are unaffected (built above from the FULL
+    # all_trees dataset), so a method's colour never shifts just because
+    # this run only renders a subset.
+    for tree in (TREES_TO_PLOT if TREES_TO_PLOT is not None else all_trees):
+        if "10cm" in BRANCH_FILTERS_TO_PLOT:
+            plot_tree_overview(rows, tree, "10cm", color_map_10cm)
+        if "none" in BRANCH_FILTERS_TO_PLOT:
+            plot_tree_overview(rows, tree, "none", color_map_none)
 
     # The boxplot and RMSE/Bias/MAE charts compare methods ACROSS trees vs. a
     # reference, so what matters for EACH mode is how many trees have a row
@@ -1326,9 +1518,10 @@ if __name__ == "__main__":
     trees_10cm = sorted({r["tree"] for r in rows_10cm})
     trees_none = sorted({r["tree"] for r in rows_none})
 
-    if len(trees_10cm) >= 2:
-        plot_error_boxplot(rows_10cm, "10cm", REFERENCE_METHOD, color_map_10cm)
-        plot_error_metrics_bar(rows_10cm, "10cm", REFERENCE_METHOD, color_map_10cm)
+    if len(trees_10cm) >= 2 and "10cm" in BRANCH_FILTERS_TO_PLOT:
+        for field in ("total", "trunk", "branch"):
+            plot_error_boxplot(rows_10cm, "10cm", REFERENCE_METHOD, color_map_10cm, field=field)
+            plot_error_metrics_bar(rows_10cm, "10cm", REFERENCE_METHOD, color_map_10cm, field=field)
     else:
         print("Only %d tree(s) with branch_filter='10cm' rows in %s - skipping "
               "error_boxplot_10cm.png and error_metrics_bar_10cm.png (both compare "
@@ -1336,9 +1529,10 @@ if __name__ == "__main__":
               "trees to be meaningful). Add more trees to the CSV and re-run to get them."
               % (len(trees_10cm), RESULTS_CSV))
 
-    if len(trees_none) >= 2:
-        plot_error_boxplot(rows_none, "none", REFERENCE_METHOD_NONE, color_map_none)
-        plot_error_metrics_bar(rows_none, "none", REFERENCE_METHOD_NONE, color_map_none)
+    if len(trees_none) >= 2 and "none" in BRANCH_FILTERS_TO_PLOT:
+        for field in ("total", "trunk", "branch"):
+            plot_error_boxplot(rows_none, "none", REFERENCE_METHOD_NONE, color_map_none, field=field)
+            plot_error_metrics_bar(rows_none, "none", REFERENCE_METHOD_NONE, color_map_none, field=field)
     else:
         print("Only %d tree(s) with branch_filter='none' rows in %s - skipping "
               "error_boxplot_none.png and error_metrics_bar_none.png (both compare "

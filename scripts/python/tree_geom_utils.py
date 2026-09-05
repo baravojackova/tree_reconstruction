@@ -973,7 +973,7 @@ def upsert_result(csv_path, tree, method, total, trunk, branch, std, dbh=None, h
                    mode=None, pd1=None, pd2min=None, pd2max=None, mincylrad=None,
                    simp_maxorder=None, simp_smallradii=None, simp_replaceiterations=None,
                    adqsm_variant=None, radius_threshold_mm=None,
-                   seg_min_mm=None, seg_max_mm=None, seg_k_pct=None):
+                   seg_min_mm=None, seg_max_mm=None, seg_k_pct=None, calmethod=None):
     """Insert/update one (tree, method) row in the shared master results CSV
     (see compare_volumes.py for its format). Reads csv_path if it exists
     (creating it with the header if not), removes any existing row with the
@@ -1006,20 +1006,29 @@ def upsert_result(csv_path, tree, method, total, trunk, branch, std, dbh=None, h
     caller of upsert_result() (TreeQSM/AdQSM-direct/reference rows in the
     other scripts) needs no changes and simply leaves these columns blank.
     adqsm_variant is a plain string, written as-is like mode/branch_filter;
-    the other four are numeric."""
+    the other four are numeric.
+
+    calmethod: which AdTree radius-calibration method produced this row
+    (e.g. "regression-perorder", "min5mm") - see
+    adtree_reconstruct_compare.py's upsert_result() calls. Optional/None by
+    default (blank string when not given), same convention as
+    adqsm_variant - "AdTree raw" rows correctly leave it blank (raw rows
+    have no calibration method at all, same reasoning as why they leave
+    adqsm_variant blank)."""
     # n_cylinders is the LAST column (Task A), added after branch_filter so
     # every existing column keeps its position - old rows/readers relying
     # on column position elsewhere are unaffected. mode/pd1/.../
     # simp_replaceiterations are appended after n_cylinders for the same
-    # reason, and adqsm_variant/radius_threshold_mm/seg_min_mm/seg_max_mm/
-    # seg_k_pct are appended after THOSE, for the same reason again - this
-    # is now the LAST group of columns.
+    # reason, adqsm_variant/radius_threshold_mm/seg_min_mm/seg_max_mm/
+    # seg_k_pct are appended after THOSE for the same reason again, and
+    # calmethod is appended after those - this is now the LAST column.
     header = ["tree", "method", "total_m3", "trunk_m3", "branch_m3", "std_m3",
               "dbh_m", "height_m", "taper_cm_per_m", "trunk_len_m", "branch_len_m",
               "branch_filter", "n_cylinders",
               "mode", "pd1_m", "pd2min_m", "pd2max_m", "mincylrad_m",
               "simp_maxorder", "simp_smallradii", "simp_replaceiterations",
-              "adqsm_variant", "radius_threshold_mm", "seg_min_mm", "seg_max_mm", "seg_k_pct"]
+              "adqsm_variant", "radius_threshold_mm", "seg_min_mm", "seg_max_mm", "seg_k_pct",
+              "calmethod"]
 
     def fmt(x):
         return "" if x is None else "%.6f" % x
@@ -1047,7 +1056,8 @@ def upsert_result(csv_path, tree, method, total, trunk, branch, std, dbh=None, h
                  "simp_maxorder": fmt(simp_maxorder), "simp_smallradii": fmt(simp_smallradii),
                  "simp_replaceiterations": fmt(simp_replaceiterations),
                  "adqsm_variant": adqsm_variant or "", "radius_threshold_mm": fmt(radius_threshold_mm),
-                 "seg_min_mm": fmt(seg_min_mm), "seg_max_mm": fmt(seg_max_mm), "seg_k_pct": fmt(seg_k_pct)})
+                 "seg_min_mm": fmt(seg_min_mm), "seg_max_mm": fmt(seg_max_mm), "seg_k_pct": fmt(seg_k_pct),
+                 "calmethod": calmethod or ""})
 
     with open(csv_path, "w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=header)

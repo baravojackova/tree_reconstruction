@@ -31,7 +31,7 @@ import os
 # EXACTLY like TREE_NAME (true for IND07_083, but NOT for IND01_054 - its
 # folder is "IND01_54", a shorter form - if you switch back to that tree,
 # set DATA_DIR directly instead of deriving it from TREE_NAME).
-TREE_NAME = "IND01_054"  # e.g. "IND01_054" or "IND07_083" (must match the source file's treeID)
+TREE_NAME = "IND07_083"  # e.g. "IND01_054" or "IND07_083" (must match the source file's treeID)
 
 # Base folder holding every tree's data, one subfolder per tree (normally
 # named exactly like TREE_NAME - see the note above for the one exception).
@@ -167,7 +167,8 @@ def upsert_result(csv_path, tree, method, total, trunk, branch, std, dbh=None, h
               "branch_filter", "n_cylinders",
               "mode", "pd1_m", "pd2min_m", "pd2max_m", "mincylrad_m",
               "simp_maxorder", "simp_smallradii", "simp_replaceiterations",
-              "adqsm_variant", "radius_threshold_mm", "seg_min_mm", "seg_max_mm", "seg_k_pct"]
+              "adqsm_variant", "radius_threshold_mm", "seg_min_mm", "seg_max_mm", "seg_k_pct",
+              "calmethod"]
 
     def fmt(x):
         return "" if x is None else "%.6f" % x
@@ -194,7 +195,7 @@ def upsert_result(csv_path, tree, method, total, trunk, branch, std, dbh=None, h
                  "simp_maxorder": fmt(simp_maxorder), "simp_smallradii": fmt(simp_smallradii),
                  "simp_replaceiterations": fmt(simp_replaceiterations),
                  "adqsm_variant": "", "radius_threshold_mm": "", "seg_min_mm": "",
-                 "seg_max_mm": "", "seg_k_pct": ""})
+                 "seg_max_mm": "", "seg_k_pct": "", "calmethod": ""})
 
     with open(csv_path, "w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=header)

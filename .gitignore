@@ -23,7 +23,9 @@
 !scripts/python/plot_box.py
 !scripts/python/parameter_sensitivity.py
 !scripts/python/volume_results.csv
-
+!scripts/python/calmethod_decision_summary.py
+!scripts/python/taper_curve_compare.py
+!scripts/python/reconstruction_method_decision_summary.py
 
 !scripts/matlab/
 !scripts/matlab/runsken.m

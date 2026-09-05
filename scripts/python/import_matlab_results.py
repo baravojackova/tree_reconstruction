@@ -146,7 +146,8 @@ def upsert_result(csv_path, tree, method, total, trunk, branch, std, dbh=None, h
               "branch_filter", "n_cylinders",
               "mode", "pd1_m", "pd2min_m", "pd2max_m", "mincylrad_m",
               "simp_maxorder", "simp_smallradii", "simp_replaceiterations",
-              "adqsm_variant", "radius_threshold_mm", "seg_min_mm", "seg_max_mm", "seg_k_pct"]
+              "adqsm_variant", "radius_threshold_mm", "seg_min_mm", "seg_max_mm", "seg_k_pct",
+              "calmethod"]
 
     def fmt(x):
         return "" if x is None else "%.6f" % x
@@ -173,7 +174,7 @@ def upsert_result(csv_path, tree, method, total, trunk, branch, std, dbh=None, h
                  "simp_maxorder": fmt(simp_maxorder), "simp_smallradii": fmt(simp_smallradii),
                  "simp_replaceiterations": fmt(simp_replaceiterations),
                  "adqsm_variant": "", "radius_threshold_mm": "", "seg_min_mm": "",
-                 "seg_max_mm": "", "seg_k_pct": ""})
+                 "seg_max_mm": "", "seg_k_pct": "", "calmethod": ""})
 
     with open(csv_path, "w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=header)

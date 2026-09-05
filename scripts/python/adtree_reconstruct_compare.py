@@ -67,7 +67,7 @@ from tree_geom_utils import (
 # trees - it names this tree's row in the shared results table (RESULTS_CSV,
 # see upsert_result() calls below) AND builds AdQSM_DIR/AdTree_DIR/INPUT_PLY
 # right below it automatically, so those don't need editing separately.
-TREE_NAME = "IND01_054"
+TREE_NAME = "IND07_083"
 
 # Base folder holding every tree's data, one subfolder per tree named after
 # TREE_NAME (e.g. ".../data/IND07_083/..."). Change this only if you move the
@@ -99,22 +99,20 @@ AdQSM_DIR = os.path.join(DATA_ROOT, TREE_NAME, "05")
 # Each name in ADQSM_VARIANTS must be a subfolder of ADQSM_BASE_DIR that
 # contains its own taper.txt, BranchStructure.txt and TreesParams.txt.
 ADQSM_BASE_DIR = os.path.join(DATA_ROOT, TREE_NAME)
-ADQSM_VARIANTS = ["04", "05", "06","07", "08", "09","10"]   # e.g. ["05", "08"]
+ADQSM_VARIANTS = ["10"]   # e.g. ["05", "08"]
 
 AdTree_DIR = os.path.join(DATA_ROOT, TREE_NAME)
 
 # input skeleton from AdTree - filename follows the "<TREE_NAME> - Cloud_skeleton.ply"
 # convention used for every tree, so it's derived from TREE_NAME too.
-INPUT_PLY = os.path.join(AdTree_DIR, "%s - Cloud_skeleton.ply" % TREE_NAME)
+INPUT_PLY = os.path.join(AdTree_DIR, "%s - Cloud_nobutt_skeleton.ply" % TREE_NAME)
 
 # Radius threshold (in METERS). You can give several values -> several variants.
 # Remove all branches whose radius is below this threshold. The trunk (branch order 0) is never removed, even if its radius is below the threshold.
 # Example of a single variant:   RADIUS_THRESHOLDS = [0.010]
 # Example of several variants:   RADIUS_THRESHOLDS = [0.010, 0.020, 0.030]
 RADIUS_THRESHOLDS = [0.005,
-                     0.010,
-                     0.015,
-                     0.020]        # 0.030 m = 30 mm radius (60 mm diameter)
+                    ]        # 0.030 m = 30 mm radius (60 mm diameter)
 
 # Fixed reference threshold(s) (in METERS) used to build the
 # "[calref=minXmm]" calibration factors (see the "FIXED calibration
@@ -145,7 +143,7 @@ CALIBRATION_REF_THRESHOLDS_MM = [0.005]
 # no calref=min5mm rows are computed or upserted this run, but any EXISTING
 # calref=min5mm rows already in volume_results.csv from past runs are left
 # untouched (last-verified snapshot) until this is re-enabled and re-run.
-COMPUTE_CALREF_MIN5MM = False   # secondary/backup calibration check
+COMPUTE_CALREF_MIN5MM = True   # secondary/backup calibration check
 # (fixed-reference median-ratio method) - OFF by default since
 # per-order regression is the primary method; turn True only when
 # you want to re-verify calref=min5mm against fresh data.
@@ -157,6 +155,7 @@ COMPUTE_CALREF_MIN5MM = False   # secondary/backup calibration check
 # merged with the next order(s), walked in ascending order, until this
 # minimum is reached. Tune this after seeing the printed raw per-order
 # pair counts if 15 turns out too strict/loose for a given tree.
+#TODO: revise fittign function
 MIN_PAIRS_PER_ORDER = 15
 
 # Adaptive segment length used for resampling (in METERS). The target length at
@@ -168,9 +167,9 @@ MIN_PAIRS_PER_ORDER = 15
 # TODO: Check if seglen mim influence the regresion - see changes doc 
 # CLAMPED DIAMETER [mm] = 2 × SEG_LEN_MIN [mm] / SEG_LEN_K
 # LENGTH ≈ SEG_LEN_MIN
-SEG_LEN_MIN = 0.01                # shortest allowed segment (m), for thin twigs
-SEG_LEN_MAX = 0.5                # longest allowed segment (m), for the trunk
-SEG_LEN_K = 0.5                   # target length = SEG_LEN_K * local_radius
+SEG_LEN_MIN = 0.2                # shortest allowed segment (m), for thin twigs - def. 0.1
+SEG_LEN_MAX = 0.5                    # longest allowed segment (m), for the trunk - def 0.5
+SEG_LEN_K = 0.5                   # target length = SEG_LEN_K * local_radius def. 0.5
 
 # --- Build a short suffix identifying THIS resampling configuration -----
 # WHY THIS EXISTS: SEG_LEN_MIN/MAX/K (just above) control how densely the
@@ -382,6 +381,29 @@ for variant_label, taper_file, branch_file, params_file in ADQSM_VARIANT_LIST:
         print("\nLoading AdQSM calibration data%s..."
               % (" (variant: %s)" % variant_label if variant_label else ""))
         taper_heights, taper_diameters = parse_adqsm_taper_file(taper_file)
+        # trunk_radius_func: every calibrated trunk (order 0) cylinder's
+        # radius comes ENTIRELY from THIS curve, at the AdTree cylinder's
+        # own height - never from AdTree's own measured radius. See
+        # apply_order_calibration_factors()/apply_radius_regression_per_order()
+        # in tree_geom_utils.py, both of which look up trunk radius here
+        # regardless of calmethod. That means a bad taper.txt directly and
+        # fully determines a bad calibrated trunk volume, with no other
+        # signal to catch it - _reject_taper_spikes() (called from inside
+        # parse_adqsm_taper_file() above) only drops an isolated single-row
+        # spike, not a whole implausible SECTION of the curve.
+        #
+        # Confirmed case: data/IND07_083/04/taper.txt reports an almost
+        # exactly constant diameter (~0.708 m) from 0-22.6 m height - real
+        # trunk taper should decrease measurably over 22+ metres, so this
+        # is not physically plausible - then turns erratic from 23.6-27.6 m
+        # before the already-handled 28.6 m spike. This inflates that
+        # tree's calibrated trunk volume well past AdQSM's own official
+        # TrunkVolume (TreesParams.txt) for the same tree - identically for
+        # both calmethod=min5mm and calmethod=regression-perorder, since
+        # neither reads AdTree's own trunk radius at all. See
+        # TODO_investigations.md (item 8) for the follow-up: checking other
+        # trees' taper.txt files for the same kind of implausibly flat or
+        # erratic section before trusting their calibrated trunk volumes.
         trunk_radius_func = make_trunk_radius_func(taper_heights, taper_diameters, FIELD_DBH)
         adqsm_median_by_order = parse_adqsm_branch_file(branch_file)
         # raw_diam_by_order (Task: regression calibration method): the RAW
@@ -824,7 +846,7 @@ for variant_label, taper_file, branch_file, params_file in ADQSM_VARIANT_LIST:
                               n_cylinders=fr["n_cylinders"],
                               adqsm_variant=variant_label, radius_threshold_mm=round(thr * 1000),
                               seg_min_mm=round(SEG_LEN_MIN * 1000), seg_max_mm=round(SEG_LEN_MAX * 1000),
-                              seg_k_pct=round(SEG_LEN_K * 100))
+                              seg_k_pct=round(SEG_LEN_K * 100), calmethod=ref_name)
                 if WRITE_THIN_BRANCH_FILTERED_ROW:
                     fr_thin = fr["thin"]
                     upsert_result(RESULTS_CSV, TREE_NAME,
@@ -839,7 +861,7 @@ for variant_label, taper_file, branch_file, params_file in ADQSM_VARIANT_LIST:
                                   n_cylinders=fr_thin["n_cyl_kept"],
                                   adqsm_variant=variant_label, radius_threshold_mm=round(thr * 1000),
                                   seg_min_mm=round(SEG_LEN_MIN * 1000), seg_max_mm=round(SEG_LEN_MAX * 1000),
-                                  seg_k_pct=round(SEG_LEN_K * 100))
+                                  seg_k_pct=round(SEG_LEN_K * 100), calmethod=ref_name)
 
             # ---- PRIMARY calibration variant: per-order regression - upsert 2 rows --
             # Mirrors the "none"/"(>=10cm only)" pattern above exactly, using
@@ -858,7 +880,7 @@ for variant_label, taper_file, branch_file, params_file in ADQSM_VARIANT_LIST:
                           n_cylinders=regperorder_n_cylinders,
                           adqsm_variant=variant_label, radius_threshold_mm=round(thr * 1000),
                           seg_min_mm=round(SEG_LEN_MIN * 1000), seg_max_mm=round(SEG_LEN_MAX * 1000),
-                          seg_k_pct=round(SEG_LEN_K * 100))
+                          seg_k_pct=round(SEG_LEN_K * 100), calmethod="regression-perorder")
             if WRITE_THIN_BRANCH_FILTERED_ROW:
                 upsert_result(RESULTS_CSV, TREE_NAME,
                               "AdTree calibrated r%dmm%s [calmethod=regression-perorder] (>=%.0fcm only)%s"
@@ -872,7 +894,7 @@ for variant_label, taper_file, branch_file, params_file in ADQSM_VARIANT_LIST:
                               n_cylinders=regperorder_thin["n_cyl_kept"],
                               adqsm_variant=variant_label, radius_threshold_mm=round(thr * 1000),
                               seg_min_mm=round(SEG_LEN_MIN * 1000), seg_max_mm=round(SEG_LEN_MAX * 1000),
-                              seg_k_pct=round(SEG_LEN_K * 100))
+                              seg_k_pct=round(SEG_LEN_K * 100), calmethod="regression-perorder")
 
             print("  DBH (at %.1f m)   : raw AdTree = %s   |   calibrated = %s"
                   % (TAPER_H_LOWER, _fmt_dbh(raw_dbh), _fmt_dbh(cal_dbh)))
