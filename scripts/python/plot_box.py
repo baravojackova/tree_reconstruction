@@ -66,7 +66,28 @@ from plot_volumes import (
     OVERVIEW_NCOLS,
     shorten_method_label, FAMILY_GRADIENTS, classify_family,
     ensure_plots_dir,
-    treeqsm_pd_token,
+    treeqsm_pd_token, _pd_field_token,
+)
+# Shared visual style (colors/sizes) - see plot_style.py's own header.
+# TREEQSM_REF_LINE_COLOR/BOX_TITLE_FONTSIZE/BOX_LABEL_FONTSIZE/
+# POINT_LABEL_FONTSIZE/JITTER_POINT_SIZE used to be defined locally in
+# THIS file - they now live in plot_style.py instead (PANEL_TITLE_FONTSIZE
+# replaces the old BOX_TITLE_FONTSIZE name, AXIS_LABEL_FONTSIZE replaces
+# the old BOX_LABEL_FONTSIZE name - both were already 9 here, so nothing
+# renders differently), imported from there like everywhere else.
+# LEGEND_FONTSIZE is imported too but currently unused in this file (no
+# existing call site here uses the 8pt legend size - this file's one
+# legend already used BOX_LABEL_FONTSIZE=9, now AXIS_LABEL_FONTSIZE, kept
+# as-is for byte-identical output) - available for a future legend that
+# wants the project's standard legend size.
+from plot_style import (
+    TREEQSM_REF_LINE_COLOR,
+    PANEL_TITLE_FONTSIZE,
+    LEGEND_FONTSIZE,
+    POINT_LABEL_FONTSIZE,
+    REFERENCE_LINEWIDTH,
+    JITTER_POINT_SIZE,
+    AXIS_LABEL_FONTSIZE,
 )
 
 # to_float is imported for parity with the other scripts' import lists (see
@@ -81,11 +102,11 @@ _ = to_float
 # as plain arguments (same shape as plot_volumes.py's plot_tree_overview()),
 # so a future side-by-side multi-tree view is a matter of looping that call
 # once per tree, not restructuring anything in this file.
-SELECT_TREE = "IND03_088"
+SELECT_TREE = "B21_S01"
 
 # "none" = full reconstruction, "10cm" = >=10cm-only comparison - switch
 # this to re-run for the other branch_filter variant.
-BRANCH_FILTER = "10cm"
+BRANCH_FILTER = "none"
 
 # Draw a horizontal dashed line at the destructive-reference value on every
 # panel where a reference row/value exists for that field. Silently skipped
@@ -98,10 +119,11 @@ SHOW_REFERENCE_LINE = True
 # shows up depends on branch_filter (mutually exclusive, so at most ONE of
 # these two is ever present for a given BRANCH_FILTER): "TreeQSM de Tanago
 # (mean)" for "none", "TreeQSM de Tanago (mean, Filtered<10cm)" for "10cm".
-SHOW_TREEQSM_REF_LINE = True
-TREEQSM_REF_METHODS = ["TreeQSM de Tanago (mean)",
-                        "TreeQSM de Tanago (mean, Filtered<10cm)"]
-TREEQSM_REF_LINE_COLOR = "#2a9d8f"   # teal - visually distinct from the destructive reference's pink/#ef476f
+SHOW_TREEQSM_REF_LINE = False
+TREEQSM_REF_METHODS = "none" 
+
+#["TreeQSM de Tanago (mean)","TreeQSM de Tanago (mean, Filtered<10cm)"]
+# TREEQSM_REF_LINE_COLOR now imported from plot_style.py (same "#2a9d8f" teal)
 
 # Small per-panel table showing each group's deviation from the SAME
 # reference row the panel's reference line (SHOW_REFERENCE_LINE) points at -
@@ -129,12 +151,13 @@ SAVE_PLOT_PNG = True   # always save, consistent with this project's convention 
 # GROUP, not one per individual method variant - so the same wide panels
 # felt oversized). Tune these freely; they no longer affect, or get
 # affected by, plot_volumes.py's own panel styling.
-BOX_PANEL_WIDTH = 5     # inches per panel
-BOX_PANEL_HEIGHT = 6  # inches per panel
-BOX_LABEL_FONTSIZE = 9  # x-axis group-label font size
+BOX_PANEL_WIDTH = 10     # inches per panel
+BOX_PANEL_HEIGHT = 5  # inches per panel
+# the old local BOX_LABEL_FONTSIZE now imported from plot_style.py as AXIS_LABEL_FONTSIZE
+# (same value, 9 - this file's own axis-label size never changes)
 BOX_LABEL_ROTATION = 30  # x-axis group-label rotation angle (degrees)
 BOX_BOTTOM_MARGIN = 0.15 # fraction of figure height reserved for x-axis labels
-BOX_TITLE_FONTSIZE = 12 # per-panel title font size
+# BOX_TITLE_FONTSIZE now imported from plot_style.py as PANEL_TITLE_FONTSIZE (same value, 12)
 
 # Which GROUP a method belongs to, decided by matching shorten_method_label
 # (method) - the SAME shortened string plot_tree_overview() shows on its
@@ -180,11 +203,11 @@ GROUP_RULES = [
 # pipeline (mode == "" for them) and are excluded from THIS mechanism with
 # one batched warning - same as today's silent exclusion by GROUP_RULES,
 # not a regression.
-TREEQSM_STAGE_FILTER = "none"    # one of "Optimal", "Simplified", "Simplified (no islands)", "Filtered <10cm",
+TREEQSM_STAGE_FILTER = "Optimal"    # one of "Optimal", "Simplified", "Simplified (no islands)", "Filtered <10cm",
                                             # "Filtered <10cm", or None (show all stages mixed - not
                                             # recommended, but not blocked either)
 
-TREEQSM_VARY_BY = ["ri"]        # short param name(s) (see TREEQSM_PARAM_SHORT_NAMES below) that become
+TREEQSM_VARY_BY = ["mode","pd2min"]        # short param name(s) (see TREEQSM_PARAM_SHORT_NAMES below) that become
                                   # the per-point spread INSIDE each box; every other short name becomes
                                   # part of the box-defining group key
 
@@ -197,7 +220,12 @@ TREEQSM_PARAM_FILTERS = {}      # optional: {short_name: value} - restrict to ro
 TREEQSM_PARAM_SHORT_NAMES = {   # short name -> actual load_results() row dict key, used by both
                                   # TREEQSM_VARY_BY and TREEQSM_PARAM_FILTERS above (and to build box/
                                   # point labels - see treeqsm_param_tokens() below)
+    # "mincylrad" deliberately NOT in TREEQSM_VARY_BY - it must be part of
+    # the FIXED grouping key (assign_treeqsm_groups()'s fixed_key), not an
+    # in-box spread dimension, so two rows differing only in mincylrad no
+    # longer get silently pooled into the same box.
     "mode": "mode", "pd1": "pd1", "pd2min": "pd2min", "pd2max": "pd2max",
+    "mincylrad": "mincylrad",
     "maxorder": "simp_maxorder", "sr": "simp_smallradii", "ri": "simp_replaceiterations",
 }
 # ----------------------------------------------------------------------
@@ -250,10 +278,11 @@ SHOW_ADTREE_RAW_GROUP = True   # False = exclude "AdTree raw" rows (adqsm_varian
 # shorten_method_label(method) doesn't match its group's regex) simply
 # gets no point label, with no warning.
 SHOW_POINT_LABELS = False    # master on/off switch
-POINT_LABEL_FONTSIZE = 6    # smaller than BOX_LABEL_FONTSIZE - many dense small labels next to each other
+# POINT_LABEL_FONTSIZE now imported from plot_style.py (same value, 6 -
+# smaller than AXIS_LABEL_FONTSIZE, many dense small labels next to each other)
 
 JITTER_RANGE = 0.08            # half-width of horizontal point jitter (data units)
-JITTER_POINT_SIZE = 20       # scatter marker size (matplotlib's s=)
+# JITTER_POINT_SIZE now imported from plot_style.py (same value, 20)
 JITTER_POINT_ALPHA = 0.8     # 0 = fully transparent, 1 = fully opaque
 JITTER_DARKEN_FACTOR = 0.4     # 0 = same colour as box fill, 1 = black - controls jitter POINT colour,
                                 # independently from LABEL_DARKEN_FACTOR (point labels) and the box edge's
@@ -372,7 +401,14 @@ def format_treeqsm_param_token(short_name, value):
     """Format ONE structured TreeQSM param into its compact label token
     (e.g. "ri" + 0 -> "r0"), using format B's conventions (m/s/r instead
     of the old mo/sr/ri) - shorten_method_label()'s TreeQSM branch and
-    plot_box.py's box/point labels stay consistent with each other this way."""
+    plot_box.py's box/point labels stay consistent with each other this way.
+
+    "mincylrad" returns "" (no token at all) at the historical default
+    0.0025 (tolerance 1e-9) - mirrors runsken.m's compute_run_tag()/
+    plot_volumes.py's shorten_method_label() mcr_tag, so a default-value
+    row's label stays exactly as it was before this parameter existed.
+    treeqsm_param_tokens() below skips empty tokens when joining, so this
+    does not leave a stray double underscore in the label."""
     if short_name == "mode":
         return str(value)[:3]   # "manual" -> "man", "auto" -> "aut"
     if short_name == "maxorder":
@@ -382,7 +418,16 @@ def format_treeqsm_param_token(short_name, value):
     if short_name == "ri":
         return "r%d" % int(value)
     if short_name in ("pd1", "pd2min", "pd2max"):
-        return "%s%d" % (short_name, round(value * 100))
+        # _pd_field_token() (plot_volumes.py): same conditional cm-vs-mm
+        # width as treeqsm_pd_token()'s combined trio token just below -
+        # this individual-field fallback (only used for an unusual
+        # partial-trio TREEQSM_VARY_BY split - see treeqsm_param_tokens()'
+        # own docstring) stays consistent with it either way.
+        return "%s%s" % (short_name, _pd_field_token(value))
+    if short_name == "mincylrad":
+        if abs(value - 0.0025) < 1e-9:
+            return ""
+        return "mcr%d" % round(value * 10000)
     return "%s%s" % (short_name, value)   # fallback for any future short name added later
 
 
@@ -419,8 +464,36 @@ def treeqsm_param_tokens(row, short_names):
         value = row[TREEQSM_PARAM_SHORT_NAMES[short]]
         if value is None:
             continue
-        tokens.append(format_treeqsm_param_token(short, value))
+        token = format_treeqsm_param_token(short, value)
+        if token == "":
+            # mincylrad at the historical default formats to "" (see
+            # format_treeqsm_param_token()) - skip it entirely rather than
+            # appending an empty string, which "_".join() below would
+            # otherwise turn into a stray double underscore.
+            continue
+        tokens.append(token)
     return tokens
+
+
+def _treeqsm_group_value(row, short_name):
+    """Value used for one TREEQSM_PARAM_SHORT_NAMES short name when
+    building assign_treeqsm_groups()'s fixed_key.
+
+    CRITICAL EDGE CASE (mincylrad only): a row from before the
+    mincylrad_m column existed has row["mincylrad"] == None, while a row
+    that explicitly used the historical default has 0.0025. Those must
+    NOT become two different group keys (None != 0.0025 as raw tuple
+    elements) - that would silently split old and default-value rows into
+    separate boxes, which is exactly the kind of data-merging/-splitting
+    bug this whole task exists to avoid. So None is normalized to 0.0025
+    here specifically for mincylrad, before it ever reaches the fixed_key
+    tuple - it becomes the SAME key as an explicit 0.0025 row, never a
+    separate "unknown" bucket. Every other short name is returned
+    unchanged - this normalization does not apply to them."""
+    value = row[TREEQSM_PARAM_SHORT_NAMES[short_name]]
+    if short_name == "mincylrad" and value is None:
+        return 0.0025
+    return value
 
 
 def assign_treeqsm_groups(rows):
@@ -475,7 +548,7 @@ def assign_treeqsm_groups(rows):
             if not matched:
                 continue
 
-        fixed_key = tuple(r[TREEQSM_PARAM_SHORT_NAMES[s]] for s in fixed_short_names)
+        fixed_key = tuple(_treeqsm_group_value(r, s) for s in fixed_short_names)
         if fixed_key not in rows_by_key:
             rows_by_key[fixed_key] = []
             key_order.append(fixed_key)
@@ -841,7 +914,7 @@ def build_boxplot_figure(rows, tree, branch_filter):
             box_methods.append([r["method"] for r in present])
             box_rows.append(present)
 
-        ax.set_title(subplot_title, fontsize=BOX_TITLE_FONTSIZE)
+        ax.set_title(subplot_title, fontsize=PANEL_TITLE_FONTSIZE)
         ax.grid(False)
 
         if not box_data:
@@ -962,7 +1035,7 @@ def build_boxplot_figure(rows, tree, branch_filter):
                                     fontsize=POINT_LABEL_FONTSIZE, ha="left", va="bottom",
                                     color=label_color, zorder=4)
 
-        ax.set_xticklabels(box_labels, rotation=BOX_LABEL_ROTATION, ha="right", fontsize=BOX_LABEL_FONTSIZE)
+        ax.set_xticklabels(box_labels, rotation=BOX_LABEL_ROTATION, ha="right", fontsize=AXIS_LABEL_FONTSIZE)
 
         # Capture axhline()'s own Line2D return value for each line actually
         # drawn, so the legend below can be built from real handles instead
@@ -978,12 +1051,12 @@ def build_boxplot_figure(rows, tree, branch_filter):
             # AdQSM variant for "none". A hard-coded label would be flatly
             # wrong for "none" mode once ref_row points at an AdQSM row.
             ref_line = ax.axhline(ref_row[field_key], linestyle="--", color=reference_line_color,
-                                   linewidth=1.5, label=ref_row["method"])
+                                   linewidth=REFERENCE_LINEWIDTH, label=ref_row["method"])
 
         treeqsm_line = None
         if SHOW_TREEQSM_REF_LINE and treeqsm_ref_row is not None and treeqsm_ref_row[field_key] is not None:
             treeqsm_line = ax.axhline(treeqsm_ref_row[field_key], linestyle="--", color=TREEQSM_REF_LINE_COLOR,
-                                       linewidth=1.5, label=treeqsm_ref_row["method"])
+                                       linewidth=REFERENCE_LINEWIDTH, label=treeqsm_ref_row["method"])
 
         ref_line_handles = [h for h in (ref_line, treeqsm_line) if h is not None]
         if ref_line_handles:
@@ -994,7 +1067,7 @@ def build_boxplot_figure(rows, tree, branch_filter):
             # with many groups (boxes can fill the full width, including the
             # right edge). Check a busy panel (e.g. "Total volume") for
             # placement that still looks awkward despite this.
-            ax.legend(handles=ref_line_handles, fontsize=BOX_LABEL_FONTSIZE, loc="best")
+            ax.legend(handles=ref_line_handles, fontsize=AXIS_LABEL_FONTSIZE, loc="best")
 
         # Top headroom (BOX_TOP_MARGIN): applied AFTER everything for this
         # panel is drawn (boxes, whiskers, jittered points, reference line),
@@ -1068,7 +1141,7 @@ def build_boxplot_figure(rows, tree, branch_filter):
                 tbl = ax.table(cellText=table_rows, colLabels=col_labels,
                                 bbox=[0, -clearance - table_height, 1, table_height])
                 tbl.auto_set_font_size(False)
-                tbl.set_fontsize(BOX_LABEL_FONTSIZE)
+                tbl.set_fontsize(AXIS_LABEL_FONTSIZE)
 
                 # Track this panel's total below-axis footprint (label
                 # clearance + table itself) - the tallest one across all

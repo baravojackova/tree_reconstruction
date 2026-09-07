@@ -211,7 +211,8 @@ def summarize(values):
 def upsert_result(csv_path, tree, method, total, trunk, branch, std, dbh=None, height=None, taper=None,
                    trunk_len=None, branch_len=None, branch_filter="none", n_cylinders=None,
                    mode=None, pd1=None, pd2min=None, pd2max=None, mincylrad=None,
-                   simp_maxorder=None, simp_smallradii=None, simp_replaceiterations=None):
+                   simp_maxorder=None, simp_smallradii=None, simp_replaceiterations=None,
+                   pmdist_mean=None, pmdist_trunk_mean=None, pmdist_branch_mean=None):
     """Insert/update one (tree, method) row in the shared master results CSV
     (see compare_volumes.py for its format). Reads csv_path if it exists
     (creating it with the header if not), removes any existing row with the
@@ -242,20 +243,26 @@ def upsert_result(csv_path, tree, method, total, trunk, branch, std, dbh=None, h
     columns stay blank for this script's own rows - purely additive, no
     behaviour change. mode is a plain string, written as-is like
     branch_filter (blank string, not the literal text "None", when not
-    given)."""
+    given).
+
+    pmdist_mean/pmdist_trunk_mean/pmdist_branch_mean: TreeQSM's
+    point-to-cylinder fit quality (see runsken.m section 19) - this file
+    has no real values for them either, so both calls below leave these
+    columns blank too, same convention as pd1/.../simp_* above."""
     # n_cylinders is the LAST column - kept in sync with the header used by
     # every other upsert_result() copy (tree_geom_utils.py,
     # import_matlab_results.py, reference_volume.py) so they all write/read
     # the SAME shared volume_results.csv without column mismatches. mode/
-    # pd1/.../simp_replaceiterations appended after n_cylinders, same
-    # reason - kept in sync with those same three copies.
+    # pd1/.../simp_replaceiterations appended after n_cylinders, and
+    # pmdist_mean/pmdist_trunk_mean/pmdist_branch_mean appended after
+    # calmethod, same reason - kept in sync with those same three copies.
     header = ["tree", "method", "total_m3", "trunk_m3", "branch_m3", "std_m3",
               "dbh_m", "height_m", "taper_cm_per_m", "trunk_len_m", "branch_len_m",
               "branch_filter", "n_cylinders",
               "mode", "pd1_m", "pd2min_m", "pd2max_m", "mincylrad_m",
               "simp_maxorder", "simp_smallradii", "simp_replaceiterations",
               "adqsm_variant", "radius_threshold_mm", "seg_min_mm", "seg_max_mm", "seg_k_pct",
-              "calmethod"]
+              "calmethod", "pmdist_mean", "pmdist_trunk_mean", "pmdist_branch_mean"]
 
     def fmt(x):
         return "" if x is None else "%.6f" % x
@@ -282,7 +289,9 @@ def upsert_result(csv_path, tree, method, total, trunk, branch, std, dbh=None, h
                  "simp_maxorder": fmt(simp_maxorder), "simp_smallradii": fmt(simp_smallradii),
                  "simp_replaceiterations": fmt(simp_replaceiterations),
                  "adqsm_variant": "", "radius_threshold_mm": "", "seg_min_mm": "",
-                 "seg_max_mm": "", "seg_k_pct": "", "calmethod": ""})
+                 "seg_max_mm": "", "seg_k_pct": "", "calmethod": "",
+                 "pmdist_mean": fmt(pmdist_mean), "pmdist_trunk_mean": fmt(pmdist_trunk_mean),
+                 "pmdist_branch_mean": fmt(pmdist_branch_mean)})
 
     with open(csv_path, "w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=header)

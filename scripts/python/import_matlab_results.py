@@ -117,7 +117,8 @@ def extract_group(rows, group):
 def upsert_result(csv_path, tree, method, total, trunk, branch, std, dbh=None, height=None, taper=None,
                    trunk_len=None, branch_len=None, branch_filter="none", n_cylinders=None,
                    mode=None, pd1=None, pd2min=None, pd2max=None, mincylrad=None,
-                   simp_maxorder=None, simp_smallradii=None, simp_replaceiterations=None):
+                   simp_maxorder=None, simp_smallradii=None, simp_replaceiterations=None,
+                   pmdist_mean=None, pmdist_trunk_mean=None, pmdist_branch_mean=None):
     """Insert/update one (tree, method) row in the shared master results CSV.
     Re-running overwrites the previous row instead of duplicating it.
     Backward compatible: if csv_path still has an older/shorter header, its
@@ -134,20 +135,27 @@ def upsert_result(csv_path, tree, method, total, trunk, branch, std, dbh=None, h
     used for a run (see runsken.m section 19's params_<tree>_<run>.csv and
     read_params_file() above) - all optional/None by default. mode is a
     plain string ("manual"/"auto"), written as-is like branch_filter (blank
-    string, not the literal text "None", when not given)."""
+    string, not the literal text "None", when not given).
+
+    pmdist_mean/pmdist_trunk_mean/pmdist_branch_mean: point-to-cylinder fit
+    quality (TreeQSM's point_model_distance.m, averaged over the winning
+    combination + second-run models - see runsken.m section 19), in metres.
+    Optional/None by default, same convention as pd1/.../simp_*."""
     # n_cylinders is the LAST column (Task A) - kept in sync with
     # tree_geom_utils.py's upsert_result() so both writers produce the
     # exact same header/column order for the one shared CSV. mode/pd1/.../
     # simp_replaceiterations appended after n_cylinders, same reason -
-    # this is now the LAST group of columns, also kept in sync with
-    # tree_geom_utils.py's copy.
+    # also kept in sync with tree_geom_utils.py's copy. pmdist_mean/
+    # pmdist_trunk_mean/pmdist_branch_mean appended after calmethod - now
+    # the LAST group of columns, following the exact same "append at the
+    # end" precedent as adqsm_variant/.../calmethod above them.
     header = ["tree", "method", "total_m3", "trunk_m3", "branch_m3", "std_m3",
               "dbh_m", "height_m", "taper_cm_per_m", "trunk_len_m", "branch_len_m",
               "branch_filter", "n_cylinders",
               "mode", "pd1_m", "pd2min_m", "pd2max_m", "mincylrad_m",
               "simp_maxorder", "simp_smallradii", "simp_replaceiterations",
               "adqsm_variant", "radius_threshold_mm", "seg_min_mm", "seg_max_mm", "seg_k_pct",
-              "calmethod"]
+              "calmethod", "pmdist_mean", "pmdist_trunk_mean", "pmdist_branch_mean"]
 
     def fmt(x):
         return "" if x is None else "%.6f" % x
@@ -174,7 +182,9 @@ def upsert_result(csv_path, tree, method, total, trunk, branch, std, dbh=None, h
                  "simp_maxorder": fmt(simp_maxorder), "simp_smallradii": fmt(simp_smallradii),
                  "simp_replaceiterations": fmt(simp_replaceiterations),
                  "adqsm_variant": "", "radius_threshold_mm": "", "seg_min_mm": "",
-                 "seg_max_mm": "", "seg_k_pct": "", "calmethod": ""})
+                 "seg_max_mm": "", "seg_k_pct": "", "calmethod": "",
+                 "pmdist_mean": fmt(pmdist_mean), "pmdist_trunk_mean": fmt(pmdist_trunk_mean),
+                 "pmdist_branch_mean": fmt(pmdist_branch_mean)})
 
     with open(csv_path, "w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=header)
@@ -218,6 +228,9 @@ def read_params_file(path):
         "simp_maxorder": to_float(r.get("simp_maxorder")),
         "simp_smallradii": to_float(r.get("simp_smallradii")),
         "simp_replaceiterations": to_float(r.get("simp_replaceiterations")),
+        "pmdist_mean": to_float(r.get("pmdist_mean")),
+        "pmdist_trunk_mean": to_float(r.get("pmdist_trunk_mean")),
+        "pmdist_branch_mean": to_float(r.get("pmdist_branch_mean")),
     }
 
 
@@ -282,7 +295,8 @@ if __name__ == "__main__":
         if params is None:
             params = {"mode": "", "pd1_m": None, "pd2min_m": None, "pd2max_m": None,
                        "mincylrad_m": None, "simp_maxorder": None, "simp_smallradii": None,
-                       "simp_replaceiterations": None}
+                       "simp_replaceiterations": None, "pmdist_mean": None,
+                       "pmdist_trunk_mean": None, "pmdist_branch_mean": None}
 
         for group in IMPORT_GROUPS:
             found = extract_group(rows, group)
@@ -350,7 +364,9 @@ if __name__ == "__main__":
                           mode=params["mode"], pd1=params["pd1_m"], pd2min=params["pd2min_m"],
                           pd2max=params["pd2max_m"], mincylrad=params["mincylrad_m"],
                           simp_maxorder=params["simp_maxorder"], simp_smallradii=params["simp_smallradii"],
-                          simp_replaceiterations=params["simp_replaceiterations"])
+                          simp_replaceiterations=params["simp_replaceiterations"],
+                          pmdist_mean=params["pmdist_mean"], pmdist_trunk_mean=params["pmdist_trunk_mean"],
+                          pmdist_branch_mean=params["pmdist_branch_mean"])
             imported_by_group[group] += 1
 
             def show(x):

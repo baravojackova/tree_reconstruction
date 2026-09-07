@@ -86,6 +86,23 @@ from compare_volumes import (
     resolve_reference_method_none,
 )
 
+# Shared visual style (colors/sizes) - see plot_style.py's own header for
+# why this lives in one shared module now instead of being defined here
+# locally. FAMILY_GRADIENTS/TREE_MARKERS used to be defined IN this file
+# (every other script that used them imported them from here) - they now
+# live in plot_style.py instead, imported here like everywhere else, so
+# this file is no longer the accidental "source of truth" for them.
+from plot_style import (
+    FAMILY_GRADIENTS,
+    TREE_MARKERS,
+    DEFAULT_LINEWIDTH,
+    DEFAULT_MARKERSIZE,
+    TITLE_FONTSIZE,
+    AXIS_LABEL_FONTSIZE,
+    LEGEND_FONTSIZE,
+    ANNOTATION_FONTSIZE,
+)
+
 # =====================  PARAMETERS  ==================================
 # Folder (relative to this script's working directory) where the PNG
 # charts are saved. Created automatically if it doesn't exist.
@@ -97,7 +114,12 @@ PLOTS_DIR = "plots"
 # RADIUS_THRESHOLDS x SEG_VARIANT_SUFFIX combos, or several
 # IMPORT_GROUPS all shown at once), the x-axis method labels in each
 # panel got cramped/overlapping.
-LABEL_FONTSIZE = 8      # x-axis method-label font size, in every panel
+# x-axis method-label font size, in every panel, now comes from
+# plot_style.py's shared AXIS_LABEL_FONTSIZE (imported above) - it used
+# to be a local LABEL_FONTSIZE=8 here; unifying it with plot_box.py's own
+# BOX_LABEL_FONTSIZE (already 9) into ONE shared value bumps THIS file's
+# axis labels from 8 to 9 (a deliberate, approved 1pt change) - plot_box.py's
+# own axis labels don't change, since 9 is what it already used.
 LABEL_ROTATION = 45     # x-axis method-label rotation angle (degrees)
 BOTTOM_MARGIN = 0.1    # fraction of figure height reserved for x-axis labels (fig.subplots_adjust(bottom=...))
 
@@ -108,12 +130,13 @@ PANEL_HEIGHT = 6        # inches, height of ONE panel (figure height = n_rows * 
 # ---- plot_tree_overview() deviation annotations (the "+NN% (+x.xx m3)"
 # labels drawn above each bar) ------------------------------------------
 # ANNOTATION_FONTSIZE used to be hard-coded (5) directly in the ax.annotate()
-# call. The top-of-panel headroom (see set_ylim() in the annotation loop)
-# was tuned specifically against that old fontsize=5, so a BIGGER font here
-# needs correspondingly MORE headroom or the taller text clips into the
-# panel above - TOP_MARGIN_PER_FONTSIZE scales the margin automatically so
-# the two never have to be retuned by hand together.
-ANNOTATION_FONTSIZE = 9    # font size for the % / absolute-diff labels drawn above each bar
+# call, then a local constant (9) - now imported from plot_style.py
+# (same value, 9, so no rendered change). The top-of-panel headroom (see
+# set_ylim() in the annotation loop) was tuned specifically against the
+# OLD hard-coded fontsize=5, so a BIGGER font here needs correspondingly
+# MORE headroom or the taller text clips into the panel above -
+# TOP_MARGIN_PER_FONTSIZE scales the margin automatically so the two
+# never have to be retuned by hand together.
 REFERENCE_FONTSIZE = 5         # the fontsize TOP_MARGIN_BASE below was tuned/verified against (the old hard-coded value)
 TOP_MARGIN_BASE = 0.35         # base headroom fraction above the tallest bar, at REFERENCE_FONTSIZE (existing default)
 TOP_MARGIN_PER_FONTSIZE = 0.03 # extra headroom fraction per point of ANNOTATION_FONTSIZE above REFERENCE_FONTSIZE
@@ -134,7 +157,7 @@ BAR_SPACING = 3 #distance between bar centers (data units) - was 1.6
 # chart to just those - e.g. for a focused side-by-side of a handful of
 # variants instead of everything in the CSV. Any name that matches no row
 # is printed as a warning and simply skipped, rather than crashing.
-SELECTED_METHODS = ["Reference (destructive)"]
+SELECTED_METHODS = ["none"]
 # e.g. ["AdTree raw r5mm_seg0.1-0.5-k0.5", "AdQSM (TreesParams) (AdQSM 05)", "Reference (destructive)"]
 # none  = # SELECTED_METHODS = ["none"]
 
@@ -161,7 +184,8 @@ SELECTED_METHODS = ["Reference (destructive)"]
 #      "adqsm_variant": ["04", "05"], "radius_threshold_mm": [5, 10, 15, 20],
 #      "seg_min_mm": 100, "seg_max_mm": 500, "seg_k_pct": 50},
 # ]
-METHOD_FILTERS = [{"family": "treeqsm"}]
+METHOD_FILTERS = [{"family": "treeqsm", "calmethod": "regression-perorder",
+                   "adqsm_variant": ["040", "050", "060", "070", "080", "090", "100"]}]
 
 # [] = no additional filter-based selection, SELECTED_METHODS alone still works exactly as before
 
@@ -186,7 +210,7 @@ PLOT_DPI = 100   # was hard-coded to 200 in save_and_report()
 # low-res pass. Does NOT affect plot_total_volume_by_tree(),
 # plot_error_boxplot(), or plot_error_metrics_bar() - those always
 # need every tree in the CSV to be a meaningful cross-tree comparison.
-TREES_TO_PLOT = ["IND01_054","IND03_088","IND07_083"]   # e.g. ["IND01_054"]
+TREES_TO_PLOT = ["B21_S01"]   # e.g. ["IND01_054"]
 
 # BRANCH_FILTERS_TO_PLOT: which branch_filter mode(s) ("10cm"/"none")
 # get charts drawn AT ALL this run - applies to every chart in this
@@ -194,7 +218,7 @@ TREES_TO_PLOT = ["IND01_054","IND03_088","IND07_083"]   # e.g. ["IND01_054"]
 # error_metrics_bar). Default ["10cm", "none"] = both modes, same
 # behavior as before. Set to e.g. ["10cm"] to skip every "none"-mode
 # chart entirely for this run.
-BRANCH_FILTERS_TO_PLOT = ["10cm", "none"]
+BRANCH_FILTERS_TO_PLOT = ["none"]
 # =====================================================================
 
 
@@ -334,12 +358,40 @@ def treeqsm_stage_short(stage):
     return short
 
 
+def _pd_field_token(value):
+    """One PD value (PatchDiam1/2Min/2Max, in metres) -> its token, at
+    the narrowest width that still uniquely represents it at millimetre
+    precision - mirrors runsken.m's compute_run_tag()'s pd_token() local
+    function's CONDITIONAL-WIDTH SCHEME exactly, so a given PD value that
+    isn't a "clean" centimetre gets the SAME new token text in both
+    MATLAB filenames and Python labels going forward:
+      - an exact multiple of 0.01 m (every historical PD value used so
+        far) -> today's existing bare-digit shape, e.g. 0.08 -> "8" -
+        deliberately NOT zero-padded like MATLAB's "08": this file's own
+        "clean" token format has never been byte-identical to MATLAB's
+        tag (different prefix, no padding) and is left exactly as-is, so
+        no EXISTING label changes.
+      - otherwise -> 3-digit millimetre token, e.g. 0.005 -> "005",
+        0.023 -> "023" - this NEW shape (no historical baggage to
+        preserve) is made to match MATLAB's pd_token() digit-for-digit,
+        so two values that used to collide at cm resolution (e.g. 0.005
+        and 0.01, both -> "1") now get distinct, MATLAB-matching tokens.
+    """
+    mm = round(value * 1000)
+    if mm % 10 == 0:
+        return "%d" % (mm // 10)
+    return "%03d" % mm
+
+
 def treeqsm_pd_token(pd1, pd2min, pd2max):
     """Format the 3 PatchDiam values into ONE combined token, e.g.
-    pd1=0.08, pd2min=0.02, pd2max=0.07 -> "p8-2-7" - shared by
-    shorten_method_label()'s TreeQSM branch and plot_box.py's box/point
-    labels, so both always agree on this exact format."""
-    return "p%d-%d-%d" % (round(pd1 * 100), round(pd2min * 100), round(pd2max * 100))
+    pd1=0.08, pd2min=0.02, pd2max=0.07 -> "p8-2-7" (unchanged from
+    today) - shared by shorten_method_label()'s TreeQSM branch and
+    plot_box.py's box/point labels, so both always agree on this exact
+    format. Each of the 3 values gets its own independent width via
+    _pd_field_token() above - see its own docstring for the clean-cm vs.
+    non-clean-mm split."""
+    return "p%s-%s-%s" % (_pd_field_token(pd1), _pd_field_token(pd2min), _pd_field_token(pd2max))
 
 
 def treeqsm_mode_short(mode):
@@ -350,18 +402,22 @@ def treeqsm_mode_short(mode):
 
 
 def _treeqsm_kwargs(row):
-    """Pull shorten_method_label()'s 7 optional mode/pd/simp kwargs out of a
-    load_results() row dict - shared by every call site below that has
-    (or looks up) a full row, so the same 7 field names aren't repeated
-    at each one."""
+    """Pull shorten_method_label()'s 8 optional mode/pd/mincylrad/simp
+    kwargs out of a load_results() row dict - shared by every call site
+    below that has (or looks up) a full row, so the same 8 field names
+    aren't repeated at each one. mincylrad follows the exact same
+    row.get(...)-> None-on-missing convention as the other 7 fields, so an
+    older row (from before the mincylrad_m column existed) degrades the
+    same way any of those already do."""
     return dict(mode=row.get("mode"),
                 pd1=row.get("pd1"), pd2min=row.get("pd2min"), pd2max=row.get("pd2max"),
+                mincylrad=row.get("mincylrad"),
                 simp_maxorder=row.get("simp_maxorder"), simp_smallradii=row.get("simp_smallradii"),
                 simp_replaceiterations=row.get("simp_replaceiterations"))
 
 
 def shorten_method_label(method, mode=None, pd1=None, pd2min=None, pd2max=None,
-                          simp_maxorder=None, simp_smallradii=None,
+                          mincylrad=None, simp_maxorder=None, simp_smallradii=None,
                           simp_replaceiterations=None):
     """Map a full volume_results.csv method string to a short display
     label, for legends/titles/axis labels ONLY - never used to look up or
@@ -416,8 +472,21 @@ def shorten_method_label(method, mode=None, pd1=None, pd2min=None, pd2max=None,
             have_params = None not in (mode, pd1, pd2min, pd2max, simp_maxorder,
                                         simp_smallradii, simp_replaceiterations) and mode != ""
             if have_params:
-                return "TQ_%s_%s_m%d_s%d_r%d_%s" % (
-                    treeqsm_mode_short(mode), treeqsm_pd_token(pd1, pd2min, pd2max),
+                # mcr_tag: mirrors compute_run_tag()'s mcr_tag in runsken.m
+                # (round(value*10000) at the same 0.1 mm resolution) -
+                # empty both at the historical default 0.0025 (tolerance
+                # 1e-9) AND when mincylrad is None (an older row from
+                # before the mincylrad_m column existed), so neither case
+                # changes today's label and there is no "_mcrNone"
+                # artifact. Deliberately NOT part of have_params above -
+                # its absence must not fall back to the old "TQ_{run}_
+                # {stage}" shape for every pre-existing row.
+                if mincylrad is None or abs(mincylrad - 0.0025) < 1e-9:
+                    mcr_tag = ""
+                else:
+                    mcr_tag = "_mcr%03d" % round(mincylrad * 10000)
+                return "TQ_%s_%s%s_m%d_s%d_r%d_%s" % (
+                    treeqsm_mode_short(mode), treeqsm_pd_token(pd1, pd2min, pd2max), mcr_tag,
                     int(simp_maxorder), round(simp_smallradii * 1000),
                     int(simp_replaceiterations), stage_short)
             # Old v1aut/v1man rows (blank params) or a caller with no row
@@ -478,22 +547,11 @@ def shorten_method_label(method, mode=None, pd1=None, pd2min=None, pd2max=None,
 # startswith()-based classification logic by hand.
 # ----------------------------------------------------------------------
 
-# Hand-picked, pastel (light, low-saturation) hex stops per family - plain
-# hex-string lists (not compiled matplotlib Colormap objects) so a caller
-# that doesn't even use LinearSegmentedColormap can still reuse the raw
-# stops. "Reference" is a genuine 5th entry here (not the old hardcoded
-# "#ef476f" special case) for structural consistency with the other four -
-# its middle stop IS exactly the old flat highlight color, so a
-# single-member "Reference" family (today's only real case) still resolves
-# to the identical color as before (see classify_family()'s t=0.5 rule in
-# build_method_color_map() below).
-FAMILY_GRADIENTS = {
-    "AdTree raw":        ["#e1f5e1", "#b8e2b8", "#8fce8f", "#63b563"],  # pastel green: pale -> sage -> leaf -> deeper green
-    "AdTree calibrated": ["#dceaf9", "#b3d1f2", "#84b3e8", "#5a92d6"],  # pastel blue: pale -> sky -> mid -> deeper blue
-    "TreeQSM":           ["#eeeeee", "#d4d4d4", "#b8b8b8", "#98989a"],  # pastel grey: near-white -> light -> mid -> deeper grey
-    "AdQSM":             ["#fdf3c9", "#f8e08c", "#eec85a", "#d6a83f"],  # pastel yellow/ochre: pale -> gold -> ochre -> deeper ochre
-    "Reference":         ["#fbc3d0", "#ef476f", "#c9315a"],             # pink/red: pale -> #ef476f (the ORIGINAL flat highlight, at this list's middle stop) -> deeper red
-}
+# FAMILY_GRADIENTS itself now lives in plot_style.py (imported at the top
+# of this file) - moved there verbatim (same 5 families, same hex stops,
+# "Reference" still a genuine 5th entry per the same reasoning) so every
+# plotting script in this project, not just this one, can share it
+# without importing it specifically from plot_volumes.py.
 
 # The four non-reference family prefixes, matched against a method's FULL,
 # untouched CSV string (see classify_family() below) - kept as its own
@@ -820,7 +878,7 @@ def plot_total_volume_by_tree(rows, color_map):
     ax.set_ylabel("Total volume [m^3]")
     ax.set_title("Total volume by method, per tree")
     # Legend outside the plot area (to the right) so it doesn't cover bars.
-    ax.legend(fontsize=8, loc="upper left", bbox_to_anchor=(1.01, 1.0))
+    ax.legend(fontsize=LEGEND_FONTSIZE, loc="upper left", bbox_to_anchor=(1.01, 1.0))
     fig.tight_layout()
     save_and_report(fig, "total_volume_by_tree.png")
 
@@ -849,12 +907,14 @@ FIELD_DISPLAY_NAMES = {
     "branch": "Branch volume",
 }
 
+# TREE_MARKERS itself now lives in plot_style.py (imported at the top of
+# this file) - moved there verbatim so other scripts (parameter_
+# sensitivity.py) can share it too, not just import it from here.
 # Marker shapes cycled across trees in plot_error_boxplot()'s overlay
 # dots - color there already encodes METHOD (via color_map), so shape
 # is used for TREE identity instead. Cycles (via modulo) if there are
 # ever more trees than shapes - two trees would then share a shape,
 # degrading gracefully rather than crashing.
-TREE_MARKERS = ["o", "s", "^", "D", "v", "P", "X", "*"]
 
 
 def plot_tree_overview(rows, tree, branch_filter, color_map):
@@ -1022,7 +1082,7 @@ def plot_tree_overview(rows, tree, branch_filter, color_map):
         ax.set_xticks(x_positions)
         ax.set_xticklabels(
             [shorten_method_label(m, **_treeqsm_kwargs(row_of[m])) for m in present_methods],
-            rotation=LABEL_ROTATION, ha="right", fontsize=LABEL_FONTSIZE)
+            rotation=LABEL_ROTATION, ha="right", fontsize=AXIS_LABEL_FONTSIZE)
         ax.set_title(subplot_title)
 
         # Small FYI note (not the heavy AdQSM data-quality warning further
@@ -1113,14 +1173,14 @@ def plot_tree_overview(rows, tree, branch_filter, color_map):
         # this panel. White, semi-transparent background box so it stays
         # readable even if a tall bar passes behind it.
         ax.text(0.02, 0.98, "top: %% diff from reference\nbottom: abs. diff [%s]" % unit,
-                transform=ax.transAxes, ha="left", va="top", fontsize=8,
+                transform=ax.transAxes, ha="left", va="top", fontsize=LEGEND_FONTSIZE,
                 bbox=dict(boxstyle="round", facecolor="white", alpha=0.8, edgecolor="lightgray"))
 
     # Subtitle spells out which methodology this figure shows, so it's clear
     # at a glance even without reading the filename.
     filter_label = ("full reconstruction, branch_filter='none'" if branch_filter == "none"
                      else "diameter >= 10 cm only, branch_filter='10cm'")
-    fig.suptitle("Tree overview: %s  (%s)" % (tree, filter_label), fontsize=14)
+    fig.suptitle("Tree overview: %s  (%s)" % (tree, filter_label), fontsize=TITLE_FONTSIZE)
 
     # ONLY for the "10cm" mode: a clearly-visible warning that AdQSM's
     # numbers in this filtered subset may not be trustworthy. WHY: AdQSM's
@@ -1158,7 +1218,7 @@ def plot_tree_overview(rows, tree, branch_filter, color_map):
         for m in methods
     ]
     fig.legend(handles=legend_handles, loc="lower center",
-               ncol=min(3, len(methods)), fontsize=8, bbox_to_anchor=(0.5, -0.02))
+               ncol=min(3, len(methods)), fontsize=LEGEND_FONTSIZE, bbox_to_anchor=(0.5, -0.02))
 
     # rect leaves room at the top for suptitle (+ the AdQSM warning line, when
     # present, in "10cm" mode) and at the bottom for the legend.
@@ -1279,7 +1339,7 @@ def plot_error_boxplot(rows, branch_filter, reference_method, color_map, field="
         # so it reads as a subtle boundary rather than a heavy border now
         # that the box interior is also busy with overlaid scatter points.
         patch.set_edgecolor("#888888")
-    ax.axhline(0.0, color="gray", linestyle="--", linewidth=1)  # 0% error = perfect match
+    ax.axhline(0.0, color="gray", linestyle="--", linewidth=DEFAULT_LINEWIDTH)  # 0% error = perfect match
 
     # ---- overlay each tree's individual % error as a small dot ----------
     # WHY: with only 1-2 trees right now, the box itself is a degenerate
@@ -1306,7 +1366,7 @@ def plot_error_boxplot(rows, branch_filter, reference_method, color_map, field="
         for y_val, t in zip(errors_pct, trees_here):
             x_jittered = (i + 1) + random.uniform(-jitter_width, jitter_width)
             ax.plot(x_jittered, y_val, marker=tree_marker_map[t], color=dot_color,
-                    markersize=6, markeredgewidth=0, alpha=0.9, zorder=3)   # zorder=3: draw dots ON TOP of the (semi-transparent) boxes
+                    markersize=DEFAULT_MARKERSIZE, markeredgewidth=0, alpha=0.9, zorder=3)   # zorder=3: draw dots ON TOP of the (semi-transparent) boxes
     ax.set_ylabel("Error vs. reference [%]")
     ax.set_title(
         "%s error distribution by method (across trees)\n"

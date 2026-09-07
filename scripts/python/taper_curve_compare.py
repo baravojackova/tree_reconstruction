@@ -37,13 +37,27 @@
 #  Dependencies: numpy, matplotlib (install: pip install numpy matplotlib)
 # =====================================================================
 
+import csv
 import os
 import re
 
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.lines as mlines   # proxy handle for the one combined "Crown Base Height" legend entry
 
 from tree_geom_utils import parse_adqsm_taper_file, make_trunk_radius_func, parse_adqsm_params_file
+
+# Shared visual style (colors/sizes) - see plot_style.py's own header.
+# family_shades() extends FAMILY_GRADIENTS["AdQSM"]'s 4 hand-picked stops
+# into as many distinct shades as this chart needs (one per AdQSM variant,
+# up to ~21 on B21_S01) - see its own docstring in plot_style.py.
+from plot_style import (
+    family_shades,
+    LEGEND_FONTSIZE,
+    AXIS_LABEL_FONTSIZE,
+    PANEL_TITLE_FONTSIZE,
+    DEFAULT_LINEWIDTH,
+)
 
 # =====================  PARAMETERS  ===================================
 DATA_ROOT = r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\data"
@@ -51,7 +65,7 @@ DATA_ROOT = r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstructio
 # Trees to process in this run - just add a name to extend this to a
 # production beech tree once its data folder exists; nothing else needs
 # to change.
-TREES_TO_RUN = ["IND01_054", "IND03_088", "IND07_083"]
+TREES_TO_RUN = ["B21_S01"]
 
 # Optional: real field-measured DBH per tree, in METERS, for a
 # horizontal reference line on the chart - e.g. {"IND07_083": 0.75}.
@@ -61,7 +75,15 @@ TREES_TO_RUN = ["IND01_054", "IND03_088", "IND07_083"]
 # own FIELD_DBH, which DOES rescale the taper curve - this script never
 # rescales anything, it shows each variant's RAW curve so they stay
 # comparable to each other).
-MEASURED_DBH_M = {}
+MEASURED_DBH_M = {"B21_S01": 0.56}
+
+SUMMARY_CSV_PATH = "taper_curve_compare_summary.csv"
+# One row per (tree, variant) across every tree in THIS run's
+# TREES_TO_RUN - overwritten fresh each run (not an upsert/append
+# across sessions like volume_results.csv - this is a lightweight
+# diagnostic export, not the master results table).
+
+DEFAULT_LINEWIDTH = 6
 # =====================================================================
 
 
@@ -117,8 +139,17 @@ def plot_taper_variants(tree_name):
 
     fig, ax = plt.subplots(figsize=(10, 7))
     table_rows = []   # (variant, dbh_cm, trunk_vol_or_None, cbh_or_None)
+    cbh_drawn = False   # True once at least one variant's CBH line has actually been drawn -
+                          # drives whether the single combined legend entry gets added at all below
 
-    for variant in variants:
+    # One distinct AdQSM-family shade per variant, instead of leaving color
+    # unset (matplotlib's default cycle only has ~10 colors, so it used to
+    # repeat once past variant #10) - see family_shades()'s own docstring
+    # in plot_style.py for why a continuous colormap is used instead of
+    # just cycling FAMILY_GRADIENTS["AdQSM"]'s 4 raw stops.
+    variant_colors = family_shades("AdQSM", len(variants))
+
+    for variant_idx, variant in enumerate(variants):
         variant_dir = os.path.join(tree_dir, variant)
         taper_path = os.path.join(variant_dir, "taper.txt")
         params_path = os.path.join(variant_dir, "TreesParams.txt")
@@ -142,25 +173,53 @@ def plot_taper_variants(tree_name):
 
         legend_label = "Variant %s (DBH=%.1fcm, TrunkVolume=%s)" % (
             variant, dbh_variant * 100.0, ("%.2fm3" % trunk_vol) if trunk_vol is not None else "n/a")
-        line, = ax.plot(heights, diameters, marker="o", markersize=3, linewidth=1.2, label=legend_label)
+        line, = ax.plot(heights, diameters, marker="o", markersize=3, linewidth=DEFAULT_LINEWIDTH,
+                         color=variant_colors[variant_idx], label=legend_label)
 
         # CBH: thin dashed vertical line in THIS variant's own colour, low
         # alpha - the diagnostic that revealed the crown-base connection
         # for IND07_083 (see TODO_investigations.md) - kept visible but
         # unobtrusive, one per variant that actually has a CBH value.
+        # Deliberately NOT given a `label=` here (would add one near-
+        # duplicate legend row per variant, up to 21 on B21_S01) - a
+        # single combined legend entry is added once, below the loop,
+        # via a neutral proxy handle instead (see cbh_drawn/mlines.Line2D
+        # below) - kept color-neutral rather than reusing this variant's
+        # own colour, since a first-variant-coloured swatch would wrongly
+        # suggest CBH is tied to that one variant's colour specifically,
+        # when in fact every variant draws its own differently-coloured
+        # CBH line.
         if cbh is not None:
-            ax.axvline(cbh, color=line.get_color(), linestyle="--", linewidth=1.0, alpha=0.4)
+            ax.axvline(cbh, color=line.get_color(), linestyle="--", linewidth=DEFAULT_LINEWIDTH, alpha=0.4)
+            cbh_drawn = True
 
-    ax.axvline(1.3, color="gray", linestyle="--", linewidth=1.2, label="DBH height")
+    ax.axvline(1.3, color="gray", linestyle="--", linewidth=DEFAULT_LINEWIDTH, label="DBH height")
 
     if tree_name in MEASURED_DBH_M:
-        ax.axhline(MEASURED_DBH_M[tree_name], color="black", linestyle=":", linewidth=1.4,
+        ax.axhline(MEASURED_DBH_M[tree_name], color="red", linestyle=":", linewidth=DEFAULT_LINEWIDTH,
                    label="Measured DBH (field)")
 
-    ax.set_xlabel("Height [m]")
-    ax.set_ylabel("Diameter [m]")
-    ax.set_title("%s: AdQSM taper.txt curves across %d variants" % (tree_name, len(variants)))
-    ax.legend(fontsize=8, loc="best")
+    ax.set_xlabel("Height [m]", fontsize=AXIS_LABEL_FONTSIZE)
+    ax.set_ylabel("Diameter [m]", fontsize=AXIS_LABEL_FONTSIZE)
+    ax.set_title("%s: AdQSM taper.txt curves across %d variants" % (tree_name, len(variants)),
+                 fontsize=PANEL_TITLE_FONTSIZE)
+
+    # One combined legend entry for every per-variant CBH line drawn above
+    # (cbh_drawn), instead of one per variant - a neutral gray dashed proxy
+    # handle (matching "DBH height"'s own neutral style just above), NOT
+    # any one variant's own colour, so the swatch doesn't wrongly look
+    # tied to a single variant. Only added when at least one CBH line was
+    # actually drawn (cbh_drawn), so a tree with no CBH data at all gets
+    # no unused legend row. Every other legend entry (each variant's own
+    # curve, "DBH height", "Measured DBH (field)") comes from
+    # get_legend_handles_labels() unchanged, in its normal order.
+    handles, labels = ax.get_legend_handles_labels()
+    if cbh_drawn:
+        cbh_proxy = mlines.Line2D([], [], color="gray", linestyle="--", linewidth=DEFAULT_LINEWIDTH, alpha=0.4,
+                                   label="Crown Base Height (CBH)")
+        handles.append(cbh_proxy)
+        labels.append(cbh_proxy.get_label())
+    ax.legend(handles=handles, labels=labels, fontsize=LEGEND_FONTSIZE, loc="best")
     ax.grid(alpha=0.3)
     fig.tight_layout()
 
@@ -184,14 +243,53 @@ def plot_taper_variants(tree_name):
 
     print()
     print("%-10s %-10s %-15s %-12s" % ("variant", "DBH_cm", "TrunkVolume_m3", "%%diff_vs_%s" % ref_label))
+    # result_rows: one dict per variant, for the combined multi-tree summary
+    # CSV written once by the RUN section below - built alongside the
+    # console printout using the exact SAME pct_diff/ref_label already
+    # computed for it (not recomputed a second time), so the two can never
+    # drift apart. Purely additive - every print/plot/save above/below is
+    # unchanged.
+    result_rows = []
     for variant, dbh_cm, trunk_vol, cbh in table_rows:
         pct_diff = 100.0 * (dbh_cm - ref_dbh_cm) / ref_dbh_cm if ref_dbh_cm else float("nan")
         print("%-10s %-10.2f %-15s %+.2f%%" % (
             variant, dbh_cm, ("%.4f" % trunk_vol) if trunk_vol is not None else "n/a", pct_diff))
+        result_rows.append({
+            "tree": tree_name,
+            "variant": variant,
+            "dbh_cm": dbh_cm,
+            # "" (not the console table's "n/a") for a missing value - CSVs
+            # should stay machine-readable, "n/a" is a display-only choice.
+            "trunk_vol_m3": trunk_vol if trunk_vol is not None else "",
+            "cbh_m": cbh if cbh is not None else "",
+            "pct_diff_vs_reference": pct_diff,
+            "reference_label": ref_label,
+        })
     print()
+
+    return result_rows
 
 
 # =========================  RUN  =====================================
 if __name__ == "__main__":
+    all_rows = []
+    n_trees_with_rows = 0   # trees that actually contributed rows, NOT len(TREES_TO_RUN) -
+                              # a skipped tree (no variant folders found, plot_taper_variants()
+                              # returns None) must not be counted as one of the "trees" below
     for tree in TREES_TO_RUN:
-        plot_taper_variants(tree)
+        rows = plot_taper_variants(tree)
+        if rows:
+            all_rows.extend(rows)
+            n_trees_with_rows += 1
+
+    if all_rows:
+        with open(SUMMARY_CSV_PATH, "w", encoding="utf-8", newline="") as f:
+            fieldnames = ["tree", "variant", "dbh_cm", "trunk_vol_m3", "cbh_m",
+                          "pct_diff_vs_reference", "reference_label"]
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(all_rows)
+        print("Saved summary CSV: %s (%d rows across %d trees)" %
+              (SUMMARY_CSV_PATH, len(all_rows), n_trees_with_rows))
+    else:
+        print("No rows to write - every tree in TREES_TO_RUN was skipped (see WARNINGs above).")

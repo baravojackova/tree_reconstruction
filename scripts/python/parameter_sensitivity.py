@@ -40,8 +40,12 @@ import matplotlib.colors as mcolors
 import matplotlib.lines as mlines
 
 from compare_volumes import RESULTS_CSV, REFERENCE_METHOD, load_results, resolve_reference_method_none
-from plot_volumes import FAMILY_GRADIENTS, classify_family, ensure_plots_dir, shorten_method_label, TREE_MARKERS
-from plot_box import parse_treeqsm_method, TREEQSM_REF_LINE_COLOR
+from plot_volumes import classify_family, ensure_plots_dir, shorten_method_label
+from plot_box import parse_treeqsm_method
+# FAMILY_GRADIENTS/TREE_MARKERS used to come from plot_volumes.py and
+# TREEQSM_REF_LINE_COLOR from plot_box.py - all three now live in
+# plot_style.py instead (source swap only, same values, no rendered change).
+from plot_style import FAMILY_GRADIENTS, TREE_MARKERS, TREEQSM_REF_LINE_COLOR
 
 # =====================  PARAMETERS  ===================================
 SELECT_TREE = "IND01_054"
@@ -96,7 +100,7 @@ SEGMIN_VIEW_LINE_PARAM = "adqsm_variant"
 TREEQSM_FACET_PARAM = "mode"
 TREEQSM_X_PARAM = "simp_smallradii"
 TREEQSM_LINE_PARAM = "simp_replaceiterations"
-TREEQSM_PARAMS_FOR_CORR = ["pd1_m", "pd2min_m", "pd2max_m", "simp_maxorder", "simp_smallradii", "simp_replaceiterations"]
+TREEQSM_PARAMS_FOR_CORR = ["pd1_m", "pd2min_m", "pd2max_m", "mincylrad_m", "simp_maxorder", "simp_smallradii", "simp_replaceiterations"]
 # NOTE: "mode" is a string ("manual"/"auto"), not numeric - deliberately
 # NOT in TREEQSM_PARAMS_FOR_CORR above (Spearman needs an ordinal/numeric
 # axis), but it's fine as TREEQSM_FACET_PARAM (the facet grid just needs

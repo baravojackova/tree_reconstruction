@@ -214,7 +214,220 @@ else
         end
     end
 end
-%% 1B) USER SETTINGS ------------------------------------------
+%% 1B) ARCHIVE SELECTED TAGS (OPTIONAL) --------------------------
+%     ARCHIVE SELECTED TAGS (OPTIONAL) - archive/delete only the files
+%     whose name contains one or more Bara-specified tag substrings
+%     WHAT this block does: like CLEAN START above, but instead of
+%     matching EVERY output file for every tree/run, it first builds the
+%     SAME full candidate list (same clean_patterns, same two search
+%     directories, same dedup logic, same case-insensitive "Cloud"
+%     skip-guard), then keeps only the files whose name contains at
+%     least one of the strings in archive_tags below - e.g. archive
+%     every file for one specific manual run_tag you no longer need,
+%     without touching any other tree/run's outputs.
+%     WHY it needs the same two-switch-plus-typed-confirmation
+%     architecture as CLEAN START: this still moves/deletes real files,
+%     just a narrower set - the same accidental-cell-execution risk
+%     applies, so the same safety net applies. This block does NOT read
+%     or modify any of CLEAN START's own switches/variables above - it
+%     rebuilds its own copies of clean_patterns/clean_search_dirs fresh,
+%     so running this cell can never change CLEAN START's behavior, and
+%     vice versa.
+%  ------------------------------------------------------------
+
+% Switch 1 (master switch): must be hand-edited to true, otherwise this
+% whole cell is a no-op - same default-off philosophy as clean_start.
+archive_by_tag = fasle;
+
+% archive_tags: cell array of tag substrings - Bara edits this list by
+% hand before enabling the switch above. A file is selected if its name
+% contains AT LEAST ONE of these strings anywhere (case-sensitive exact
+% substring match - see the filter step below for why).
+archive_tags = {'B21_S01_man_pd07-005-10_mo8_sr005_ri0'
+    };
+
+% Switch 2 (dry run): default TRUE here (unlike clean_start's current
+% false) - this is a NEW, less-tested code path, so it defaults to the
+% safe preview-only behavior until Bara has reviewed a real matched list.
+archive_dry_run = true;
+
+% Switch 3 (archive vs. delete): false (default, SAFE) = ARCHIVE - move
+% matched files into archive\<timestamp>_bytag\ instead of deleting them,
+% fully recoverable. true = actually DELETE permanently - use only for a
+% genuine cleanup you want gone for good.
+archive_by_tag_delete_permanently = false;
+
+if ~archive_by_tag
+    % Master switch is off - do nothing at all, not even list files.
+    % Keeps a normal "run every cell in order" pass completely inert.
+    fprintf('Archive by tag is disabled (archive_by_tag = false) - skipping.\n');
+else
+    % ---- 1. Reuse the EXACT SAME candidate-file scan as CLEAN START
+    % (section 1 above): same clean_patterns, same clean_search_dirs,
+    % same dedup-by-name+folder, same case-insensitive "Cloud"
+    % skip-guard - rebuilt fresh here (own local copies) rather than
+    % re-invented, so this list can never silently drift out of sync
+    % with what CLEAN START itself considers "every file this script can
+    % produce".
+    clean_patterns = { ...
+        '*_res_*.mat', ...
+        'volumes_*.mat', ...
+        'volumes_*.csv', ...
+        'dbh_*.txt', ...
+        'height_*.txt', ...
+        'taper_*.txt', ...
+        'trunklen_*.txt', ...
+        'trunklen_filtered_*.txt', ...
+        'branchlen_*.txt', ...
+        'branchlen_filtered_*.txt', ...
+        'params_*.csv', ...
+        'geom_*.txt', ...
+        '*.mat', ...
+        '*.png', ...   % catches saved point clouds too, e.g. "IND07_083.mat"
+        };
+    clean_search_dirs = {data_dir, fullfile(data_dir, 'results')};
+
+    archive_candidates = struct('name', {}, 'folder', {}, 'bytes', {});
+    for d = 1:numel(clean_search_dirs)
+        search_dir = clean_search_dirs{d};
+        if ~isfolder(search_dir)
+            continue   % e.g. no "results" subfolder yet - nothing to scan there
+        end
+        for p = 1:numel(clean_patterns)
+            pattern = clean_patterns{p};
+            matches = dir(fullfile(search_dir, pattern));
+            for m = 1:numel(matches)
+                f = matches(m);
+                if f.isdir
+                    continue
+                end
+
+                % Same "Cloud" safety guard as CLEAN START - protects raw
+                % input point clouds regardless of which pattern matched.
+                if ~isempty(regexpi(f.name, 'Cloud', 'once'))
+                    continue
+                end
+
+                already_listed = false;
+                for e = 1:numel(archive_candidates)
+                    if strcmp(archive_candidates(e).name, f.name) && strcmp(archive_candidates(e).folder, f.folder)
+                        already_listed = true;
+                        break
+                    end
+                end
+                if ~already_listed
+                    idx = numel(archive_candidates) + 1;
+                    archive_candidates(idx).name   = f.name;   %#ok<SAGROW>
+                    archive_candidates(idx).folder = f.folder;
+                    archive_candidates(idx).bytes  = f.bytes;
+                end
+            end
+        end
+    end
+
+    % ---- 2. POST-FILTER: keep a candidate only if its name contains AT
+    % LEAST ONE of archive_tags as a substring. contains() is
+    % case-SENSITIVE by default (exact substring match) - run_tag values
+    % are already case-consistent (e.g. always lowercase "man_pd..."), so
+    % a case-insensitive match here would only risk matching MORE than
+    % intended, never help - unlike the "Cloud" skip-guard above, which
+    % deliberately wants to catch every case variant instead.
+    archive_files = struct('name', {}, 'folder', {}, 'bytes', {}, 'tags', {});
+    for i = 1:numel(archive_candidates)
+        f = archive_candidates(i);
+        matched_tags = {};
+        for t = 1:numel(archive_tags)
+            if contains(f.name, archive_tags{t})
+                matched_tags{end+1} = archive_tags{t}; %#ok<AGROW>
+            end
+        end
+        if ~isempty(matched_tags)
+            idx = numel(archive_files) + 1;
+            archive_files(idx).name   = f.name;
+            archive_files(idx).folder = f.folder;
+            archive_files(idx).bytes  = f.bytes;
+            archive_files(idx).tags   = matched_tags;
+        end
+    end
+
+    % ---- 3. If nothing matched, say so clearly and STOP - do not
+    % proceed to any confirmation step (there is nothing to confirm).
+    if isempty(archive_files)
+        fprintf('Archive by tag: 0 files matched {%s} in %s - nothing to do.\n', ...
+            strjoin(archive_tags, ', '), data_dir);
+    else
+        % ---- 4. Print the filtered list with sizes AND which tag(s)
+        % matched each file (unlike CLEAN START's plain list) - this is
+        % more error-prone than CLEAN START's "match everything" case (a
+        % short/generic tag could over-match), so the review step needs
+        % to be extra legible about WHY each file was selected.
+        fprintf('Archive by tag: %d matching file(s) found for tags {%s} in %s\n', ...
+            numel(archive_files), strjoin(archive_tags, ', '), data_dir);
+        total_bytes = 0;
+        for i = 1:numel(archive_files)
+            fprintf('  %-50s %10.1f KB   [matched: %s]\n', archive_files(i).name, ...
+                archive_files(i).bytes / 1024, strjoin(archive_files(i).tags, ', '));
+            total_bytes = total_bytes + archive_files(i).bytes;
+        end
+        fprintf('Total: %d file(s), %.2f MB\n', numel(archive_files), total_bytes / (1024*1024));
+
+        % archive_dir: "_bytag" suffix (vs. CLEAN START's plain timestamp
+        % folder) so tag-archived batches are visually distinguishable
+        % when Bara browses archive\ later. Only actually created (mkdir)
+        % in the real-move branch below.
+        archive_dir = fullfile(data_dir, 'archive', [datestr(now, 'yyyy-mm-dd_HHMM') '_bytag']);
+
+        if archive_dry_run
+            % Dry run - list only (already printed above), never touch
+            % the disk. Preview text describes whichever mode is active.
+            if archive_by_tag_delete_permanently
+                fprintf('DRY RUN - nothing deleted. Set archive_dry_run = false to actually PERMANENTLY DELETE.\n');
+            else
+                fprintf('DRY RUN - nothing archived. Set archive_dry_run = false to actually MOVE these files to %s\n', archive_dir);
+            end
+        else
+            % Real archive/delete - require a typed confirmation first,
+            % same word choice/meaning as CLEAN START, so Bara can't
+            % mistake one mode for the other right before confirming.
+            if archive_by_tag_delete_permanently
+                confirmation = input('Type SMAZAT (all caps) to PERMANENTLY DELETE the files listed above: ', 's');
+                expected = 'SMAZAT';
+            else
+                confirmation = input('Type ARCHIVOVAT (all caps) to MOVE the files listed above to the archive folder: ', 's');
+                expected = 'ARCHIVOVAT';
+            end
+            if ~strcmp(confirmation, expected)
+                fprintf('Confirmation not received - nothing was touched.\n');
+            else
+                if ~archive_by_tag_delete_permanently
+                    mkdir(archive_dir);
+                end
+                for i = 1:numel(archive_files)
+                    file_path = fullfile(archive_files(i).folder, archive_files(i).name);
+                    try
+                        if archive_by_tag_delete_permanently
+                            delete(file_path);
+                            fprintf('Deleted: %s\n', file_path);
+                        else
+                            movefile(file_path, fullfile(archive_dir, archive_files(i).name));
+                            fprintf('Archived to %s: %s\n', archive_dir, archive_files(i).name);
+                        end
+                    catch ME
+                        % try/catch per file so one locked/missing file
+                        % cannot abort the rest of the list.
+                        if archive_by_tag_delete_permanently
+                            fprintf('FAILED to delete %s (%s)\n', file_path, ME.message);
+                        else
+                            fprintf('FAILED to archive %s (%s)\n', file_path, ME.message);
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
+%% 1C) USER SETTINGS ------------------------------------------
 %  all manual setting
 %  ------------------------------------------------------------
 %
@@ -225,8 +438,8 @@ end
 % run's results with different settings. See section 2 for the exact
 % auto-generation formula.
 % --- tree identification -------------------------------------
-tree_id   = 'IND07_083';           % short name used for ALL output files
-cloud_txt = 'IND07_083.txt';   % input point cloud (text file, 3 columns X Y Z)
+tree_id   = 'B21_S04';           % short name used for ALL output files
+cloud_txt = 'B21_S04_noplate_clean.txt';   % input point cloud (text file, 3 columns X Y Z)
 
 % --- number of models ----------------------------------------
 n_models_first = 5;    % models per parameter combination, first (coarse) run
@@ -249,19 +462,19 @@ n_workers = 0;         % 0 = derive automatically from the number of tasks
 % define_input(P, nPD1, nPD2Min, nPD2Max) = how many values are tested
 % for each of the three patch-diameter parameters
 % !!! if manual input nPD = 1
-nPD1    = 1;
-nPD2Min = 1;
-nPD2Max = 1;
+nPD1    = 3;
+nPD2Min = 3;
+nPD2Max = 3;
 
 % --- MANUAL PatchDiam (see section 9) ------------------------
-manual_patchdiam = true;   % false = keep everything from define_input
+manual_patchdiam = false;   % false = keep everything from define_input
 
 % PatchDiam1 (rought first cover) has to be t ≥ PatchDiam2Max (gentle cover)
 
-man_PD1    = 0.08;   % PatchDiam1     - AdQSM paper, Indonesian site 0,08
-man_PD2Min = 0.02;   % PatchDiam2Min
-man_PD2Max = 0.07;   % PatchDiam2Max
-man_MinCylRad = 0.0025; % MinCylRad default 0.0025
+man_PD1    = 0.07;   % PatchDiam1     - AdQSM paper, Indonesian site 0,08
+man_PD2Min = 0.005;   % PatchDiam2Min
+man_PD2Max = 0.1;   % PatchDiam2Max
+man_MinCylRad = 0.0025; % MinCylRad default 0.0025 0.0373
 
 % --- which model is simplified and exported ------------------
 use_optimal = true;    % true  = use the optimal model from select_optimum
@@ -276,9 +489,9 @@ plot_optimal = true;   % true = plot the optimal QSM before simplification
 % ReplaceIterations  Number of iterations for replacing two concecutive
 %                    cylinders inside one branch with one longer cylinder
 % --- simplification settings ---------------------------------
-simp_MaxOrder          = 8;
+simp_MaxOrder          = 9;
 simp_SmallRadii        = 0.005;          %def 0.005
-simp_ReplaceIterations = 2;              %def 0
+simp_ReplaceIterations = 0;              %def 0
 simp_Plot              = 1;
 simp_Disp              = 1;
 
@@ -290,7 +503,7 @@ simp_Disp              = 1;
 % comparison against the destructive reference for this run) - the
 % diagnostic cylinder/volume printout in the console still runs either
 % way, only the CSV/text-file EXPORT is affected.
-export_filtered_10cm = true;
+export_filtered_10cm = false;
 
 % Master switch for the ANSYS geometry export (section 20) - default OFF,
 % same "explicit opt-in" pattern as clean_start/export_filtered_10cm above,
@@ -362,7 +575,7 @@ EXPORT_FROM_SAVED_RUN_TAG = '';
 % else (vol_file/export_prefix/dbh_file/etc.), since THOSE genuinely
 % differ per simp_* variant even when they share the same reconstruction.
 [recon_tag, run_tag] = compute_run_tag(manual_patchdiam, man_PD1, man_PD2Min, ...
-    man_PD2Max, simp_MaxOrder, simp_SmallRadii, simp_ReplaceIterations);
+    man_PD2Max, man_MinCylRad, simp_MaxOrder, simp_SmallRadii, simp_ReplaceIterations);
 fprintf('Auto-generated run_tag: %s  (reconstruction tag: %s)\n', run_tag, recon_tag);
 
 mat_name     = tree_id;                          % .mat file with the point cloud
@@ -639,7 +852,7 @@ clear QSM_simple_clean   % avoid picking up a stale result from an
 % simplified_file, volume table, dbh/height/params, geom_*.txt) would
 % otherwise silently be written under the WRONG (stale) run_tag.
 [~, expected_run_tag] = compute_run_tag(manual_patchdiam, man_PD1, man_PD2Min, ...
-    man_PD2Max, simp_MaxOrder, simp_SmallRadii, simp_ReplaceIterations);
+    man_PD2Max, man_MinCylRad, simp_MaxOrder, simp_SmallRadii, simp_ReplaceIterations);
 if ~strcmp(run_tag, expected_run_tag)
     error(['run_tag (''%s'') does not match what your CURRENT settings ' ...
            'would produce (''%s''). You changed manual_patchdiam/man_PD*/' ...
@@ -1295,13 +1508,45 @@ mode_str = 'auto';
 if manual_patchdiam
     mode_str = 'manual';
 end
+
+% pmdist_mean/pmdist_trunk_mean/pmdist_branch_mean: point-to-cylinder fit
+% quality (point_model_distance.m, computed unconditionally on every QSM
+% inside treeqsm.m - independent of select_optimum), averaged over the
+% SAME model set as section 17's 'Estimated' group (winning combination
+% res.QSMs(idx) + the second run res_new.QSMs, when it exists) - reusing
+% that exact exist('res_new','var') guard so this stays consistent with
+% the Estimated row instead of inventing a second, possibly-diverging
+% condition.
+if exist('res_new', 'var')
+    pmdist_models = [res.QSMs(idx), res_new.QSMs];
+else
+    warning(['res_new not found - pmdist_* columns computed from ' ...
+        'res.QSMs(idx) only (run steps 13 and 14 to get the full ' ...
+        'Estimated-equivalent set).']);
+    pmdist_models = res.QSMs(idx);
+end
+% Two steps, not one: "pmdist_models.pmdistance" is already a
+% comma-separated list (one pmdistance struct per model in pmdist_models),
+% and MATLAB does not allow a further ".mean"/".TrunkMean"/".BranchMean"
+% chained directly onto a comma-separated list - it has to be collected
+% into a single struct array first (via the outer brackets below), THEN
+% field-accessed as its own separate step.
+pmdist_struct = [pmdist_models.pmdistance];
+pmdist_mean        = mean([pmdist_struct.mean]);
+pmdist_trunk_mean   = mean([pmdist_struct.TrunkMean]);
+pmdist_branch_mean  = mean([pmdist_struct.BranchMean]);
+fprintf('pmdist_mean = %.4f m   pmdist_trunk_mean = %.4f m   pmdist_branch_mean = %.4f m\n', ...
+    pmdist_mean, pmdist_trunk_mean, pmdist_branch_mean);
+
 params_file = ['params_' tree_id '_' run_tag '.csv'];
 fid = fopen(params_file, 'w');
-fprintf(fid, 'tree,run,mode,pd1_m,pd2min_m,pd2max_m,mincylrad_m,simp_maxorder,simp_smallradii,simp_replaceiterations\n');
-fprintf(fid, '%s,%s,%s,%.6f,%.6f,%.6f,%.6f,%d,%.6f,%d\n', ...
+fprintf(fid, ['tree,run,mode,pd1_m,pd2min_m,pd2max_m,mincylrad_m,simp_maxorder,' ...
+    'simp_smallradii,simp_replaceiterations,pmdist_mean,pmdist_trunk_mean,pmdist_branch_mean\n']);
+fprintf(fid, '%s,%s,%s,%.6f,%.6f,%.6f,%.6f,%d,%.6f,%d,%.6f,%.6f,%.6f\n', ...
     tree_id, run_tag, mode_str, ...
     OptInputs.PatchDiam1, OptInputs.PatchDiam2Min, OptInputs.PatchDiam2Max, OptInputs.MinCylRad, ...
-    simp_MaxOrder, simp_SmallRadii, simp_ReplaceIterations);
+    simp_MaxOrder, simp_SmallRadii, simp_ReplaceIterations, ...
+    pmdist_mean, pmdist_trunk_mean, pmdist_branch_mean);
 fclose(fid);
 fprintf('Parameters exported to %s\n', params_file);
 
@@ -1423,7 +1668,7 @@ end
 % ---------------------------------------------------------------
 
 function [recon_tag, run_tag] = compute_run_tag(manual_patchdiam, man_PD1, man_PD2Min, ...
-                                 man_PD2Max, simp_MaxOrder, simp_SmallRadii, ...
+                                 man_PD2Max, man_MinCylRad, simp_MaxOrder, simp_SmallRadii, ...
                                  simp_ReplaceIterations)
     % The ONE place run_tag's (and recon_tag's) formula lives - called from
     % section 2 (to actually SET recon_tag/run_tag) and from section 16's
@@ -1444,15 +1689,67 @@ function [recon_tag, run_tag] = compute_run_tag(manual_patchdiam, man_PD1, man_P
     % params, simplified_file), since those genuinely differ whenever
     % simp_* differs, even with the same underlying reconstruction.
     if manual_patchdiam
-        mode_tag = sprintf('man_pd%02d-%02d-%02d', round(man_PD1*100), ...
-            round(man_PD2Min*100), round(man_PD2Max*100));
+        % pd_token() (local function, below) gives each of PD1/PD2Min/
+        % PD2Max its OWN independent width: 2-digit cm when the value is
+        % an exact multiple of 0.01 m (every historical value Bara has
+        % used so far) - BYTE-IDENTICAL to today's tag - or 3-digit mm
+        % otherwise, so two values that used to collide at cm resolution
+        % (e.g. 0.005 and 0.01, both -> "01") now get distinct tokens
+        % ("005" vs "01"). Deliberately NOT a blanket switch to 3-digit
+        % for every field, which would rename every existing clean-value
+        % tag (e.g. "08" -> "080").
+        mode_tag = sprintf('man_pd%s-%s-%s', pd_token(man_PD1), ...
+            pd_token(man_PD2Min), pd_token(man_PD2Max));
+        % mcr_tag: MinCylRad token, appended ONLY when man_MinCylRad differs
+        % from the historical default 0.0025 (tolerance 1e-9, to absorb
+        % float round-off) - so every existing tag/filename for a default-
+        % MinCylRad run stays BYTE-IDENTICAL to before this change, and a
+        % non-default MinCylRad becomes a visibly different, unique tag
+        % (round(...*10000) gives 0.1 mm resolution, matching the encoding
+        % scheme already used elsewhere for this same value - see
+        % plot_volumes.py/plot_box.py's mcr token).
+        if abs(man_MinCylRad - 0.0025) < 1e-9
+            mcr_tag = '';
+        else
+            mcr_tag = sprintf('_mcr%03d', round(man_MinCylRad*10000));
+        end
+        recon_tag = [mode_tag mcr_tag];
     else
+        % AUTO mode: MinCylRad is fixed unconditionally at 0.0025 by
+        % create_input.m today (not user-configurable in this mode), so the
+        % tag never varies by it here - mcr_tag stays empty regardless of
+        % whatever man_MinCylRad happens to hold (it's meaningless in AUTO
+        % mode), keeping 'aut' exactly as it is today.
         mode_tag = 'aut';
+        recon_tag = mode_tag;
     end
-    recon_tag = mode_tag;
     simp_tag = sprintf('mo%d_sr%03d_ri%d', simp_MaxOrder, ...
         round(simp_SmallRadii*1000), simp_ReplaceIterations);
     run_tag = [recon_tag '_' simp_tag];
+end
+
+function token = pd_token(value_m)
+    % One PD value (PatchDiam1/2Min/2Max, in metres) -> its tag token,
+    % at the NARROWEST width that still uniquely represents it at
+    % millimetre precision:
+    %   - value is an exact multiple of 0.01 m (every historical PD value
+    %     used so far) -> 2-digit centimetre token, e.g. 0.08 -> '08' -
+    %     BYTE-IDENTICAL to today's round(value*100) formula, so no
+    %     existing filename changes.
+    %   - otherwise -> 3-digit millimetre token, e.g. 0.005 -> '005',
+    %     0.023 -> '023' - gives every non-"clean" value its own unique,
+    %     wider token instead of colliding with whatever clean or unclean
+    %     value happens to round to the same centimetre (e.g. 0.005 and
+    %     0.01 used to both produce '01').
+    % Same conditional-width scheme applied independently to each of the
+    % 3 PD fields - never a blanket 3-digit switch, which would rename
+    % every existing clean-value tag.
+    mm = round(value_m * 1000);
+    if mod(mm, 10) == 0
+        token = sprintf('%02d', mm / 10);
+    else
+        token = sprintf('%03d', mm);
+    end
 end
 
 function island_groups = find_disconnected_islands(parent_arr)
