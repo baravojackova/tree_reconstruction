@@ -4,6 +4,7 @@
 # ...except the code and the results table:
 !.gitignore
 !README.md
+!CHANGELOG_adtree.md
 
 !scripts/
 !scripts/python/
@@ -40,3 +41,6 @@
 
 !results/
 !results/volume_results.csv
+
+!docs/
+!docs/AdTree_Calibration_Summary.docx

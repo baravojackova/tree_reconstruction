@@ -31,6 +31,23 @@ import pandas as pd
 from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import breadth_first_order
 
+# RADIUS_STAT_WEIGHTING: default value for the `weighting` keyword argument
+# of build_quantile_matched_pairs() and compute_order_calibration_factors()
+# (see both, below) - "none" (unweighted, one sample per cylinder regardless
+# of length - today's existing behaviour, byte-identical) or "length" (each
+# cylinder weighted by its own length, so a densely-resampled thin/thick
+# region doesn't over/under-represent itself in the statistic - see
+# CHANGELOG_adtree.md for the length-weighting investigation).
+# This is a REFERENCE DEFAULT ONLY - consistent with this file's "no
+# module-level PARAMETERS block" design (see header comment above), neither
+# function reads this constant directly; each takes `weighting` as an
+# explicit argument (itself defaulting to "none"), so behaviour still
+# depends only on what the CALLER passes, never on hidden module state.
+# adtree_reconstruct_compare.py's own RADIUS_STAT_WEIGHTING parameter is
+# what actually controls a real run - this constant just documents/mirrors
+# its default here, next to the functions it affects.
+RADIUS_STAT_WEIGHTING = "none"     # "none" | "length"
+
 
 def read_ply(path):
     """Read a binary .ply with vertices (x,y,z,radius) and edges (2 indices)."""
@@ -508,7 +525,35 @@ def report_adqsm_thin_branch(path, cut_cm=10.0, params_file=None):
         return None
 
 
-def compute_order_calibration_factors(cyl, cyl_order, adqsm_median_by_order):
+def weighted_quantile(values, weights, quantiles):
+    """Plain cumulative-weight interpolation (no new dependency): sort by
+    value, place each sample at the MIDPOINT of its own cumulative-weight
+    interval (Hazen-type), then linearly interpolate the requested
+    `quantiles` (fractions in [0, 1]) against that cumulative-weight axis
+    via np.interp(). With all weights equal this reduces to the same
+    linear-interpolation quantile convention np.percentile() uses, so it is
+    directly comparable to (and a drop-in weighted replacement for) the
+    unweighted np.percentile()/np.median() calls in
+    build_quantile_matched_pairs()/compute_order_calibration_factors()
+    below.
+
+    Same implementation as scratch_calib_sensitivity.py's own
+    weighted_quantile() (verified there against real data as part of the
+    length-weighting investigation - see CHANGELOG_adtree.md) - reused
+    verbatim here rather than reimplemented, now that it feeds real
+    calibration instead of just a diagnostic."""
+    values = np.asarray(values, dtype=float)
+    weights = np.asarray(weights, dtype=float)
+    sorter = np.argsort(values)
+    values = values[sorter]
+    weights = weights[sorter]
+    cum_weights = np.cumsum(weights) - 0.5 * weights
+    cum_weights = cum_weights / weights.sum()
+    return np.interp(quantiles, cum_weights, values)
+
+
+def compute_order_calibration_factors(cyl, cyl_order, adqsm_median_by_order,
+                                       xyz=None, weighting="none"):
     """Compute the per-branch-order calibration factor dict from a given
     cylinder set: factor = AdQSM_median_radius(order) / AdTree_median_radius
     (order), where the AdTree median is computed over THIS cyl/cyl_order.
@@ -520,14 +565,42 @@ def compute_order_calibration_factors(cyl, cyl_order, adqsm_median_by_order):
     Deliberately separate from apply_order_calibration_factors() so the
     reference cylinder set used to compute factors (a fixed threshold, e.g.
     "[calref=min5mm]") can differ from the cylinder set the factors are
-    later applied to - see apply_order_calibration_factors()."""
+    later applied to - see apply_order_calibration_factors().
+
+    weighting="none" (default): AdTree median is the plain np.median() over
+    one sample per cylinder, regardless of length - BYTE-IDENTICAL to this
+    function's behaviour before `xyz`/`weighting` existed; `xyz` is unused
+    in this path and may be left None.
+    weighting="length": AdTree median is instead the length-weighted median
+    (weighted_quantile() above, quantile=0.5) - each cylinder counted in
+    proportion to its own length, not as one sample regardless of length.
+    `xyz` is REQUIRED in this path (to compute per-cylinder length); passing
+    weighting="length" with xyz=None raises ValueError rather than silently
+    falling back to unweighted.
+
+    Only the AdTree side is ever weighted - adqsm_median_by_order (AdQSM's
+    own reported per-order median, from parse_adqsm_branch_file()) is a
+    population of AdQSM BRANCHES, not cylinders, and carries no comparable
+    per-row length in this context to weight by."""
     orders = np.asarray(cyl_order)
     orig_r = np.array([c[2] for c in cyl])
+    if weighting == "length":
+        if xyz is None:
+            raise ValueError(
+                "compute_order_calibration_factors(weighting='length') requires xyz "
+                "(to compute per-cylinder length) - got xyz=None.")
+        lengths = np.array([float(np.linalg.norm(xyz[b] - xyz[a])) for a, b, r, pid in cyl])
+    elif weighting != "none":
+        raise ValueError("compute_order_calibration_factors: weighting must be "
+                          "'none' or 'length', got %r" % (weighting,))
 
     factors = {}
     for o in sorted(set(orders.tolist()) - {0}):
         mask = orders == o
-        adtree_med = float(np.median(orig_r[mask]))
+        if weighting == "length":
+            adtree_med = float(weighted_quantile(orig_r[mask], lengths[mask], [0.5])[0])
+        else:
+            adtree_med = float(np.median(orig_r[mask]))
         adqsm_med = adqsm_median_by_order.get(o)
         factor = (adqsm_med / adtree_med) if (adqsm_med is not None and adtree_med > 0) else 1.0
         factors[o] = factor
@@ -562,7 +635,8 @@ def apply_order_calibration_factors(xyz, cyl, cyl_order, trunk_radius_func, fact
     return new_r
 
 
-def build_quantile_matched_pairs(ref_cyl, ref_cyl_order, raw_diam_by_order):
+def build_quantile_matched_pairs(ref_cyl, ref_cyl_order, raw_diam_by_order,
+                                  xyz=None, weighting="none"):
     """Build quantile-matched (AdTree_radius, AdQSM_radius) pairs for the
     per-order regression calibration method (see
     fit_radius_regression()/apply_radius_regression_per_order()), as an
@@ -580,6 +654,24 @@ def build_quantile_matched_pairs(ref_cyl, ref_cyl_order, raw_diam_by_order):
     DISTRIBUTIONS per order, not individual branches (which have no
     correspondence between AdTree and AdQSM).
 
+    weighting="none" (default): exactly the np.percentile() call described
+    above - BYTE-IDENTICAL to this function's behaviour before
+    `xyz`/`weighting` existed; `xyz` is unused in this path and may be left
+    None.
+    weighting="length": the AdTree side's percentile lookup is replaced by
+    weighted_quantile() (above), each cylinder weighted by its own length -
+    same percentile POSITIONS (still driven by the AdQSM sort/count, so the
+    number of matched pairs per order is unchanged either way), but a
+    length-weighted value at each position instead of a one-cylinder-one-
+    sample value. `xyz` is REQUIRED in this path (to compute per-cylinder
+    length); passing weighting="length" with xyz=None raises ValueError
+    rather than silently falling back to unweighted.
+
+    Only the AdTree side is ever weighted - the AdQSM side (raw_diam_by_order,
+    from parse_adqsm_branch_file_raw()) is a population of AdQSM BRANCHES,
+    not cylinders, and carries no comparable per-row length in this context
+    to weight by.
+
     Pools the matched pairs from every order into two flat arrays and
     returns (adtree_radii, adqsm_radii, order_labels), where order_labels
     (same length) records which order each pair came from - used only for
@@ -589,6 +681,16 @@ def build_quantile_matched_pairs(ref_cyl, ref_cyl_order, raw_diam_by_order):
     naming it."""
     orders = np.asarray(ref_cyl_order)
     ref_r = np.array([c[2] for c in ref_cyl])
+    if weighting == "length":
+        if xyz is None:
+            raise ValueError(
+                "build_quantile_matched_pairs(weighting='length') requires xyz "
+                "(to compute per-cylinder length) - got xyz=None.")
+        ref_lengths = np.array(
+            [float(np.linalg.norm(xyz[b] - xyz[a])) for a, b, r, pid in ref_cyl])
+    elif weighting != "none":
+        raise ValueError("build_quantile_matched_pairs: weighting must be "
+                          "'none' or 'length', got %r" % (weighting,))
 
     adtree_orders = set(orders.tolist()) - {0}
     adqsm_orders = set(raw_diam_by_order.keys()) - {0}
@@ -606,7 +708,11 @@ def build_quantile_matched_pairs(ref_cyl, ref_cyl_order, raw_diam_by_order):
         if n == 0 or len(adtree_this_order) == 0:
             continue
         pct = np.linspace(0, 100, n)
-        matched_adtree = np.percentile(adtree_this_order, pct)
+        if weighting == "length":
+            matched_adtree = weighted_quantile(
+                adtree_this_order, ref_lengths[orders == o], pct / 100.0)
+        else:
+            matched_adtree = np.percentile(adtree_this_order, pct)
         adtree_parts.append(matched_adtree)
         adqsm_parts.append(adqsm_sorted)
         order_label_parts.append(np.full(n, o))
