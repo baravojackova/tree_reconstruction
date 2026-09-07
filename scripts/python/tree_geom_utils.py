@@ -792,7 +792,7 @@ def apply_radius_regression_per_order(xyz, cyl, cyl_order, trunk_radius_func, or
 
 def plot_radius_regression_per_order(adtree_radii, adqsm_radii, order_labels, group_fits,
                                       tree_name, variant_label, order1_merge_note=None,
-                                      plots_dir="plots"):
+                                      filename_suffix="", plots_dir="plots"):
     """Diagnostic PNG for the per-order (grouped) regression variant
     ([calmethod=regression-perorder], the adopted primary calibration
     method - see CHANGELOG_adtree.md): a log-log scatter of the
@@ -822,7 +822,12 @@ def plot_radius_regression_per_order(adtree_radii, adqsm_radii, order_labels, gr
     imported lazily here too, same pattern as plot_model().
 
     Saved into `plots_dir` (created if missing) as
-    "adtree_adqsm_radius_regression_perorder_<tree_name>_AdQSM<variant>.png".
+    "adtree_adqsm_radius_regression_perorder_<tree_name>_AdQSM<variant><filename_suffix>.png".
+    `filename_suffix` defaults to "" (byte-identical filename to before this
+    parameter existed) - pass e.g. a SEG_VARIANT_SUFFIX-style tag from the
+    caller to keep this diagnostic plot distinct across runs that would
+    otherwise share the same tree_name/variant_label and silently overwrite
+    each other's PNG (see adtree_reconstruct_compare.py's SEG_LEN sweep).
     Returns the saved path."""
     import matplotlib.pyplot as plt
 
@@ -870,8 +875,8 @@ def plot_radius_regression_per_order(adtree_radii, adqsm_radii, order_labels, gr
 
     fig.tight_layout()
 
-    plot_path = os.path.join(plots_dir, "adtree_adqsm_radius_regression_perorder_%s_AdQSM%s.png"
-                              % (tree_name, variant_tag))
+    plot_path = os.path.join(plots_dir, "adtree_adqsm_radius_regression_perorder_%s_AdQSM%s%s.png"
+                              % (tree_name, variant_tag, filename_suffix))
     fig.savefig(plot_path, dpi=150)
     plt.close(fig)
     return plot_path
@@ -973,7 +978,8 @@ def upsert_result(csv_path, tree, method, total, trunk, branch, std, dbh=None, h
                    mode=None, pd1=None, pd2min=None, pd2max=None, mincylrad=None,
                    simp_maxorder=None, simp_smallradii=None, simp_replaceiterations=None,
                    adqsm_variant=None, radius_threshold_mm=None,
-                   seg_min_mm=None, seg_max_mm=None, seg_k_pct=None, calmethod=None):
+                   seg_min_mm=None, seg_max_mm=None, seg_k_pct=None, calmethod=None,
+                   pmdist_mean=None, pmdist_trunk_mean=None, pmdist_branch_mean=None):
     """Insert/update one (tree, method) row in the shared master results CSV
     (see compare_volumes.py for its format). Reads csv_path if it exists
     (creating it with the header if not), removes any existing row with the
@@ -1014,21 +1020,29 @@ def upsert_result(csv_path, tree, method, total, trunk, branch, std, dbh=None, h
     default (blank string when not given), same convention as
     adqsm_variant - "AdTree raw" rows correctly leave it blank (raw rows
     have no calibration method at all, same reasoning as why they leave
-    adqsm_variant blank)."""
+    adqsm_variant blank).
+
+    pmdist_mean/pmdist_trunk_mean/pmdist_branch_mean: TreeQSM's
+    point-to-cylinder fit quality (see runsken.m section 19 and
+    import_matlab_results.py's read_params_file()) - not applicable to
+    AdTree rows, so every EXISTING caller in THIS file leaves these
+    columns blank, same convention as mode/pd1/... above."""
     # n_cylinders is the LAST column (Task A), added after branch_filter so
     # every existing column keeps its position - old rows/readers relying
     # on column position elsewhere are unaffected. mode/pd1/.../
     # simp_replaceiterations are appended after n_cylinders for the same
     # reason, adqsm_variant/radius_threshold_mm/seg_min_mm/seg_max_mm/
-    # seg_k_pct are appended after THOSE for the same reason again, and
-    # calmethod is appended after those - this is now the LAST column.
+    # seg_k_pct are appended after THOSE for the same reason again,
+    # calmethod is appended after those, and pmdist_mean/pmdist_trunk_mean/
+    # pmdist_branch_mean are appended after calmethod - this is now the
+    # LAST group of columns.
     header = ["tree", "method", "total_m3", "trunk_m3", "branch_m3", "std_m3",
               "dbh_m", "height_m", "taper_cm_per_m", "trunk_len_m", "branch_len_m",
               "branch_filter", "n_cylinders",
               "mode", "pd1_m", "pd2min_m", "pd2max_m", "mincylrad_m",
               "simp_maxorder", "simp_smallradii", "simp_replaceiterations",
               "adqsm_variant", "radius_threshold_mm", "seg_min_mm", "seg_max_mm", "seg_k_pct",
-              "calmethod"]
+              "calmethod", "pmdist_mean", "pmdist_trunk_mean", "pmdist_branch_mean"]
 
     def fmt(x):
         return "" if x is None else "%.6f" % x
@@ -1057,7 +1071,9 @@ def upsert_result(csv_path, tree, method, total, trunk, branch, std, dbh=None, h
                  "simp_replaceiterations": fmt(simp_replaceiterations),
                  "adqsm_variant": adqsm_variant or "", "radius_threshold_mm": fmt(radius_threshold_mm),
                  "seg_min_mm": fmt(seg_min_mm), "seg_max_mm": fmt(seg_max_mm), "seg_k_pct": fmt(seg_k_pct),
-                 "calmethod": calmethod or ""})
+                 "calmethod": calmethod or "",
+                 "pmdist_mean": fmt(pmdist_mean), "pmdist_trunk_mean": fmt(pmdist_trunk_mean),
+                 "pmdist_branch_mean": fmt(pmdist_branch_mean)})
 
     with open(csv_path, "w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=header)

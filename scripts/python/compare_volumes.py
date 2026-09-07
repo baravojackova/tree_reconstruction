@@ -75,7 +75,8 @@ SELECT_TREE = "ALL"
 
 # The method used as the "truth" that everything is compared against. Must
 # match a value in the 'method' column exactly.
-REFERENCE_METHOD = "Reference (destructive)"
+REFERENCE_METHOD = "Reference (destructive)" \
+""
 
 # The "reference" for MODE B (branch_filter == "none", methods compared to
 # EACH OTHER - see the header comment above). The destructive field
@@ -190,6 +191,21 @@ def load_results(path):
                 # Same blank-or-missing-column convention as adqsm_variant
                 # above (blank string, not None, when not given/missing).
                 "calmethod": (r.get("calmethod") or "").strip(),
+                # pmdist_mean/pmdist_trunk_mean/pmdist_branch_mean: TreeQSM's
+                # point-to-cylinder fit quality (see runsken.m section 19) -
+                # unlike pd1_m/dbh_m/etc. above, these CSV headers have no
+                # unit suffix to strip, so the dict key is identical to the
+                # CSV header (confirmed against every other column's own
+                # naming in this same function - some strip a "_m"/"_m3"/
+                # "_cm_per_m" unit suffix, others, like radius_threshold_mm/
+                # seg_min_mm/seg_k_pct above, keep theirs verbatim; these
+                # three have nothing to strip either way). Same to_float()
+                # missing-value convention as every other optional numeric
+                # column here - blank/missing (e.g. AdTree rows, which never
+                # set these) -> None, not 0.0 and not a crash.
+                "pmdist_mean": to_float(r.get("pmdist_mean")),
+                "pmdist_trunk_mean": to_float(r.get("pmdist_trunk_mean")),
+                "pmdist_branch_mean": to_float(r.get("pmdist_branch_mean")),
             })
     return rows
 

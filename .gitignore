@@ -26,6 +26,11 @@
 !scripts/python/calmethod_decision_summary.py
 !scripts/python/taper_curve_compare.py
 !scripts/python/reconstruction_method_decision_summary.py
+!scripts/python/adqsm_variant_sensitivity.py
+!scripts/python/adqsm_build_median_variant.py
+!scripts/python/plot_style.py
+!scripts/python/scratch_skeleton_diag.py
+!scripts/python/plot_param_sweep.py
 
 !scripts/matlab/
 !scripts/matlab/runsken.m
