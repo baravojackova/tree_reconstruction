@@ -237,7 +237,7 @@ end
 
 % Switch 1 (master switch): must be hand-edited to true, otherwise this
 % whole cell is a no-op - same default-off philosophy as clean_start.
-archive_by_tag = fasle;
+archive_by_tag = false;
 
 % archive_tags: cell array of tag substrings - Bara edits this list by
 % hand before enabling the switch above. A file is selected if its name
