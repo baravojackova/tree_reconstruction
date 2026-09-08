@@ -487,6 +487,67 @@ QUESTION** - not investigated here, recorded for future follow-up.
 
 ---
 
+## Step 13 - Checked branch-order correspondence between AdQSM and AdTree across four trees; no fixed offset found
+
+**Files:** none (documentation only - no pipeline code changed; investigation
+used the read-only scratch script `scratch_order_alignment.py`)
+
+**Motivation:** after the length-weighting fix (Step 12), the per-order
+fitted coefficient ratio between two `SEG_LEN` cases still rose
+monotonically with branch order - `1.006, 1.009, 1.028, 1.056, 1.066, 1.079,
+1.105` for orders 1-7 - suggesting AdQSM and AdTree might not label branch
+order equivalently (e.g. AdQSM's own fork detection missing some forks going
+up the crown, so a branch AdTree calls order `o+k` is called order `o` by
+AdQSM).
+
+**Method:** for each tree, AdQSM's per-order median branch diameter
+(`BranchStructure.txt`) was compared against AdTree's LENGTH-WEIGHTED
+per-order median diameter at integer order shifts `k = 0..6`, scoring each
+`k` by the standard deviation of `log(AdTree/AdQSM)` across the order pairs.
+A genuine definitional offset between the two tools would show up as the
+same best `k` on every tree.
+
+**Result - a fixed offset is ruled out:**
+
+| tree | max order (pairs) | best k | std at best k | std at k=0 |
+|---|---|---|---|---|
+| B21_S01 | 7 (7 pairs) | 2 | 0.138 | 0.541 |
+| IND07_083 | 7 (7 pairs) | 2 | 0.069 | 0.484 |
+| IND01_054 | 8 (8 pairs) | 0 | 0.150 | 0.150 (best k IS 0) |
+| IND03_088 | 8 (8 pairs) | 0 | 0.204 | 0.204 (best k IS 0) |
+
+The `std` values come from unequal pair counts (7 vs. 8) and are not
+directly comparable magnitudes between the two groups.
+
+**Decision:** order-based pairing is left UNCHANGED. Two of the four trees
+do not support any shift at all (their own best `k` is 0), so introducing a
+shift on the strength of the other two would make the calibration worse for
+half the trees checked, not better - not adopted.
+
+Neither AdQSM's `Introduction.pdf` nor AdTree's `ReadMe.txt` defines branch
+order, so this could only be settled empirically, not from documentation.
+
+**Two incidental findings, recorded for future reference:**
+
+1. On all four trees, AdQSM's branch count per order rises to a peak around
+   order 4-5 and then falls (e.g. B21_S01: 48, 601, 3034, 6496, 6282, 3607,
+   1194). A real tree's branch count should keep rising with order, so this
+   is consistent with AdQSM's fork detection ceasing to resolve further
+   forks, rather than the tree's branching structure actually ending there.
+2. The AdTree/AdQSM median-diameter ratio itself differs roughly twofold
+   between trees: **0.17-0.30** for B21_S01 and IND07_083, **0.44-0.58** for
+   IND01_054 and IND03_088. Unexplained.
+
+**Observation only, not a finding:** the best-`k` split lines up exactly
+with maximum branch order - the two trees reaching order 7 (B21_S01,
+IND07_083) both prefer `k=2`; the two reaching order 8 (IND01_054,
+IND03_088) both prefer `k=0`. With only four trees, this could equally be
+coincidence - the same two trees also happen to split the same way by site
+and by other properties not examined here. Recorded as something to watch
+for as more trees are processed, not written up as an established pattern.
+
+---
+
 ## Open items
 
 - The remaining gap between the primary calibration's `>=10cm`-filtered

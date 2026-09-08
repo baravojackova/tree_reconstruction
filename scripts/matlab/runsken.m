@@ -243,13 +243,28 @@ archive_by_tag = false;
 % hand before enabling the switch above. A file is selected if its name
 % contains AT LEAST ONE of these strings anywhere (case-sensitive exact
 % substring match - see the filter step below for why).
-archive_tags = {'B21_S01_man_pd07-005-10_mo8_sr005_ri0'
+archive_tags = {'B21_S04_man_pd05-001-10_mo9_sr005_ri0.txt',...
+    'B21_S04_man_pd05-001-10_mo9_sr005_ri1.txt',...
+    'B21_S04_man_pd05-001-10_mo9_sr005_ri2.txt',...
+    'B21_S04_man_pd05-001-10_mo9_sr005_ri3.txt',...
+    'B21_S04_man_pd05-001-10_mo9_sr010_ri0.txt',...
+    'B21_S04_man_pd05-001-10_mo9_sr010_ri1.txt',...
+    'B21_S04_man_pd05-001-10_mo9_sr010_ri2.txt',...
+    'B21_S04_man_pd05-001-10_mo9_sr010_ri3.txt',...
+    'B21_S04_man_pd05-001-10_mo9_sr015_ri0.txt',...
+    'B21_S04_man_pd05-001-10_mo9_sr015_ri1.txt',...
+    'B21_S04_man_pd05-001-10_mo9_sr015_ri2.txt',...
+    'B21_S04_man_pd05-001-10_mo9_sr015_ri3.txt',...
+    'B21_S04_man_pd05-001-10_mo9_sr020_ri0.txt',...
+    'B21_S04_man_pd05-001-10_mo9_sr020_ri1.txt',...
+    'B21_S04_man_pd05-001-10_mo9_sr020_ri2.txt',...
+    'B21_S04_man_pd05-001-10_mo9_sr020_ri3.txt',...
     };
 
 % Switch 2 (dry run): default TRUE here (unlike clean_start's current
 % false) - this is a NEW, less-tested code path, so it defaults to the
 % safe preview-only behavior until Bara has reviewed a real matched list.
-archive_dry_run = true;
+archive_dry_run = false;
 
 % Switch 3 (archive vs. delete): false (default, SAFE) = ARCHIVE - move
 % matched files into archive\<timestamp>_bytag\ instead of deleting them,
@@ -443,7 +458,7 @@ cloud_txt = 'B21_S04_noplate_clean.txt';   % input point cloud (text file, 3 col
 
 % --- number of models ----------------------------------------
 n_models_first = 5;    % models per parameter combination, first (coarse) run
-n_models_opt   = 25;   % models with the optimal inputs, second run
+n_models_opt   = 10;   % models with the optimal inputs, second run
 
 % false (default, SAFE) = if a res_file/res_new_file already exists for
 % this EXACT run_tag, SKIP make_models and just load the existing file
@@ -462,17 +477,17 @@ n_workers = 0;         % 0 = derive automatically from the number of tasks
 % define_input(P, nPD1, nPD2Min, nPD2Max) = how many values are tested
 % for each of the three patch-diameter parameters
 % !!! if manual input nPD = 1
-nPD1    = 3;
-nPD2Min = 3;
-nPD2Max = 3;
+nPD1    = 1;
+nPD2Min = 1;
+nPD2Max = 1;
 
 % --- MANUAL PatchDiam (see section 9) ------------------------
-manual_patchdiam = false;   % false = keep everything from define_input
+manual_patchdiam = true;   % false = keep everything from define_input
 
 % PatchDiam1 (rought first cover) has to be t ≥ PatchDiam2Max (gentle cover)
 
-man_PD1    = 0.07;   % PatchDiam1     - AdQSM paper, Indonesian site 0,08
-man_PD2Min = 0.005;   % PatchDiam2Min
+man_PD1    = 0.05;   % PatchDiam1     - AdQSM paper, Indonesian site 0,08
+man_PD2Min = 0.002;   % PatchDiam2Min
 man_PD2Max = 0.1;   % PatchDiam2Max
 man_MinCylRad = 0.0025; % MinCylRad default 0.0025 0.0373
 
@@ -490,7 +505,7 @@ plot_optimal = true;   % true = plot the optimal QSM before simplification
 %                    cylinders inside one branch with one longer cylinder
 % --- simplification settings ---------------------------------
 simp_MaxOrder          = 9;
-simp_SmallRadii        = 0.005;          %def 0.005
+simp_SmallRadii        = 0.02;          %def 0.005
 simp_ReplaceIterations = 0;              %def 0
 simp_Plot              = 1;
 simp_Disp              = 1;

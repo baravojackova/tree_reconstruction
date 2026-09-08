@@ -32,7 +32,13 @@ import statistics
 import matplotlib.pyplot as plt
 
 from compare_volumes import RESULTS_CSV, load_results, to_float
-from plot_volumes import ensure_plots_dir, PLOTS_DIR, treeqsm_pd_token, _pd_field_token
+from plot_volumes import treeqsm_pd_token, _pd_field_token
+# ensure_tree_plots_dir(): this chart is per-tree (param_sweep_<tree>_
+# <param>.png), so it is routed to plots/<tree>/ - replaces the
+# ensure_plots_dir()/PLOTS_DIR import this file used to have (no longer
+# needed: they had one call site each, both below). Imported directly
+# from paths.py since that is the actual source of truth for it.
+from paths import ensure_tree_plots_dir
 from plot_style import (
     FAMILY_GRADIENTS,
     family_shades,
@@ -447,8 +453,7 @@ def run():
                  fontsize=TITLE_FONTSIZE)
     fig.tight_layout(rect=[0, 0.04, 1, 0.96])
 
-    ensure_plots_dir()   # creates PLOTS_DIR if it doesn't exist yet
-    out_path = os.path.join(PLOTS_DIR, "param_sweep_%s_%s.png" % (SELECT_TREE, SWEEP_PARAM))
+    out_path = os.path.join(ensure_tree_plots_dir(SELECT_TREE), "param_sweep_%s_%s.png" % (SELECT_TREE, SWEEP_PARAM))
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print("Saved:", out_path)

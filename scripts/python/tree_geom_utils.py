@@ -898,7 +898,7 @@ def apply_radius_regression_per_order(xyz, cyl, cyl_order, trunk_radius_func, or
 
 def plot_radius_regression_per_order(adtree_radii, adqsm_radii, order_labels, group_fits,
                                       tree_name, variant_label, order1_merge_note=None,
-                                      filename_suffix="", plots_dir="plots"):
+                                      filename_suffix="", plots_dir=None):
     """Diagnostic PNG for the per-order (grouped) regression variant
     ([calmethod=regression-perorder], the adopted primary calibration
     method - see CHANGELOG_adtree.md): a log-log scatter of the
@@ -934,8 +934,25 @@ def plot_radius_regression_per_order(adtree_radii, adqsm_radii, order_labels, gr
     caller to keep this diagnostic plot distinct across runs that would
     otherwise share the same tree_name/variant_label and silently overwrite
     each other's PNG (see adtree_reconstruct_compare.py's SEG_LEN sweep).
+
+    `plots_dir` is REQUIRED (no default) - it used to silently default to
+    the bare "plots" string, which is exactly how the caller in
+    adtree_reconstruct_compare.py forgetting to pass its own per-tree
+    FIGURES_DIR produced 90 PNGs loose directly in plots/ instead of under
+    plots/<tree>/. Raising here instead of silently falling back to some
+    directory of this function's own choosing makes that mistake fail
+    loudly, at the call site, instead of quietly misplacing files again.
+
     Returns the saved path."""
     import matplotlib.pyplot as plt
+
+    if plots_dir is None:
+        raise ValueError(
+            "plot_radius_regression_per_order() requires an explicit "
+            "plots_dir (the caller's own per-tree output directory, e.g. "
+            "ensure_tree_plots_dir(tree_name) from paths.py) - it no "
+            "longer defaults to a bare 'plots' string, since that is what "
+            "caused PNGs to land loose in plots/ instead of plots/<tree>/.")
 
     if not os.path.isdir(plots_dir):
         os.makedirs(plots_dir)

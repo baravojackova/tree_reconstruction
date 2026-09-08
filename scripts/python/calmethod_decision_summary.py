@@ -58,9 +58,18 @@ from compare_volumes import (
     resolve_reference_method_none,
 )
 
+# ensure_all_plots_dir/ensure_csv_dir: this file used to define its own
+# LOCAL ensure_plots_dir()/PLOTS_DIR = "plots" (an independent
+# re-implementation of the exact same logic plot_volumes.py already had -
+# scratch_output_path_audit.md flagged this as one of three separate
+# copies). Both now come from paths.py instead - the chart this script
+# produces pools across every reference tree (see build_summary_rows()
+# below), so it uses ensure_all_plots_dir() (plots/all/), not a per-tree
+# directory.
+from paths import ensure_all_plots_dir, ensure_csv_dir
+
 # =====================  PARAMETERS  ==================================
-OUTPUT_CSV = "calmethod_decision_summary.csv"
-PLOTS_DIR = "plots"   # same convention as plot_volumes.py
+OUTPUT_CSV = "calmethod_decision_summary.csv"   # written under csv/ - see ensure_csv_dir() at the write site below
 
 FIELDS = ["total", "trunk", "branch"]
 CALMETHODS = ["min5mm", "regression-perorder"]
@@ -161,12 +170,6 @@ def tree_spread_std(per_tree_mean_pct, trees):
     return math.sqrt(sum((v - mean) ** 2 for v in vals) / len(vals))
 
 
-def ensure_plots_dir():
-    if not os.path.isdir(PLOTS_DIR):
-        os.makedirs(PLOTS_DIR)
-    return PLOTS_DIR
-
-
 def build_summary_rows(rows, reference_method_10cm, reference_method_none):
     """One dict per (field, branch_filter, calmethod) - see the module
     header / STEP 4 in the task this script was written for. Also returns
@@ -219,12 +222,13 @@ def write_summary_csv(summary_rows):
     # not n-1) of the 3 reference trees' own mean %% errors - noted here in
     # the header comment (not a separate column) since that's what the
     # number in that column actually is.
-    with open(OUTPUT_CSV, "w", newline="", encoding="utf-8") as f:
+    out_path = os.path.join(ensure_csv_dir(), OUTPUT_CSV)
+    with open(out_path, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=fieldnames)
         w.writeheader()
         for row in summary_rows:
             w.writerow(row)
-    print("Wrote:", OUTPUT_CSV)
+    print("Wrote:", out_path)
 
 
 def print_cancellation_check(summary_rows):
@@ -284,7 +288,7 @@ def plot_calmethod_decision_chart(summary_rows, field):
     ax.legend()
     fig.tight_layout()
 
-    out_path = os.path.join(ensure_plots_dir(), "calmethod_decision_%s.png" % field)
+    out_path = os.path.join(ensure_all_plots_dir(), "calmethod_decision_%s.png" % field)
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print("Saved:", out_path)

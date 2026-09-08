@@ -32,6 +32,8 @@
 !scripts/python/plot_style.py
 !scripts/python/scratch_skeleton_diag.py
 !scripts/python/plot_param_sweep.py
+!paths.py
+!tree_coverage_check.py
 
 !scripts/matlab/
 !scripts/matlab/runsken.m

@@ -62,6 +62,17 @@ from tree_geom_utils import (
     _fmt_dbh, _fmt_taper, print_volume_stats, raw_skeleton_stats,
     report_volume, plot_model,
 )
+# PLOTS_DIR: FIGURES_DIR below is built from this instead of a local bare
+# "plots" literal, so paths.py stays the single place that name is
+# defined project-wide (see paths.py's own header for why).
+# ensure_tree_geom_dir(): the plot_model() call below (tree-SHAPE render
+# PNG, derived from a geom_*.txt-style stub) is routed to plots/<tree>/
+# geom/ - a DIFFERENT artifact from the adtree_adqsm_radius_regression_
+# perorder_*.png diagnostic saved via FIGURES_DIR above, which stays
+# directly under plots/<tree>/, not geom/ (see paths.py's own
+# ensure_tree_geom_dir() docstring for this same "two different things
+# both named 'geom'" distinction).
+from paths import PLOTS_DIR, ensure_tree_geom_dir
 
 # =====================  PARAMETERS  ===================================
 # PRINT_TIMING: print wall-clock elapsed seconds (time.perf_counter()) for
@@ -76,7 +87,7 @@ PRINT_TIMING = True
 # trees - it names this tree's row in the shared results table (RESULTS_CSV,
 # see upsert_result() calls below) AND builds AdQSM_DIR/AdTree_DIR/INPUT_PLY
 # right below it automatically, so those don't need editing separately.
-TREE_NAME = "B21_S01"
+TREE_NAME = "B21_S04"
 
 # Base folder holding every tree's data, one subfolder per tree named after
 # TREE_NAME (e.g. ".../data/IND07_083/..."). Change this only if you move the
@@ -108,7 +119,7 @@ AdQSM_DIR = os.path.join(DATA_ROOT, TREE_NAME, "05")
 # Each name in ADQSM_VARIANTS must be a subfolder of ADQSM_BASE_DIR that
 # contains its own taper.txt, BranchStructure.txt and TreesParams.txt.
 ADQSM_BASE_DIR = os.path.join(DATA_ROOT, TREE_NAME)
-ADQSM_VARIANTS = ["999"]
+ADQSM_VARIANTS = ["090","999"]
 
 AdTree_DIR = os.path.join(DATA_ROOT, TREE_NAME)
 
@@ -120,8 +131,7 @@ INPUT_PLY = os.path.join(AdTree_DIR, "%s_noplate_clean_skeleton.ply" % TREE_NAME
 # Remove all branches whose radius is below this threshold. The trunk (branch order 0) is never removed, even if its radius is below the threshold.
 # Example of a single variant:   RADIUS_THRESHOLDS = [0.010]
 # Example of several variants:   RADIUS_THRESHOLDS = [0.010, 0.020, 0.030]
-RADIUS_THRESHOLDS = [0.005,0.01,0.015,0.02
-                    ]        # 0.030 m = 30 mm radius (60 mm diameter)
+RADIUS_THRESHOLDS = [0.005,0.01,0.015,0.02]        # 0.030 m = 30 mm radius (60 mm diameter)
 
 # Fixed reference threshold(s) (in METERS) used to build the
 # "[calref=minXmm]" calibration factors (see the "FIXED calibration
@@ -195,8 +205,8 @@ MIN_PAIRS_PER_ORDER = 15
 # AdTree radius) at the smallest K (0.5) in the grid, so the trunk always
 # stays in the linear (non-floor) region of local_seg_len() for every
 # combination in this grid.
-SEG_LEN_MIN_LIST = [0.065]   # metres  -- STEP 1 clean invariance run: case B, same session as case A
-SEG_LEN_K_LIST   = [0.5]     # dimensionless
+SEG_LEN_MIN_LIST = [0.035, 0.05, 0.065]   # metres  -- STEP 1 clean invariance run: case B, same session as case A
+SEG_LEN_K_LIST   = [0.5, 0.8, 1.0]    # dimensionless
 SEG_LEN_MAX      = 0.5                     # longest allowed segment (m), for the trunk - unchanged, still scalar
 
 # --- Short suffix identifying THIS resampling configuration -------------
@@ -325,13 +335,13 @@ RESULTS_CSV = "volume_results.csv"
 
 # Output folders, so the working directory doesn't fill up with dozens of
 # .npz/.png files mixed in with the scripts. NPZ_DIR is this script's own
-# new folder; FIGURES_DIR reuses the project's existing "plots/" convention
-# (already used by plot_box.py/plot_volumes.py for their own charts),
-# grouped under a per-tree subfolder. export_geom_ansys.py has its OWN
-# matching NPZ_DIR parameter (see that file) - keep both in sync by hand if
-# this one ever changes.
+# new folder; FIGURES_DIR reuses the project's shared PLOTS_DIR convention
+# (paths.py - already used by plot_box.py/plot_volumes.py for their own
+# charts), grouped under a per-tree subfolder. export_geom_ansys.py has its
+# OWN matching NPZ_DIR parameter (see that file) - keep both in sync by
+# hand if this one ever changes.
 NPZ_DIR = "npz"
-FIGURES_DIR = os.path.join("plots", TREE_NAME)
+FIGURES_DIR = os.path.join(PLOTS_DIR, TREE_NAME)
 
 # Reference heights [m] used for DBH (lower) and the taper metric (lower/
 # upper). DBH is the stem diameter at TAPER_H_LOWER (1.3 m = breast height).
@@ -737,7 +747,7 @@ for variant_label, taper_file, branch_file, params_file in ADQSM_VARIANT_LIST:
                     regression_perorder_plot_path = plot_radius_regression_per_order(
                         adtree_matched, adqsm_matched, order_labels_matched, group_fits,
                         TREE_NAME, variant_label, order1_merge_note=order1_merge_note,
-                        filename_suffix=SEG_VARIANT_SUFFIX)
+                        filename_suffix=SEG_VARIANT_SUFFIX, plots_dir=FIGURES_DIR)
                     print("  Saved per-order regression diagnostic plot: %s" % regression_perorder_plot_path)
             else:
                 seg_variant_suffix_by_weighting = {None: SEG_VARIANT_SUFFIX_BASE}
@@ -1155,10 +1165,16 @@ for variant_label, taper_file, branch_file, params_file in ADQSM_VARIANT_LIST:
                         # `out` itself is NOT touched here (see the NPZ_DIR/FIGURES_DIR
                         # comment above) - it's also stored verbatim as `geom_filename`
                         # inside the .npz below, for export_geom_ansys.py to read back
-                        # later as the bare (no-folder) name it should write. FIGURES_DIR
-                        # is prefixed ONLY at this call site, purely to steer where
-                        # plot_model() derives its PNG path from (out.txt -> out.png).
-                        plot_model(xyz, final_cyl, root, RECENTER_XY, thr, os.path.join(FIGURES_DIR, out), SHOW_PLOT, SAVE_PLOT_PNG)
+                        # later as the bare (no-folder) name it should write.
+                        # ensure_tree_geom_dir(TREE_NAME) (plots/<tree>/geom/) is
+                        # prefixed ONLY at this call site, purely to steer where
+                        # plot_model() derives its PNG path from (out.txt -> out.png) -
+                        # this is the tree-SHAPE render PNG, routed to plots/<tree>/
+                        # geom/ specifically (NOT plots/<tree>/ directly, which is
+                        # where the adtree_adqsm_radius_regression_perorder_*.png
+                        # diagnostic above goes via FIGURES_DIR - a different artifact).
+                        plot_model(xyz, final_cyl, root, RECENTER_XY, thr,
+                                   os.path.join(ensure_tree_geom_dir(TREE_NAME), out), SHOW_PLOT, SAVE_PLOT_PNG)
 
                 if PRINT_TIMING:
                     print("  [TIMING] RADIUS_THRESHOLDS iteration thr=%.3f (total): %.2f s"

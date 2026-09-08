@@ -34,8 +34,9 @@
 #      shorten_method_label() (method -> short display string),
 #      FAMILY_GRADIENTS/classify_family() (the shared "method family ->
 #      colour" scheme - see plot_volumes.py's "Shared colour scheme"
-#      section for the full rationale), and ensure_plots_dir()/PLOTS_DIR
-#      (shared output folder).
+#      section for the full rationale).
+#    - paths.py: ensure_tree_plots_dir() (shared per-tree output folder,
+#      plots/<tree>/).
 #
 #  Colour scheme note: since this chart colours GROUPS (not individual
 #  methods), a group's colour is derived from classify_family() applied to
@@ -65,9 +66,14 @@ from compare_volumes import RESULTS_CSV, REFERENCE_METHOD, load_results, to_floa
 from plot_volumes import (
     OVERVIEW_NCOLS,
     shorten_method_label, FAMILY_GRADIENTS, classify_family,
-    ensure_plots_dir,
     treeqsm_pd_token, _pd_field_token,
 )
+# ensure_tree_plots_dir(): this chart is per-tree (<tree>_boxplot_
+# <branch_filter>.png), so it is routed to plots/<tree>/ rather than
+# loose in plots/ - replaces the ensure_plots_dir() import this file used
+# to have (no longer needed: this was its only call site). Imported
+# directly from paths.py since that is the actual source of truth for it.
+from paths import ensure_tree_plots_dir
 # Shared visual style (colors/sizes) - see plot_style.py's own header.
 # TREEQSM_REF_LINE_COLOR/BOX_TITLE_FONTSIZE/BOX_LABEL_FONTSIZE/
 # POINT_LABEL_FONTSIZE/JITTER_POINT_SIZE used to be defined locally in
@@ -1168,7 +1174,7 @@ def build_boxplot_figure(rows, tree, branch_filter):
         fig.subplots_adjust(bottom=BOX_BOTTOM_MARGIN)
 
     if SAVE_PLOT_PNG:
-        out_path = os.path.join(ensure_plots_dir(), "%s_boxplot_%s.png" % (tree, branch_filter))
+        out_path = os.path.join(ensure_tree_plots_dir(tree), "%s_boxplot_%s.png" % (tree, branch_filter))
         fig.savefig(out_path, dpi=200, bbox_inches="tight")
         print("Saved:", out_path)
 

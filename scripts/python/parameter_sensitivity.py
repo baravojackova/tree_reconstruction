@@ -40,8 +40,15 @@ import matplotlib.colors as mcolors
 import matplotlib.lines as mlines
 
 from compare_volumes import RESULTS_CSV, REFERENCE_METHOD, load_results, resolve_reference_method_none
-from plot_volumes import classify_family, ensure_plots_dir, shorten_method_label
+from plot_volumes import classify_family, shorten_method_label
 from plot_box import parse_treeqsm_method
+# ensure_tree_plots_dir()/ensure_all_plots_dir(): _save() below routes
+# per-tree charts to plots/<tree>/ and pooled-across-trees charts
+# (tree=None) to plots/all/ - replaces the ensure_plots_dir() import this
+# file used to have (no longer needed: both of _output_dir()/_save()'s
+# call sites now use one of these two instead). Imported directly from
+# paths.py since that is the actual source of truth for both.
+from paths import ensure_tree_plots_dir, ensure_all_plots_dir
 # FAMILY_GRADIENTS/TREE_MARKERS used to come from plot_volumes.py and
 # TREEQSM_REF_LINE_COLOR from plot_box.py - all three now live in
 # plot_style.py instead (source swap only, same values, no rendered change).
@@ -268,16 +275,15 @@ def _fmt_num(v):
 def _output_dir(tree):
     """plots/<tree>/ - same per-tree subfolder convention
     adtree_reconstruct_compare.py's own FIGURES_DIR already established,
-    built on top of ensure_plots_dir() (plots/) rather than duplicating it."""
-    out_dir = os.path.join(ensure_plots_dir(), tree)
-    os.makedirs(out_dir, exist_ok=True)
-    return out_dir
+    built on top of paths.py's ensure_tree_plots_dir() rather than
+    duplicating it."""
+    return ensure_tree_plots_dir(tree)
 
 
 def _save(fig, family, branch_filter, metric, chart, tree=None):
     """Save into plots/<tree>/sensitivity_<family>_<branch_filter>_<metric>_<chart>.png
     when `tree` is given (single-tree charts, unchanged from before this
-    tree parameter existed), or directly into plots/ as
+    tree parameter existed), or into plots/all/ as
     sensitivity_multitree_<family>_<branch_filter>_<metric>_<chart>.png
     when `tree` is None (the pooled-across-trees functions) - the
     "multitree" filename tag keeps pooled and per-tree outputs from ever
@@ -287,7 +293,7 @@ def _save(fig, family, branch_filter, metric, chart, tree=None):
         out_path = os.path.join(out_dir, "sensitivity_%s_%s_%s_%s.png" % (family, branch_filter, metric, chart))
     else:
         out_path = os.path.join(
-            ensure_plots_dir(), "sensitivity_multitree_%s_%s_%s_%s.png" % (family, branch_filter, metric, chart))
+            ensure_all_plots_dir(), "sensitivity_multitree_%s_%s_%s_%s.png" % (family, branch_filter, metric, chart))
     fig.savefig(out_path, dpi=200, bbox_inches="tight")
     plt.close(fig)
     print("Saved:", out_path)

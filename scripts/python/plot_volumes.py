@@ -49,9 +49,10 @@
 #        trees, only across methods for the SAME tree), so both mode's PNGs
 #        are always drawn for every tree found in the CSV.
 #
-#  All PNGs are written into a "plots" subfolder next to this script
-#  (created automatically if it doesn't exist yet). The path of each saved
-#  file is printed to the console.
+#  All PNGs are written under a "plots" subfolder next to this script
+#  (created automatically if it doesn't exist yet) - per-tree charts under
+#  plots/<tree>/, cross-tree charts under plots/all/ (see paths.py). The
+#  path of each saved file is printed to the console.
 #
 #  Colour scheme: every chart above shares ONE {method: colour} mapping per
 #  mode (see build_method_color_map()), so the same method is always the
@@ -103,10 +104,26 @@ from plot_style import (
     ANNOTATION_FONTSIZE,
 )
 
+# PLOTS_DIR/ensure_plots_dir: this file used to define both of these
+# ITSELF (the "canonical" copy scratch_output_path_audit.md found - two
+# other files, calmethod_decision_summary.py and
+# reconstruction_method_decision_summary.py, each had their own
+# INDEPENDENT re-implementation of the same logic). Both now live in
+# paths.py instead, imported here like everywhere else. Re-exported under
+# their EXACT original names (no renaming) because four other files
+# (plot_param_sweep.py, plot_box.py, adqsm_variant_sensitivity.py,
+# parameter_sensitivity.py) import ensure_plots_dir/PLOTS_DIR FROM THIS
+# FILE, not from paths.py directly - `from plot_volumes import
+# ensure_plots_dir` keeps working unchanged since importing a name into
+# this module's namespace makes it an attribute of this module too.
+from paths import (
+    PLOTS_DIR,
+    ensure_plots_dir,
+    ensure_tree_plots_dir,
+    ensure_all_plots_dir,
+)
+
 # =====================  PARAMETERS  ==================================
-# Folder (relative to this script's working directory) where the PNG
-# charts are saved. Created automatically if it doesn't exist.
-PLOTS_DIR = "plots"
 
 # ---- plot_tree_overview() panel layout -------------------------------
 # Tune how plot_tree_overview()'s per-metric panels are sized and
@@ -273,17 +290,18 @@ def resolve_selected_methods_multi_tree(rows, branch_filter, selected_methods, m
     return methods
 
 
-def ensure_plots_dir():
-    """Create PLOTS_DIR if it doesn't exist yet, and return its path."""
-    if not os.path.isdir(PLOTS_DIR):
-        os.makedirs(PLOTS_DIR)   # makedirs (not mkdir) also creates parent folders if needed
-    return PLOTS_DIR
+def save_and_report(fig, filename, out_dir):
+    """Save one matplotlib figure into out_dir, close it (frees memory),
+    and print the full path so you know where to look for it.
 
-
-def save_and_report(fig, filename):
-    """Save one matplotlib figure into PLOTS_DIR, close it (frees memory),
-    and print the full path so you know where to look for it."""
-    out_path = os.path.join(ensure_plots_dir(), filename)
+    out_dir is now a REQUIRED parameter (used to default to PLOTS_DIR's
+    bare root via ensure_plots_dir()) - every call site below now passes
+    ensure_tree_plots_dir(tree) for a chart scoped to one tree, or
+    ensure_all_plots_dir() for a chart that pools across trees, so nothing
+    lands loose directly in PLOTS_DIR any more (that bare-root placement
+    was exactly the "90 misplaced files" bug scratch_output_path_audit.md
+    found)."""
+    out_path = os.path.join(out_dir, filename)
     fig.savefig(out_path, dpi=PLOT_DPI, bbox_inches="tight")
     plt.close(fig)
     print("Saved:", out_path)
@@ -880,7 +898,7 @@ def plot_total_volume_by_tree(rows, color_map):
     # Legend outside the plot area (to the right) so it doesn't cover bars.
     ax.legend(fontsize=LEGEND_FONTSIZE, loc="upper left", bbox_to_anchor=(1.01, 1.0))
     fig.tight_layout()
-    save_and_report(fig, "total_volume_by_tree.png")
+    save_and_report(fig, "total_volume_by_tree.png", ensure_all_plots_dir())
 
 
 # ----------------------------------------------------------------------
@@ -1235,7 +1253,8 @@ def plot_tree_overview(rows, tree, branch_filter, color_map):
     # PNG_FILENAME_SUFFIX (see PARAMETERS block) - appended before the
     # extension, "" by default (unchanged filename) so saved variants (e.g.
     # a SELECTED_METHODS-restricted chart) don't overwrite the default one.
-    save_and_report(fig, "tree_overview_%s_%s%s.png" % (tree, branch_filter, PNG_FILENAME_SUFFIX))
+    save_and_report(fig, "tree_overview_%s_%s%s.png" % (tree, branch_filter, PNG_FILENAME_SUFFIX),
+                     ensure_tree_plots_dir(tree))
 
 
 # ----------------------------------------------------------------------
@@ -1397,7 +1416,7 @@ def plot_error_boxplot(rows, branch_filter, reference_method, color_map, field="
     # backward compatibility - "trunk"/"branch" get a suffix instead, so
     # all three fields' PNGs coexist without overwriting each other.
     suffix = "" if field == "total" else "_%s" % field
-    save_and_report(fig, "error_boxplot_%s%s.png" % (branch_filter, suffix))
+    save_and_report(fig, "error_boxplot_%s%s.png" % (branch_filter, suffix), ensure_all_plots_dir())
 
 
 # ----------------------------------------------------------------------
@@ -1480,7 +1499,7 @@ def plot_error_metrics_bar(rows, branch_filter, reference_method, color_map, fie
     # field=="total" keeps the EXACT original filename (backward compat) -
     # see plot_error_boxplot()'s own comment for why.
     suffix = "" if field == "total" else "_%s" % field
-    save_and_report(fig, "error_metrics_bar_%s%s.png" % (branch_filter, suffix))
+    save_and_report(fig, "error_metrics_bar_%s%s.png" % (branch_filter, suffix), ensure_all_plots_dir())
 
 
 # =========================  RUN  =====================================

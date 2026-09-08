@@ -42,7 +42,7 @@ import numpy as np
 from tree_geom_utils import parse_adqsm_taper_file
 
 # =====================  PARAMETERS  ===================================
-TREE_NAME = "B21_S01"
+TREE_NAME = "B21_S04"
 
 # Source AdQSM variant folder names to median together - a list, not a
 # range, so it works for any subset/tree without editing the logic

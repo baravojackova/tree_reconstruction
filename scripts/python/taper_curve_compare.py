@@ -47,6 +47,14 @@ import matplotlib.lines as mlines   # proxy handle for the one combined "Crown B
 
 from tree_geom_utils import parse_adqsm_taper_file, make_trunk_radius_func, parse_adqsm_params_file
 
+# ensure_tree_plots_dir(): this chart is per-tree (one PNG per tree in
+# TREES_TO_RUN), so it belongs under plots/<tree>/ like every other
+# per-tree chart - see paths.py's own header for why this is the single
+# shared source of truth for that path instead of a local "plots" literal.
+# ensure_csv_dir(): SUMMARY_CSV_PATH below is a CSV output, so it is
+# routed under csv/ like every other CSV this project writes.
+from paths import ensure_tree_plots_dir, ensure_csv_dir
+
 # Shared visual style (colors/sizes) - see plot_style.py's own header.
 # family_shades() extends FAMILY_GRADIENTS["AdQSM"]'s 4 hand-picked stops
 # into as many distinct shades as this chart needs (one per AdQSM variant,
@@ -65,7 +73,7 @@ DATA_ROOT = r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstructio
 # Trees to process in this run - just add a name to extend this to a
 # production beech tree once its data folder exists; nothing else needs
 # to change.
-TREES_TO_RUN = ["B21_S01"]
+TREES_TO_RUN = ["B21_S04"]
 
 # Optional: real field-measured DBH per tree, in METERS, for a
 # horizontal reference line on the chart - e.g. {"IND07_083": 0.75}.
@@ -75,13 +83,18 @@ TREES_TO_RUN = ["B21_S01"]
 # own FIELD_DBH, which DOES rescale the taper curve - this script never
 # rescales anything, it shows each variant's RAW curve so they stay
 # comparable to each other).
-MEASURED_DBH_M = {"B21_S01": 0.56}
+MEASURED_DBH_M = {"B21_S04": 0.43}
 
 SUMMARY_CSV_PATH = "taper_curve_compare_summary.csv"
 # One row per (tree, variant) across every tree in THIS run's
 # TREES_TO_RUN - overwritten fresh each run (not an upsert/append
 # across sessions like volume_results.csv - this is a lightweight
 # diagnostic export, not the master results table).
+# NOTE: this is a bare FILENAME, not a path - the write site below joins
+# it onto ensure_csv_dir(). adqsm_variant_sensitivity.py reads this same
+# file back via its own TAPER_SUMMARY_CSV constant; the two constants
+# name the SAME file and must be kept in sync (see TAPER_SUMMARY_CSV's
+# own comment in adqsm_variant_sensitivity.py).
 
 DEFAULT_LINEWIDTH = 6
 # =====================================================================
@@ -190,7 +203,7 @@ def plot_taper_variants(tree_name):
         # when in fact every variant draws its own differently-coloured
         # CBH line.
         if cbh is not None:
-            ax.axvline(cbh, color=line.get_color(), linestyle="--", linewidth=DEFAULT_LINEWIDTH, alpha=0.4)
+            ax.axvline(cbh, color="green", linestyle="--", linewidth=DEFAULT_LINEWIDTH, alpha=0.1)
             cbh_drawn = True
 
     ax.axvline(1.3, color="gray", linestyle="--", linewidth=DEFAULT_LINEWIDTH, label="DBH height")
@@ -215,7 +228,7 @@ def plot_taper_variants(tree_name):
     # get_legend_handles_labels() unchanged, in its normal order.
     handles, labels = ax.get_legend_handles_labels()
     if cbh_drawn:
-        cbh_proxy = mlines.Line2D([], [], color="gray", linestyle="--", linewidth=DEFAULT_LINEWIDTH, alpha=0.4,
+        cbh_proxy = mlines.Line2D([], [], color="green", linestyle="--", linewidth=DEFAULT_LINEWIDTH, alpha=0.4,
                                    label="Crown Base Height (CBH)")
         handles.append(cbh_proxy)
         labels.append(cbh_proxy.get_label())
@@ -223,8 +236,7 @@ def plot_taper_variants(tree_name):
     ax.grid(alpha=0.3)
     fig.tight_layout()
 
-    out_dir = os.path.join("plots", tree_name)
-    os.makedirs(out_dir, exist_ok=True)
+    out_dir = ensure_tree_plots_dir(tree_name)
     out_path = os.path.join(out_dir, "taper_curve_compare_%s.png" % tree_name)
     fig.savefig(out_path, dpi=200, bbox_inches="tight")
     plt.close(fig)
@@ -283,13 +295,14 @@ if __name__ == "__main__":
             n_trees_with_rows += 1
 
     if all_rows:
-        with open(SUMMARY_CSV_PATH, "w", encoding="utf-8", newline="") as f:
+        summary_csv_out_path = os.path.join(ensure_csv_dir(), SUMMARY_CSV_PATH)
+        with open(summary_csv_out_path, "w", encoding="utf-8", newline="") as f:
             fieldnames = ["tree", "variant", "dbh_cm", "trunk_vol_m3", "cbh_m",
                           "pct_diff_vs_reference", "reference_label"]
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(all_rows)
         print("Saved summary CSV: %s (%d rows across %d trees)" %
-              (SUMMARY_CSV_PATH, len(all_rows), n_trees_with_rows))
+              (summary_csv_out_path, len(all_rows), n_trees_with_rows))
     else:
         print("No rows to write - every tree in TREES_TO_RUN was skipped (see WARNINGs above).")

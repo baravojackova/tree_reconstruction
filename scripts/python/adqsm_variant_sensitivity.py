@@ -64,6 +64,18 @@ from reconstruction_method_decision_summary import _adqsm_variant_of
 # per-tree chart in this codebase already builds on (plots/<tree>/...).
 from plot_volumes import ensure_plots_dir
 
+# ensure_csv_dir()/CSV_DIR: write_merged_csv() below writes a CSV output,
+# routed under csv/ (NOT next to the PNG under plots/<tree>/, even though
+# it is "the same result, two views" as plot_variant_sensitivity()'s PNG -
+# PNG goes under plots/, CSV goes under csv/, see paths.py's own CSV_DIR
+# comment for this project-wide rule). CSV_DIR is also used below to
+# build TAPER_SUMMARY_CSV's path (a file this script only READS, so no
+# ensure_csv_dir() call is needed for that one - nothing to create).
+# Imported directly from paths.py (not re-exported via plot_volumes.py
+# like ensure_plots_dir above) since paths.py is the actual source of
+# truth for both.
+from paths import ensure_csv_dir, CSV_DIR
+
 # Shared visual style (colors/sizes) - see plot_style.py's own header.
 # This chart previously had no colors/sizes in common with the rest of
 # the project at all (default matplotlib color cycle, markersize=3,
@@ -75,7 +87,7 @@ from plot_volumes import ensure_plots_dir
 from plot_style import FAMILY_GRADIENTS, PANEL_TITLE_FONTSIZE, AXIS_LABEL_FONTSIZE
 
 # =====================  PARAMETERS  ===================================
-TREE_NAME = "B21_S01"
+TREE_NAME = "B21_S04"
 
 # True (default): also read/plot/export the secondary "[calref=min5mm]"
 # AdTree-calibrated series alongside the primary "[calmethod=regression-
@@ -91,7 +103,12 @@ INCLUDE_CALREF_MIN5MM = True
 # both are plain relative paths, resolved from wherever this script is
 # actually run from (normally scripts/python/).
 RESULTS_CSV = "volume_results.csv"
-TAPER_SUMMARY_CSV = "taper_curve_compare_summary.csv"
+# TAPER_SUMMARY_CSV names the SAME file as taper_curve_compare.py's own
+# SUMMARY_CSV_PATH constant - both must be kept in sync (same filename,
+# same directory) or this script will fail to find what that one wrote.
+# taper_curve_compare.py writes it under csv/ via ensure_csv_dir(), so it
+# is read back from there too, below.
+TAPER_SUMMARY_CSV = os.path.join(CSV_DIR, "taper_curve_compare_summary.csv")
 
 # The "close to reference" vs. "outlier" split threshold used by the
 # console summary (Step 6) - a variant's |pct_diff_vs_reference| (already
@@ -331,9 +348,12 @@ def plot_variant_sensitivity(tree_name, merged_rows):
     return out_dir, png_path
 
 
-def write_merged_csv(out_dir, tree_name, merged_rows):
-    """Save the full merged table next to the PNG (out_dir, i.e.
-    plots/<tree>/) as adqsm_variant_sensitivity_<tree>.csv, sorted by
+def write_merged_csv(tree_name, merged_rows):
+    """Save the full merged table as adqsm_variant_sensitivity_<tree>.csv
+    under csv/ - NOT next to the PNG in plots/<tree>/ (plot_variant_
+    sensitivity() above), even though both are two views of the same
+    merged_rows result: PNG goes under plots/, CSV goes under csv/, per
+    this project's own rule (see paths.py's CSV_DIR comment) - sorted by
     variant (merged_rows already is, from build_merged_rows())."""
     fieldnames = ["variant", "dbh_cm", "pct_diff_vs_reference",
                   "adqsm_total_m3", "adqsm_trunk_m3",
@@ -341,7 +361,7 @@ def write_merged_csv(out_dir, tree_name, merged_rows):
     if INCLUDE_CALREF_MIN5MM:
         fieldnames += ["adtree_calref_total_m3", "adtree_calref_trunk_m3"]
 
-    csv_path = os.path.join(out_dir, "adqsm_variant_sensitivity_%s.csv" % tree_name)
+    csv_path = os.path.join(ensure_csv_dir(), "adqsm_variant_sensitivity_%s.csv" % tree_name)
     with open(csv_path, "w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
@@ -395,8 +415,8 @@ def run(tree_name):
     print("Tree: %s  (INCLUDE_CALREF_MIN5MM=%s)" % (tree_name, INCLUDE_CALREF_MIN5MM))
     print("-" * 78)
     merged_rows = build_merged_rows(tree_name)
-    out_dir, _png_path = plot_variant_sensitivity(tree_name, merged_rows)
-    write_merged_csv(out_dir, tree_name, merged_rows)
+    _out_dir, _png_path = plot_variant_sensitivity(tree_name, merged_rows)
+    write_merged_csv(tree_name, merged_rows)
     print_cluster_summary(tree_name, merged_rows)
 
 

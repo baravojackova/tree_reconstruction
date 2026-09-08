@@ -75,11 +75,19 @@ from plot_volumes import (
     shorten_method_label,
     ANNOTATION_FONTSIZE,
 )
+# ensure_all_plots_dir/ensure_csv_dir: this file used to define its own
+# LOCAL ensure_plots_dir()/PLOTS_DIR = "plots" - an independent
+# re-implementation of the same logic plot_volumes.py already had
+# (scratch_output_path_audit.md flagged this as one of three separate
+# copies). Every chart this file produces pools across every tree present
+# in RESULTS_CSV (see the 3-block comparison in the module header above),
+# so it uses ensure_all_plots_dir() (plots/all/), never a per-tree
+# directory.
+from paths import ensure_all_plots_dir, ensure_csv_dir
 
 # =====================  PARAMETERS  ==================================
-OUTPUT_CSV = "reconstruction_method_decision_summary.csv"
-BEST_PICKS_CSV = "reconstruction_method_best_picks.csv"
-PLOTS_DIR = "plots"
+OUTPUT_CSV = "reconstruction_method_decision_summary.csv"       # written under csv/ - see ensure_csv_dir() at the write sites below
+BEST_PICKS_CSV = "reconstruction_method_best_picks.csv"         # same - written under csv/
 METRICS = ["total_m3", "trunk_m3", "branch_m3", "dbh_m", "n_cylinders"]
 CHART_METRICS = ["total_m3", "trunk_m3", "branch_m3", "n_cylinders"]   # only these get bar charts, all 5 go in the CSV
 SIMP_BASELINE = {"simp_smallradii": 0.005, "simp_replaceiterations": 0.0}   # block 3 only, compared as floats
@@ -127,10 +135,6 @@ BLOCKS = [
 # =====================================================================
 
 
-def ensure_plots_dir():
-    if not os.path.isdir(PLOTS_DIR):
-        os.makedirs(PLOTS_DIR)
-    return PLOTS_DIR
 
 
 # ----------------------------------------------------------------------
@@ -430,12 +434,13 @@ def write_summary_csv(summary_rows):
          "mean_pct_error", "tree_spread_std_pct"]
         + ["%s_pct" % t for t in REFERENCE_TREES]
     )
-    with open(OUTPUT_CSV, "w", newline="", encoding="utf-8") as f:
+    out_path = os.path.join(ensure_csv_dir(), OUTPUT_CSV)
+    with open(out_path, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=fieldnames)
         w.writeheader()
         for row in summary_rows:
             w.writerow(row)
-    print("Wrote:", OUTPUT_CSV)
+    print("Wrote:", out_path)
 
 
 def write_best_picks_csv(best_picks):
@@ -444,7 +449,8 @@ def write_best_picks_csv(best_picks):
     winning row's OWN values for all 5 METRICS (not just the 3 used to
     select it) so the exact picks are preserved for later reference."""
     fieldnames = ["block", "tree", "group", "winning_method", "combined_pct_score"] + METRICS
-    with open(BEST_PICKS_CSV, "w", newline="", encoding="utf-8") as f:
+    out_path = os.path.join(ensure_csv_dir(), BEST_PICKS_CSV)
+    with open(out_path, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=fieldnames)
         w.writeheader()
         for (block_name, tree, group_name), (row, score) in best_picks.items():
@@ -453,7 +459,7 @@ def write_best_picks_csv(best_picks):
             for m in METRICS:
                 out[m] = row.get(_rowkey(m))
             w.writerow(out)
-    print("Wrote:", BEST_PICKS_CSV)
+    print("Wrote:", out_path)
 
 
 # Y-axis label per metric - same dict-lookup-with-fallback convention as
@@ -486,7 +492,7 @@ def plot_block_metric_chart(summary_rows, block, metric, group_order):
     ax.legend()
     fig.tight_layout()
 
-    out_path = os.path.join(ensure_plots_dir(), "reconstruction_decision_%s_%s.png" % (block["name"], metric))
+    out_path = os.path.join(ensure_all_plots_dir(), "reconstruction_decision_%s_%s.png" % (block["name"], metric))
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print("Saved:", out_path)
@@ -633,7 +639,7 @@ def plot_bestof_pooled_chart(summary_rows, block, metric, bestof_group_order, be
 
     fig.tight_layout()
 
-    out_path = os.path.join(ensure_plots_dir(), "reconstruction_decision_%s__bestof_pooled_%s.png" % (block["name"], metric))
+    out_path = os.path.join(ensure_all_plots_dir(), "reconstruction_decision_%s__bestof_pooled_%s.png" % (block["name"], metric))
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print("Saved:", out_path)
@@ -756,7 +762,7 @@ def plot_bestof_pertree_chart(groups, best_picks, ref_of_tree, block, metric, be
     ax.legend(handles=_build_shade_legend_handles(), title="Bar shade = Tree", loc="upper left")
     fig.tight_layout()
 
-    out_path = os.path.join(ensure_plots_dir(), "reconstruction_decision_%s__bestof_pertree_%s.png" % (block["name"], metric))
+    out_path = os.path.join(ensure_all_plots_dir(), "reconstruction_decision_%s__bestof_pertree_%s.png" % (block["name"], metric))
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print("Saved:", out_path)

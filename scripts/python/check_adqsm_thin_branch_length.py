@@ -40,6 +40,13 @@ from tree_geom_utils import (
     _read_adqsm_branch_header, _find_adqsm_column,
     print_adqsm_branch_file_sample, parse_adqsm_params_file,
 )
+# ensure_tree_plots_dir(): this diagnostic PNG is per-tree, so it is
+# routed to plots/<tree>/ like every other per-tree chart - the tree
+# name is also added to PLOT_FILENAME below, since the old bare
+# "adqsm_thin_branch_length_share.png" name (no tree name in it) would
+# collide across trees once this stops living in a single shared
+# top-level plots/ folder.
+from paths import ensure_tree_plots_dir
 
 # =====================  PARAMETERS  ===================================
 # Same tree/AdQSM-variant this project is currently focused on (see
@@ -67,10 +74,12 @@ LENGTH_COL = None
 # number so the final bin ("20+") catches everything above 20 cm.
 DIAMETER_BINS_CM = [0, 1, 2, 5, 10, 20, 1000]
 
-# Where the summary bar chart is saved - same "plots" folder plot_volumes.py
-# already uses, so all diagnostic PNGs for this project live in one place.
-PLOTS_DIR = "plots"
-PLOT_FILENAME = "adqsm_thin_branch_length_share.png"
+# Where the summary bar chart is saved - plots/<TREE_NAME>/, the same
+# per-tree convention every other per-tree chart in this project uses
+# (see ensure_tree_plots_dir() import above). TREE_NAME is baked into the
+# filename itself (not just the folder) since it used to be a single
+# fixed name with no tree in it at all - see the import comment above.
+PLOT_FILENAME = "adqsm_thin_branch_length_share_%s.png" % TREE_NAME
 # =====================================================================
 
 
@@ -252,9 +261,6 @@ print("\n" + "=" * 70)
 print("STEP 5: plotting")
 print("=" * 70)
 
-if not os.path.isdir(PLOTS_DIR):
-    os.makedirs(PLOTS_DIR)   # create the shared plots folder if this is the first script to run
-
 x = np.arange(len(bin_labels))   # one x position per diameter bin
 width = 0.35                     # width of each bar, so two bars fit side by side per bin
 
@@ -269,7 +275,7 @@ ax.set_title("AdQSM %s: branch length vs. volume share by diameter" % TREE_NAME)
 ax.legend()
 fig.tight_layout()
 
-plot_path = os.path.join(PLOTS_DIR, PLOT_FILENAME)
+plot_path = os.path.join(ensure_tree_plots_dir(TREE_NAME), PLOT_FILENAME)
 fig.savefig(plot_path, dpi=150)
 plt.close(fig)   # free the figure's memory now that it's saved
 print("Saved: %s" % plot_path)
