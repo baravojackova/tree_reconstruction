@@ -87,7 +87,7 @@ PRINT_TIMING = True
 # trees - it names this tree's row in the shared results table (RESULTS_CSV,
 # see upsert_result() calls below) AND builds AdQSM_DIR/AdTree_DIR/INPUT_PLY
 # right below it automatically, so those don't need editing separately.
-TREE_NAME = "B21_S04"
+TREE_NAME = "B21_S10"
 
 # Base folder holding every tree's data, one subfolder per tree named after
 # TREE_NAME (e.g. ".../data/IND07_083/..."). Change this only if you move the
@@ -119,7 +119,7 @@ AdQSM_DIR = os.path.join(DATA_ROOT, TREE_NAME, "05")
 # Each name in ADQSM_VARIANTS must be a subfolder of ADQSM_BASE_DIR that
 # contains its own taper.txt, BranchStructure.txt and TreesParams.txt.
 ADQSM_BASE_DIR = os.path.join(DATA_ROOT, TREE_NAME)
-ADQSM_VARIANTS = ["090","999"]
+ADQSM_VARIANTS = ["040","999"]
 
 AdTree_DIR = os.path.join(DATA_ROOT, TREE_NAME)
 

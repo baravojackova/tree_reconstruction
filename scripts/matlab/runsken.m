@@ -243,23 +243,7 @@ archive_by_tag = false;
 % hand before enabling the switch above. A file is selected if its name
 % contains AT LEAST ONE of these strings anywhere (case-sensitive exact
 % substring match - see the filter step below for why).
-archive_tags = {'B21_S04_man_pd05-001-10_mo9_sr005_ri0.txt',...
-    'B21_S04_man_pd05-001-10_mo9_sr005_ri1.txt',...
-    'B21_S04_man_pd05-001-10_mo9_sr005_ri2.txt',...
-    'B21_S04_man_pd05-001-10_mo9_sr005_ri3.txt',...
-    'B21_S04_man_pd05-001-10_mo9_sr010_ri0.txt',...
-    'B21_S04_man_pd05-001-10_mo9_sr010_ri1.txt',...
-    'B21_S04_man_pd05-001-10_mo9_sr010_ri2.txt',...
-    'B21_S04_man_pd05-001-10_mo9_sr010_ri3.txt',...
-    'B21_S04_man_pd05-001-10_mo9_sr015_ri0.txt',...
-    'B21_S04_man_pd05-001-10_mo9_sr015_ri1.txt',...
-    'B21_S04_man_pd05-001-10_mo9_sr015_ri2.txt',...
-    'B21_S04_man_pd05-001-10_mo9_sr015_ri3.txt',...
-    'B21_S04_man_pd05-001-10_mo9_sr020_ri0.txt',...
-    'B21_S04_man_pd05-001-10_mo9_sr020_ri1.txt',...
-    'B21_S04_man_pd05-001-10_mo9_sr020_ri2.txt',...
-    'B21_S04_man_pd05-001-10_mo9_sr020_ri3.txt',...
-    };
+archive_tags = {'_man_pd05-001-09_mo9_sr005_ri0'};
 
 % Switch 2 (dry run): default TRUE here (unlike clean_start's current
 % false) - this is a NEW, less-tested code path, so it defaults to the
@@ -453,8 +437,8 @@ end
 % run's results with different settings. See section 2 for the exact
 % auto-generation formula.
 % --- tree identification -------------------------------------
-tree_id   = 'B21_S04';           % short name used for ALL output files
-cloud_txt = 'B21_S04_noplate_clean.txt';   % input point cloud (text file, 3 columns X Y Z)
+tree_id   = 'B21_S11';           % short name used for ALL output files
+cloud_txt = 'B21_S11_noplate_clean.txt';   % input point cloud (text file, 3 columns X Y Z)
 
 % --- number of models ----------------------------------------
 n_models_first = 5;    % models per parameter combination, first (coarse) run
@@ -486,15 +470,15 @@ manual_patchdiam = true;   % false = keep everything from define_input
 
 % PatchDiam1 (rought first cover) has to be t ≥ PatchDiam2Max (gentle cover)
 
-man_PD1    = 0.05;   % PatchDiam1     - AdQSM paper, Indonesian site 0,08
+man_PD1    = 0.06;   % PatchDiam1     - AdQSM paper, Indonesian site 0,08
 man_PD2Min = 0.002;   % PatchDiam2Min
-man_PD2Max = 0.1;   % PatchDiam2Max
+man_PD2Max = 0.11;   % PatchDiam2Max
 man_MinCylRad = 0.0025; % MinCylRad default 0.0025 0.0373
 
 % --- which model is simplified and exported ------------------
 use_optimal = true;    % true  = use the optimal model from select_optimum
                        % false = use res.QSMs(model_index)
-model_index = 1;       % used only when use_optimal = false
+model_index = 1;       % uty jsed only when use_optimal = false
 
 plot_optimal = true;   % true = plot the optimal QSM before simplification
 
@@ -505,7 +489,7 @@ plot_optimal = true;   % true = plot the optimal QSM before simplification
 %                    cylinders inside one branch with one longer cylinder
 % --- simplification settings ---------------------------------
 simp_MaxOrder          = 9;
-simp_SmallRadii        = 0.02;          %def 0.005
+simp_SmallRadii        = 0.005;          %def 0.005
 simp_ReplaceIterations = 0;              %def 0
 simp_Plot              = 1;
 simp_Disp              = 1;

@@ -108,7 +108,7 @@ _ = to_float
 # as plain arguments (same shape as plot_volumes.py's plot_tree_overview()),
 # so a future side-by-side multi-tree view is a matter of looping that call
 # once per tree, not restructuring anything in this file.
-SELECT_TREE = "B21_S01"
+SELECT_TREE = "B21_S04"
 
 # "none" = full reconstruction, "10cm" = >=10cm-only comparison - switch
 # this to re-run for the other branch_filter variant.

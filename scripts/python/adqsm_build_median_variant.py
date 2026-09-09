@@ -24,6 +24,18 @@
 #  assuming they hold (see build_median_taper()/build_median_branch_
 #  structure() below).
 #
+#  UPDATE (tree B21_S11): unlike B21_S01, B21_S11's 7 source variants do
+#  NOT naturally share an identical taper.txt height grid - AdQSM's own
+#  taper.txt export can contain isolated "spike" artifacts, and
+#  tree_geom_utils.py's shared parse_adqsm_taper_file() drops those
+#  per-variant, independently, which can desync the grids across variants
+#  (the same physical artifact height can fail in one variant's spike test
+#  and pass in another's). build_median_taper() below no longer relies on
+#  every variant already sharing a grid - it computes the UNION of every
+#  variant's failing heights first, then drops that SAME union from every
+#  variant, so the grids are made identical BY CONSTRUCTION rather than
+#  assumed. See SPIKE_FACTOR below for the threshold this uses.
+#
 #  Only CREATES data/<TREE_NAME>/<NEW_VARIANT_NAME>/ with 3 new files
 #  inside. Never touches any existing file/folder - refuses to run at
 #  all (SystemExit) if that folder already exists, rather than silently
@@ -38,11 +50,17 @@ import numpy as np
 
 # Reuse (do not re-implement): the same taper.txt parser (with its own
 # spike-rejection) and TreesParams.txt parser already used everywhere
-# else in this codebase that reads AdQSM output.
-from tree_geom_utils import parse_adqsm_taper_file
+# else in this codebase that reads AdQSM output. _reject_taper_spikes()
+# is imported directly (underscore-prefixed - same "import a private
+# helper directly" pattern already used elsewhere in this codebase, e.g.
+# check_adqsm_thin_branch_length.py importing _read_adqsm_branch_header/
+# _find_adqsm_column) so build_median_taper() below can reuse its EXACT
+# spike-detection decision - not a second, independent copy of "what
+# counts as a spike" - for the cross-variant union-based dropping.
+from tree_geom_utils import parse_adqsm_taper_file, _reject_taper_spikes
 
 # =====================  PARAMETERS  ===================================
-TREE_NAME = "B21_S04"
+TREE_NAME = "B21_S11"
 
 # Source AdQSM variant folder names to median together - a list, not a
 # range, so it works for any subset/tree without editing the logic
@@ -62,6 +80,42 @@ SOURCE_VARIANTS = ["040", "050", "060", "070", "080", "090", "100"]
 NEW_VARIANT_NAME = "999"
 
 DATA_ROOT = r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\data"
+
+# Threshold (ratio of a taper.txt row's diameter to the max of its two
+# immediate neighbours) above which _reject_taper_spikes()
+# (tree_geom_utils.py) treats that row as an implausible export artifact
+# rather than real trunk data. This OVERRIDES that function's own default
+# (factor=2.0 - see its own comment for why the two values are kept
+# discoverable from each other) because 2.0 was verified to be too
+# permissive for tree B21_S11: the artifact at 5.6 m in source variant 050
+# has a ratio of only 1.763, which PASSES a 2.0 threshold and silently
+# survives while the SAME physical artifact is dropped in variant 040
+# (ratio 3.436) - exactly the per-variant desync build_median_taper()'s
+# two-pass union-based dropping (below) exists to eliminate.
+#
+# 1.5 is justified directly from the data, not picked arbitrarily: genuine
+# trunk taper is monotonically decreasing, so a real adjacent-row diameter
+# ratio should never exceed 1.0 - verified on B21_S11 variant 040, where
+# every genuine row-to-row ratio is <= 1.000 and the only two exceptions
+# are the actual artifacts (ratios 3.436 and 9.987). 1.5 leaves 50%
+# headroom above what real data can ever produce (comfortably clear of
+# measurement noise), while still catching the 5.6 m/variant 050 artifact
+# (ratio 1.763) that a 2.0 threshold misses.
+SPIKE_FACTOR = 1.5
+
+# Trunk-taper reference height range - mirrors adtree_reconstruct_
+# compare.py's own TAPER_H_LOWER/TAPER_H_UPPER (1.3 m = breast height,
+# 10.0 m = upper taper reference). A height DROPPED (by the union-based
+# spike removal above) that falls INSIDE this range affects the
+# calibrated trunk taper directly; one dropped OUTSIDE it (e.g. an
+# artifact further up the stem) does not - see build_median_taper()'s own
+# summary print for where this distinction is surfaced. Kept as a
+# separate, independent pair of constants here rather than imported from
+# adtree_reconstruct_compare.py, which is a standalone RUN script with
+# its own side effects (not meant to be imported) - keep both pairs in
+# sync by hand if either ever changes.
+TAPER_H_LOWER = 1.3
+TAPER_H_UPPER = 10.0
 # =====================================================================
 
 
@@ -120,17 +174,66 @@ def build_median_taper(tree_name, source_variants, out_dir):
     diameter at each height replaced by the MEDIAN diameter across all
     source variants at that height.
 
-    Re-verifies (does not assume) that every source variant's height
-    grid, as returned by parse_adqsm_taper_file() (i.e. AFTER its own
-    spike-rejection), is identical to the first variant's - a
-    row-by-row median is only valid when that holds. Raises SystemExit
-    with the offending variant name if it doesn't, rather than silently
-    guessing/interpolating."""
-    per_variant = {}
+    Two-pass, CROSS-VARIANT spike dropping (deliberately NOT parse_adqsm_
+    taper_file()'s normal per-variant behaviour - see SPIKE_FACTOR's own
+    comment above for why that is insufficient here):
+      Pass 1: read every source variant UNFILTERED (raw=True) and ask
+              _reject_taper_spikes() (detect_only=True, factor=
+              SPIKE_FACTOR) which heights EACH variant would fail at,
+              independently - nothing is dropped yet.
+      Pass 2: drop the UNION of every variant's failing heights from
+              EVERY variant, so all grids stay identical BY CONSTRUCTION -
+              a height dropped because ONE variant has a spike there is
+              dropped from ALL of them, rather than surviving in whichever
+              variants didn't happen to fail it there.
+
+    Re-verifies (does not assume) that every source variant's height grid,
+    AFTER this union-based dropping, is identical to the first variant's -
+    a row-by-row median is only valid when that holds. This should now
+    NEVER fire (that is the whole point of dropping the union rather than
+    per-variant); raises SystemExit naming the offending variant if it
+    somehow still does, rather than silently guessing/interpolating."""
+    # ---- Pass 1: read every variant unfiltered; DETECT, don't drop -----
+    raw_per_variant = {}
+    failing_per_variant = {}
     for v in source_variants:
         path = os.path.join(_variant_dir(tree_name, v), "taper.txt")
-        h, d = parse_adqsm_taper_file(path)
-        per_variant[v] = (h, d)
+        h, d = parse_adqsm_taper_file(path, raw=True)
+        raw_per_variant[v] = (h, d)
+        failing = _reject_taper_spikes(h, d, path, factor=SPIKE_FACTOR, detect_only=True)
+        failing_per_variant[v] = set(failing.tolist())
+
+    union_heights = set()
+    for v in source_variants:
+        union_heights |= failing_per_variant[v]
+
+    # ---- Summary, once per tree, BEFORE the median is computed ---------
+    print("Cross-variant spike detection (SPIKE_FACTOR=%.3g): %d height(s) dropped "
+          "(union across all %d source variants):" % (SPIKE_FACTOR, len(union_heights), len(source_variants)))
+    if not union_heights:
+        print("  (none - no source variant flagged any height as an implausible spike)")
+    else:
+        for h in sorted(union_heights):
+            failed_in = [v for v in source_variants if h in failing_per_variant[v]]
+            kept_in = [v for v in source_variants if v not in failed_in]
+            print("  height %.4g m: FAILED (dropped) in variant(s) %s; kept in variant(s) %s"
+                  % (h, failed_in, kept_in if kept_in else "(none - every variant failed here)"))
+            if TAPER_H_LOWER <= h <= TAPER_H_UPPER:
+                print("    *** WARNING: height %.4g m falls INSIDE the trunk-taper reference "
+                      "range TAPER_H_LOWER..TAPER_H_UPPER (%.1f-%.1f m) - this dropped row DOES "
+                      "affect the calibrated trunk taper, unlike an artifact elsewhere on the "
+                      "stem. ***" % (h, TAPER_H_LOWER, TAPER_H_UPPER))
+    print()
+
+    # ---- Pass 2: drop exactly the union heights from every variant ------
+    per_variant = {}
+    for v in source_variants:
+        h, d = raw_per_variant[v]
+        if union_heights:
+            drop_mask = np.isin(h, np.array(sorted(union_heights)))
+        else:
+            drop_mask = np.zeros(len(h), dtype=bool)
+        per_variant[v] = (h[~drop_mask], d[~drop_mask])
 
     ref_v = source_variants[0]
     ref_h, _ref_d = per_variant[ref_v]
@@ -391,7 +494,7 @@ def run():
     # ---- taper.txt ----------------------------------------------------
     ref_h, median_diam, taper_per_variant, taper_path = build_median_taper(TREE_NAME, SOURCE_VARIANTS, out_dir)
     print("Saved:", taper_path)
-    i_1_3 = int(np.argmin(np.abs(ref_h - 1.3)))
+    i_1_3 = int(np.argmin(np.abs(ref_h - TAPER_H_LOWER)))
     print("  diameter @ height=%.4g m (source values vs. median):" % ref_h[i_1_3])
     for v in SOURCE_VARIANTS:
         print("    source %s: %.6f m" % (v, taper_per_variant[v][1][i_1_3]))

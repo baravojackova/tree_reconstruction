@@ -162,16 +162,32 @@ def compute_branch_order(nnodes, kids, rad, bfs_order):
     return node_order
 
 
-def parse_adqsm_taper_file(path):
+def parse_adqsm_taper_file(path, factor=2.0, raw=False):
     """Parse an AdQSM taper.txt file: rows of 'height[m] <TAB> diameter[m]'.
     Robust to non-UTF8 (Chinese) headers, blank lines, and several
     concatenated blocks (the file may repeat the same export multiple times)
     - only the FIRST block of numeric rows is used, per AdQSM convention.
 
     Isolated "spike" rows (a single row with an implausibly large diameter
-    compared to both its neighbours) are dropped before returning - see
-    _reject_taper_spikes() below for why this is necessary and how it
-    decides what counts as a spike."""
+    compared to both its neighbours) are dropped before returning, unless
+    `raw=True` - see _reject_taper_spikes() below for why this is necessary
+    and how it decides what counts as a spike.
+
+    `factor`: passed straight through to _reject_taper_spikes() (see its
+    own default-value comment for what it means and why
+    adqsm_build_median_variant.py overrides it). The default here (2.0)
+    matches that function's own default, so every EXISTING caller that
+    doesn't pass `factor` (taper_curve_compare.py, adtree_reconstruct_
+    compare.py) keeps getting byte-identical behaviour - this parameter is
+    purely additive.
+
+    `raw` (default False): when True, skip spike-rejection entirely and
+    return the sorted, unfiltered (heights, diameters) exactly as read from
+    the file. Added for adqsm_build_median_variant.py's cross-variant
+    union-based dropping, which needs every source variant's UNFILTERED
+    data before deciding what to drop - dropping per-variant, before
+    comparing variants, is exactly the bug that approach exists to avoid
+    (see that file's own SPIKE_FACTOR comment)."""
     heights, diameters = [], []
     collecting = False
     with open(path, "r", encoding="latin-1") as f:
@@ -194,10 +210,12 @@ def parse_adqsm_taper_file(path):
     idx = np.argsort(heights)
     heights = np.asarray(heights)[idx]
     diameters = np.asarray(diameters)[idx]
-    return _reject_taper_spikes(heights, diameters, path)
+    if raw:
+        return heights, diameters
+    return _reject_taper_spikes(heights, diameters, path, factor=factor)
 
 
-def _reject_taper_spikes(heights, diameters, path, factor=2.0):
+def _reject_taper_spikes(heights, diameters, path, factor=2.0, detect_only=False):
     """Drop isolated "spike" rows from an AdQSM taper curve before it's used
     for radius calibration.
 
@@ -227,9 +245,32 @@ def _reject_taper_spikes(heights, diameters, path, factor=2.0):
     trunk can widen slightly lower down before tapering - e.g. a root
     flare - so this check deliberately only fires on an isolated,
     much-larger-than-both-neighbours point, never on a normal small
-    increase). Never silent: prints exactly which row(s) were dropped,
-    since losing a row changes the calibration result and that should be
-    visible, not a silent correction.
+    increase). Never silent: prints exactly which row(s) were dropped
+    (regardless of `detect_only` - see below), since losing a row changes
+    the calibration result and that should be visible, not a silent
+    correction.
+
+    `factor` (default 2.0): NOTE - adqsm_build_median_variant.py
+    deliberately calls this with factor=1.5 instead, via its own
+    SPIKE_FACTOR module-level constant; see that file's own comment on
+    SPIKE_FACTOR for the justification. The two values are independent
+    overrides of this SAME parameter for different callers - this comment
+    exists so each is discoverable from the other, instead of the two
+    drifting apart silently.
+
+    `detect_only` (default False, purely additive - with neither this nor
+    `factor` passed, behaviour is byte-identical to before either
+    parameter existed): when True, return ONLY the heights that FAIL the
+    plausibility test (a single array), instead of the normal
+    (kept_heights, kept_diameters) tuple. Nothing is dropped by this
+    function either way - it only ever decides and reports; the caller
+    decides what to do with the result. Added for adqsm_build_median_
+    variant.py's cross-variant union-based dropping, which needs to know
+    WHICH heights a given variant would fail at, without filtering that
+    one variant in isolation (the whole point being to drop the SAME
+    heights from every variant, not whatever each one independently fails
+    at - see that file's own build_median_taper() for the two-pass logic
+    this enables).
     """
     keep = np.ones(len(diameters), dtype=bool)
     for i in range(1, len(diameters) - 1):
@@ -241,6 +282,8 @@ def _reject_taper_spikes(heights, diameters, path, factor=2.0):
                   "(diameter %.4f m vs. neighbouring rows %.4f m / %.4f m) from %s "
                   "- looks like an AdQSM export artifact, not real trunk data."
                   % (heights[i], diameters[i], left, right, path))
+    if detect_only:
+        return heights[~keep]
     return heights[keep], diameters[keep]
 
 
