@@ -32,6 +32,8 @@
 !scripts/python/plot_style.py
 !scripts/python/scratch_skeleton_diag.py
 !scripts/python/plot_param_sweep.py
+!scripts/python/base_vs_dbh_compare.py
+!scripts/python/method_evaluation.py
 !paths.py
 !tree_coverage_check.py
 
@@ -39,7 +41,7 @@
 !scripts/matlab/runsken.m
 
 !scripts/ansys/
-!scripts/ansys/bk1.mac
+!scripts/ansys/bk_kp.mac
 
 !results/
 !results/volume_results.csv

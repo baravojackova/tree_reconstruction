@@ -50,7 +50,7 @@ AXIS_LABEL_FONTSIZE = 12      # x/y axis tick-category label size. UNIFIED value
                               # BOX_LABEL_FONTSIZE was already 9 - this is now the ONE shared value,
                               # so plot_volumes.py's axis labels get 1pt larger (approved change) and
                               # plot_box.py's stay exactly as they were.
-LEGEND_FONTSIZE = 8          # consistent across every legend() call in both files already
+LEGEND_FONTSIZE = 12          # consistent across every legend() call in both files already
 ANNOTATION_FONTSIZE = 9      # small in-plot text labels (% / value annotations)
 POINT_LABEL_FONTSIZE = 6     # smallest tier - dense per-point labels (plot_box.py)
 
@@ -96,3 +96,50 @@ def family_shades(family, n):
     cmap = mcolors.LinearSegmentedColormap.from_list(family, stops)
     positions = np.linspace(_FAMILY_SHADES_CLAMP_LOW, 1.0, n)
     return [mcolors.to_hex(cmap(p)) for p in positions]
+
+
+# ---- Method -> colour (method_evaluation.py) ------------------------------
+# Colour per reconstruction METHOD (not just family) for figures that compare
+# AdTree_raw/AdTree_calibrated/AdQSM/TreeQSM_Optimal/TreeQSM_Simplified side
+# by side. Every value here REUSES a colour already established above rather
+# than inventing a new one - see method_evaluation.py's own Step 0 report for
+# the full audit this was built from:
+#   - AdTree_raw/AdTree_calibrated/AdQSM: FAMILY_GRADIENTS[...][-1], the same
+#     "deepest stop" every other script already treats as THE colour for that
+#     family (e.g. adqsm_variant_sensitivity.py, base_vs_dbh_compare.py,
+#     trunk_taper_vs_field.py all key off index -1 this same way).
+#   - TreeQSM_Optimal/TreeQSM_Simplified: FAMILY_GRADIENTS only has ONE flat
+#     grey for "TreeQSM" as a whole (no existing Optimal-vs-Simplified colour
+#     split) - family_shades() samples two points across that SAME grey
+#     gradient instead of picking new hex literals; its existing
+#     _FAMILY_SHADES_CLAMP_LOW=0.2 clamp already keeps the two shades far
+#     enough apart to survive projector washout (see that constant's own
+#     comment) rather than landing in the pale, hard-to-read end of the ramp.
+#   NOTE: AdTree_raw (green) and AdTree_calibrated (blue) are DIFFERENT hues,
+#   not "one hue, two lightnesses" - this violates the ideal that raw/
+#   calibrated variants of one method should read as related. Kept as-is
+#   anyway because both colours are already in active use elsewhere in this
+#   project; repainting either one here would make this script's figures
+#   inconsistent with every earlier chart instead of consistent with them.
+_TREEQSM_STAGE_SHADES = family_shades("TreeQSM", 2)
+METHOD_COLORS = {
+    "AdQSM":              FAMILY_GRADIENTS["AdQSM"][-1],
+    "AdTree_raw":         FAMILY_GRADIENTS["AdTree raw"][-1],
+    "AdTree_calibrated":  FAMILY_GRADIENTS["AdTree calibrated"][-1],
+    "TreeQSM_Optimal":    _TREEQSM_STAGE_SHADES[0],
+    "TreeQSM_Simplified": _TREEQSM_STAGE_SHADES[1],
+}
+
+# ---- Box plot appearance (method_evaluation.py) ----------------------------
+# This project already has TWO different box-plot conventions in active use
+# (see method_evaluation.py's Step 0 report): plot_box.py draws whis=(0,100)
+# (whiskers span the group's true min/max, no separate outlier fliers), a
+# SOLID family-colour fill, and edges/whiskers/caps/median darkened from that
+# same fill colour; plot_volumes.py's plot_error_boxplot() instead uses
+# matplotlib's default 1.5*IQR whiskers (fliers possible), a semi-transparent
+# fill, and a flat grey edge. These two constants adopt plot_box.py's
+# convention (the more fully worked-out of the two) for any NEW box plot that
+# wants to match it, rather than leaving the choice to hard-coded literals
+# copied into yet a third file.
+BOX_WHIS = (0, 100)          # whis=(0,100): whiskers = true min/max, no fliers - see plot_box.py
+BOX_EDGE_DARKEN_FACTOR = 0.4  # edge/whisker/cap/median darkening from the box's own fill colour
