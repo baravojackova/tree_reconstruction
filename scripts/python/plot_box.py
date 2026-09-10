@@ -108,17 +108,17 @@ _ = to_float
 # as plain arguments (same shape as plot_volumes.py's plot_tree_overview()),
 # so a future side-by-side multi-tree view is a matter of looping that call
 # once per tree, not restructuring anything in this file.
-SELECT_TREE = "B21_S04"
+SELECT_TREE = ["B21_S12"]  # one or more tree names, must match the TREE_NAME column in volume_results.csv
 
 # "none" = full reconstruction, "10cm" = >=10cm-only comparison - switch
 # this to re-run for the other branch_filter variant.
-BRANCH_FILTER = "none"
+BRANCH_FILTER ="none"
 
 # Draw a horizontal dashed line at the destructive-reference value on every
 # panel where a reference row/value exists for that field. Silently skipped
 # (no warning) wherever it doesn't - that's expected for many fields (e.g.
 # "none" mode never has a REFERENCE_METHOD row at all), not a data problem.
-SHOW_REFERENCE_LINE = True
+SHOW_REFERENCE_LINE = False
 
 # Same treatment as SHOW_REFERENCE_LINE/REFERENCE_METHOD above, but for the
 # TreeQSM published mean from qsm_volume_mean.py - which method string

@@ -1,0 +1,620 @@
+!beamovy model stromu_buk ze skenu (Babice) dyna [m,N,Pa,kg/m3]------------
+!===================================================================================
+!
+! TO DO: napsat txt s forces, overit vypis harmonicke do txt , overeni harmonicke kvuli cylindf CS, vyhodnoceni harmonicke, stale jsou moc male TTME z fsum, mely by byt jako ty z EFFM ???????????????????????????
+!
+!
+/clear
+!
+/prep7
+*afun,rad   	
+*set,pi,2*asin(1)   		!pi calculation 
+*afun,deg   			!use degrees
+!
+!
+bks=3				!select tree - bks=1 - order of tree  1 not the number of tree (bk1)!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+sc_en=1				!1 of 6 scenarios of model
+!
+num_modes=20			!number of nat. freqs and mode shapes 
+zero_mass=0			!if 1 then the root-plate has near-zero density to neglect its modes (any other numbere, e.g. 0, will calculate realistic mass)
+!
+!
+num_steps_harm=100		!number of steps for harmonic
+!
+!----------vstupni parametry
+!
+n_rad=35387					!number of rows - keep the same number without first row (0)
+n_sl=10							!pocet sloupcu of table with scan
+*dim,geom,table,n_rad,n_sl,1,,		!nacteni tabulky s geometrii ze skenu (x,y,z,lenght,radius,xaxis,yaxis,zaxis,parent,branchorder)
+*tread,geom,geom_B21_S07_r5mm_adqsm080_seg50-500-k80-wlen,txt,,,
+!
+*dim,dendr,table,13,44,1,,	!read table with 41+3 dendrometric parameters of all 13 trees bk1-bk13
+*tread,dendr,Popis_Babice_VSE_09012025_ans_lev6_0_azimcor,txt,,1
+!
+*dim,for_ces,table,13,6,1,,		!read table with loading forces, displacements and inclinations of all 13 trees bk1-bk13
+*tread,for_ces,for_ces,txt,,1,
+!
+!*dim,out_static_bk%bks%_scenario%sc_en%,table,1,3,1,,			!create table - outputs of statics	force - displacement - inclination (for every scenario of bk%bks%)
+*dim,out_modal_bk%bks%_scenario%sc_en%,table,num_modes,19,,,1,,		!create table - outputs of modal	20 freqs + 20 partic. factors (for every scenario of bk%bks%)
+*dim,out_harm_bk%bks%_scenario%sc_en%,table,num_steps_harm,10,,,1,,	!create table - outputs of harmonics	200 amplitudes (frequency step 0.1 Hz) (for every scenario of bk%bks%)
+!
+!
+! ---------------- general parameters (common for all trees) --------
+!
+e_sizetree=0.1
+e_sizeks=0.3
+!
+!
+! ---------------- reading parameters from DENDR / Popis_Babice_VSE_09012025_ans --------------
+!
+bk%bks%_pull_dir=dendr(bks,3)		!direction of pulling (degs)
+bk%bks%_alfa=dendr(bks,5)		!angle of anchorage/pulling (degs)
+bk%bks%_an_height=dendr(bks,7)		!height of anchorage (m)
+bk%bks%_lev3_height=dendr(bks,9)	!height of measuring of displacement - level 3 (m)
+bk%bks%_trunk_hgt=dendr(bks,28)		!trunk height (m)
+bk%bks%_eff_dim=bk%bks%_trunk_hgt**2	!Characteristic Dimension - Squared Radius of Gyration 
+!
+!
+bk%bks%_d_kmen=dendr(bks,26)/100	!diameter at DBH - not possible to take from geom, since methods are sensitive to butters
+!t_ks=%bks%_d_kmen/100			!tloustka KS
+t_ks_a=2.18				!parameters to eq. t_ks=(t_ks_a*d_dbh)+t_ks_b	
+t_ks_b=0.13
+t_ks=(t_ks_a*bk%bks%_d_kmen)+t_ks_b	!equation based on sensitivity analysys 
+!
+! ---------------- reading parameters from FOR_CES --------------
+!
+bk%bks%_fx=for_ces(bks,3)			!loading force for bk%bks%  bk1-bk13
+bk%bks%_fz=for_ces(bks,4)			!loading force for bk%bks%  bk1-bk13
+bk%bks%_u=for_ces(bks,5)			!loading displ. for bk%bks%  bk1-bk13 (moment for displ = F*an_height)
+bk%bks%_i=for_ces(bks,6)			!loading incl. for bk%bks%  bk1-bk13 (moment for incl = F*(an_height-0.05)
+!
+!
+!
+!vypocet pozice druhehu bodu strednice valce
+*dim,geom_2,array,n_rad,5,1,,
+*do,i,1,n_rad,1    
+ geom_2(i,1)=sqrt(geom(i,6)**2+geom(i,7)**2+geom(i,8)**2) !velikost vektoru - d
+ geom_2(i,2)=geom(i,4)/geom_2(i,1)		!pomer mezi velkosti vektoru a delkou nosniku
+ geom_2(i,3)=geom(i,1)+(geom_2(i,2)*geom(i,6))	!x
+ geom_2(i,4)=geom(i,2)+(geom_2(i,2)*geom(i,7))	!y
+ geom_2(i,5)=geom(i,3)+(geom_2(i,2)*geom(i,8))	!z
+*enddo
+!
+!-----------TVORBA GEOMETRIE--------------------------
+!
+!----------- STEM ------------
+!
+!-----------nacteni prurezu
+!
+*do,i,1,n_rad,1                      
+ sectype,i,beam,csolid,									
+ secoffset,cent
+ secdata,geom(i,5),8,2
+*enddo
+!
+!----------tvorba kp
+!
+*do,i,1,n_rad,1  								
+ k,i,geom(i,1),geom(i,2),geom(i,3)
+ k,n_rad+1000+i,geom_2(i,3),geom_2(i,4),geom_2(i,5)									
+*enddo
+!
+*do,i,1,n_rad,1  								
+ l,i,n_rad+1000+i										
+*enddo
+!
+!----------tvorba linii
+*do,i,1,n_rad,1  
+ ksel,s,kp,,i						!vyber kp baze sekce
+ ksel,a,kp,,n_rad+1000+i				!vyber kp top sekce
+ lslk,s,1
+ latt,1,1,1,,,,i
+*enddo
+allsel,all
+!
+!----------- ROOT PLATE ------------
+!
+!------------kruhova plocha
+!
+csys,0
+wpoffs,geom(1,1),geom(1,2),geom(1,3)	
+cswpla,11,1							!cyl.sour,sys
+!
+d_ks1=2*bk%bks%_d_kmen							!prumer korenoveho systemu-stat. stabilni vrstva
+d_ks2=6*bk%bks%_d_kmen
+d_ks3=20*bk%bks%_d_kmen
+!
+cyl4,0,0,0,,d_ks1/2
+cyl4,0,0,d_ks1/2,,d_ks2/2
+cyl4,0,0,d_ks2/2,,d_ks3/2
+!
+!------------rozdeleni ks systemu na vysece
+wprota,,90
+*do,i,1,6
+ wprota,,,30
+ asbw,all,,delete						!rozdeli plochu v rovine xy, vymaze puvodni plochy
+*enddo
+wpcsys,1,0
+!
+aglue,all
+!
+csys,11
+*do,i,1,12
+ asel,s,loc,x,0,d_ks1/2						!1_vrstva KS vyber a prirazeni vlastnosti
+ asel,r,loc,y,(i-1)*30,i*30
+ aatt,10e3+i,1,2,11,600000,
+ allsel
+*enddo
+!
+*do,i,1,12	
+ asel,s,loc,x,d_ks1/2,d_ks2/2					!2_vrstva KS vyber a prirazeni vlastnosti
+ asel,r,loc,y,(i-1)*30,i*30
+ aatt,20e3+i,1,2,11,600000,
+ allsel
+*enddo
+!
+*do,i,1,12
+ asel,s,loc,x,d_ks2/2,d_ks3/2	
+ asel,r,loc,y,(i-1)*30,i*30
+ aatt,30e3+i,1,2,11,600000,
+ allsel
+*enddo
+!
+!
+save,geom_bk%bks%,db
+!
+!------------TVORBA SITE A UKOTVENI
+!
+!----------- STEM ------------
+!
+!------sitovani
+et,1,beam189
+esize,e_sizetree
+lsel,s,loc,z,0.01,100
+lmesh,all
+allsel,all
+!-----pozice uzlu pro ukotveni vetvi
+!
+*dim,c_ppos,array,n_rad,2,1,,
+!
+*do,i,2,n_rad,1  
+ ksel,s,kp,,i				
+ nslk,s	
+ *get,c_ppos(i,1),node,0,num,min							
+ ksel,s,kp,,geom(i,9)+n_rad+1000		!vyber vrchniho uzlu - nutno opravit! nejblizsi uzel bazi predchozi vetve
+ nslk,s	
+ *get,c_ppos(i,2),node,0,num,min
+*enddo
+!
+allsel,all
+!
+*get,ecount_tree,node,0,count
+!----------- ROOT PLATE ------------
+!--------sitovani
+sectype,600000,shell,
+et,2,shell281
+secoffset,top
+secdata,t_ks,,,9
+!smrtsize,1
+aesize,all,e_sizeks
+amesh,all
+!
+!-----pozice uzlu pro ukotveni kmene v ks
+ksel,s,kp,,1
+nslks,s
+*get,num_kmen,node,0,num,min
+!
+ksel,s,loc,x,0
+ksel,r,loc,z,0
+nslk,s
+*get,num_ks,node,0,num,max
+allsel,all
+!
+*get,ecount_tree_rs,node,0,count
+!----------natoceni ss a vytvoreni pro smer zatizeni
+csys,0
+wpoffs,geom(1,1),geom(1,2),geom(1,3)
+wprota,90		!x smeruje na sever
+wprota,-bk%bks%_pull_dir
+cswpla,12,0			!kart. smer zatizeni
+csys,12
+nrotat,all
+!
+csys,1
+!***************CE***********
+!------svazani vetvi
+!
+*do,i,2,n_rad,1
+ ce,i+n_rad,0,c_ppos(i,1),rotz,1,c_ppos(i,2),rotz,-1
+ ce,i+(2*n_rad),0,c_ppos(i,1),roty,1,c_ppos(i,2),roty,-1
+ ce,i+(3*n_rad),0,c_ppos(i,1),rotx,1,c_ppos(i,2),rotx,-1
+ ce,i+(4*n_rad),0,c_ppos(i,1),uz,1,c_ppos(i,2),uz,-1
+ ce,i+(5*n_rad),0,c_ppos(i,1),uy,1,c_ppos(i,2),uy,-1
+ ce,i+(6*n_rad),0,c_ppos(i,1),ux,1,c_ppos(i,2),ux,-1
+*enddo
+!
+!------svazani ks
+ce,(7*n_rad)+1,0,num_kmen,rotz,1,num_ks,rotz,-1
+ce,(7*n_rad)+2,0,num_kmen,rotx,1,num_ks,rotx,-1
+ce,(7*n_rad)+3,0,num_kmen,roty,1,num_ks,roty,-1
+ce,(7*n_rad)+4,0,num_kmen,uz,1,num_ks,uz,-1
+ce,(7*n_rad)+5,0,num_kmen,ux,1,num_ks,ux,-1
+ce,(7*n_rad)+6,0,num_kmen,uy,1,num_ks,uy,-1
+!
+*get,kp_tree,kp,0,count
+*get,ce_num,ce,0,num,max
+/eshape,1
+eplot
+!-----------MATERIAL---------
+!**********kmen*******
+!---------material kmen parametry
+e_x=(11.147e9)*0.9					!mat model beech all - kluci
+e_z=e_x*1			
+e_y=e_x*1			
+!
+g_xy=0.934e9					
+g_yz=e_x*1			
+g_xz=e_x*1		
+!
+pr_xy=0.43					
+pr_yz=0.43		
+pr_xz=0.43		
+!
+densw=966
+!--------vytvoreni mat. modelu kmen
+mp,ex,1,e_x				!definice materialovych vlastnosti
+mp,ey,1,e_z
+mp,ez,1,e_y
+!
+mp,gxy,1,g_xy
+mp,gyz,1,g_yz	
+mp,gxz,1,g_xz
+!
+mp,prxy,1,pr_xy
+mp,pryz,1,pr_yz
+mp,prxz,1,pr_xz
+!
+mp,dens,1,densw
+!
+!*********korenovy system*********
+!---------material ks parametry
+e_koren_1=e_x					!modul pruznosti dreva
+e_koren_2=e_koren_1/2
+e_koren_3=e_koren_1/4
+e_puda=11.95e6					!Foundation analysis
+pr_xy_p=0.33					!Foundation analysis
+!
+podil_koren_1=0.6				!podil korenu oddenek
+podil_koren_2=0.2				!podil korenu 1. vrstva
+podil_koren_3=0					!podil korenu 3. vrstva (bal)
+!
+densp=1000					!Foucard
+!--------------nacteni tabulky koeficentu a cykly------------------
+!
+*dim,koef_mat,table,3,12,1,vrstva,vysec						!vytvoreni tabulky
+*tread,koef_mat,koef_mat,mac,,1	
+*do,j,1,3
+ *do,i,1,12											
+	mp,ex,((10e3*j)+i),e_koren_%j%*podil_koren_%j%*koef_mat(j,i)+e_puda*(1-podil_koren_%j%)		!definice materialovych vlastnosti - s vlivem koeficientu pro upravu materialu koef_mat
+ 	mp,prxy,((10e3*j)+i),pr_xy_p										!kombinace puda koren?
+ 	!
+  	*if,zero_mass,eq,1,then
+		mp,dens,((10e3*j)+i),1e-15
+	*else
+		mp,dens,((10e3*j)+i),densw*podil_koren_%j%*koef_mat(1,i)+densp*(1-podil_koren_%j%)			!hustota puda
+	*endif 
+*enddo
+*enddo
+!
+allsel,all
+csys,0
+save,model_bk%bks%,db
+finish
+!
+!
+! ----------------- SOLU STATIC ----------------
+!
+!---------------static solution a postpr. k buk babice [m,N,Pa,kg/m3]
+/solu
+antype,0,
+nlgeom,off
+!                                                                                                       
+kbc,1						    !pokud se nezmeni automaticky se prevadi do dalsich LS
+!acel,0,0,9.81
+csys,11
+lsel,s,loc,x,d_ks3/2
+lsel,r,loc,z,0
+dl,all,1,all,0
+allsel,all
+outres,all,all
+lswrite,1
+!
+!
+nsel,s,loc,z,bk%bks%_an_height-0.05,bk%bks%_an_height+0.05
+*get,n_for,node,0,count
+csys,12
+f,all,fx,bk%bks%_fx/n_for
+f,all,fz,-bk%bks%_fz/n_for
+allsel,all
+outres,all,all				
+lswrite,2
+lssolve,1,2,1
+finish
+!
+!-----------POST STATIC ---------
+!
+/post1
+SET,LAST
+rsys,12
+!
+nsel,s,loc,x,0
+nsel,r,loc,z,0
+nsel,r,loc,y,0
+*get,n_baze,node,0,num,min
+!
+*get,u_rotsum_bk%bks%_scenario%sc_en%,node,n_baze,rot,sum			!get rotations at base
+*get,u_rotx_bk%bks%_scenario%sc_en%,node,n_baze,rot,x
+*get,u_roty_bk%bks%_scenario%sc_en%,node,n_baze,rot,y
+*get,u_rotz_bk%bks%_scenario%sc_en%,node,n_baze,rot,z
+!
+allsel,all
+esel,s,cent,z,0,e_sizetree*0.9
+esel,u,cent,z,0.000001,-100
+nsle,s
+*get,n_baze2,node,0,num,max
+*get,u_rotsum2_bk%bks%_scenario%sc_en%,node,n_baze2,rot,sum			!get rotations at base2 ?????????
+allsel,all
+!
+nsel,s,loc,z,bk%bks%_an_height-0.05,bk%bks%_an_height+0.05
+*get,ntah,node,0,num,max
+*get,u_xtah_bk%bks%_scenario%sc_en%,node,ntah,u,x				!get displacement at anchorage
+allsel,all
+!
+nsel,s,loc,z,bk%bks%_lev3_height-0.05,bk%bks%_lev3_height+0.05
+*get,n3,node,0,num,max
+*get,u_xtah3_bk%bks%_scenario%sc_en%,node,n3,u,x				!get displacement at level 3
+allsel,all
+!
+plnsol,u,x,0,1
+*get,u_max_bk%bks%_scenario%sc_en%,plnsol,0,max					!!get max. displacement ??????????
+!
+!
+*cfopen,out_static_bk%bks%_scenario%sc_en%,txt
+*vwrite
+( 'FORCEx | FORCEz | ROTSUM base | ROTx | ROTy | ROTz | ROTSUM base2 | DISPLx anchorage | DISPLx level3 | DISPLx MAX' )					
+*vwrite,bk%bks%_fx,bk%bks%_fz,u_rotsum_bk%bks%_scenario%sc_en%,u_rotx_bk%bks%_scenario%sc_en%,u_roty_bk%bks%_scenario%sc_en%,u_rotz_bk%bks%_scenario%sc_en%,u_rotsum2_bk%bks%_scenario%sc_en%,u_xtah_bk%bks%_scenario%sc_en%,u_xtah3_bk%bks%_scenario%sc_en%,u_max_bk%bks%_scenario%sc_en%
+(F,'  ',F,'  ',F,'  ',F,'  ',F,'  ',F,'  ',F,'  ',F,'  ',F,'  ',F)							
+*cfclos
+!
+!
+/VIEW,1,,-1 
+/ANG,1  
+/VIEW,1,0.18,-0.8,0.5
+/ANG,1,-19 
+/AUTO,1 
+/REP,FAST   
+!
+/SHOW,PNG,,0
+PNGR,COMP,1,-1  
+PNGR,ORIENT,HORIZ   
+PNGR,COLOR,2
+PNGR,TMOD,1 
+/GFILE,1200,
+/CMAP,_TEMPCMAP_,CMP,,SAVE  
+/RGB,INDEX,100,100,100,0
+/RGB,INDEX,0,0,0,15 
+/REPLOT 
+/CMAP,_TEMPCMAP_,CMP
+/DELETE,_TEMPCMAP_,CMP  
+/SHOW,CLOSE 
+/DEVICE,VECTOR,0
+! 
+/rename,file000,png,,bk%bks%_scenario%sc_en%_ux,png
+
+!
+! ----------------- SOLU MODAL ----------------
+!
+wa_it=0.5
+!
+/solu                       
+allsel,all                
+irlf,-1                 
+psolve,elform           
+*get,total_mass,elem,0,mtot,x
+*get,total_mass_y,elem,0,mtot,y
+*get,total_mass_z,elem,0,mtot,z
+!
+finish
+/solu
+allsel,all
+antype,2
+!
+fdele,all,all				!delete all loading by forces from STATIC  
+!acel,0,0,9.81                          
+!
+modopt,lanb,num_modes,,,,off,both,8			
+mxpand,all,,,yes
+eqslv,spar				
+lumpm,off					       
+pstres,0					         
+!			    
+solve
+finish
+/post1
+set,first
+/eshape,0 
+*do,i,1,num_modes
+	plnsol,u,sum,2,1
+	/wait,wa_it
+	!
+	*get,out_modal_bk%bks%_scenario%sc_en%(i,1),mode,i,freq
+	!	
+	*get,p_fact_x,mode,i,pfact,,direc,x
+	out_modal_bk%bks%_scenario%sc_en%(i,2)=p_fact_x	
+	*get,p_fact_y,mode,i,pfact,,direc,y
+	out_modal_bk%bks%_scenario%sc_en%(i,3)=p_fact_y
+	*get,p_fact_z,mode,i,pfact,,direc,z
+	out_modal_bk%bks%_scenario%sc_en%(i,4)=p_fact_z
+	*get,p_fact_rotx,mode,i,pfact,,direc,rotx
+	out_modal_bk%bks%_scenario%sc_en%(i,5)=p_fact_rotx
+	*get,p_fact_roty,mode,i,pfact,,direc,roty
+	out_modal_bk%bks%_scenario%sc_en%(i,6)=p_fact_roty
+	*get,p_fact_rotz,mode,i,pfact,,direc,rotz
+	out_modal_bk%bks%_scenario%sc_en%(i,7)=p_fact_rotz
+	!
+	*get,effm_x_%i%,mode,i,effm,,direc,x
+	out_modal_bk%bks%_scenario%sc_en%(i,8)=effm_x_%i%
+	*get,effm_y_%i%,mode,i,effm,,direc,y
+	out_modal_bk%bks%_scenario%sc_en%(i,9)=effm_y_%i%
+	*get,effm_z_%i%,mode,i,effm,,direc,z
+	out_modal_bk%bks%_scenario%sc_en%(i,10)=effm_z_%i%
+	!
+	*get,effm_rotx_%i%,mode,i,effm,,direc,rotx
+	out_modal_bk%bks%_scenario%sc_en%(i,11)=effm_rotx_%i%
+	*get,effm_roty_%i%,mode,i,effm,,direc,roty
+	out_modal_bk%bks%_scenario%sc_en%(i,12)=effm_roty_%i%
+	*get,effm_rotz_%i%,mode,i,effm,,direc,rotz
+	out_modal_bk%bks%_scenario%sc_en%(i,13)=effm_rotz_%i%
+	!
+	t_tme_sq_bk%bks%_scenario%sc_en%_mode%i%=(effm_x_%i%)**2+(effm_y_%i%)**2+(effm_z_%i%)**2
+	t_tme_bk%bks%_scenario%sc_en%_mode%i%=sqrt(t_tme_sq_bk%bks%_scenario%sc_en%_mode%i%)
+	out_modal_bk%bks%_scenario%sc_en%(i,14)=t_tme_bk%bks%_scenario%sc_en%_mode%i%
+	t_tme_rots_sq_bk%bks%_scenario%sc_en%_mode%i%=(effm_rotx_%i%/bk%bks%_eff_dim)**2+(effm_roty_%i%/bk%bks%_eff_dim)**2+(effm_rotz_%i%/bk%bks%_eff_dim)**2
+	t_tme_rots_bk%bks%_scenario%sc_en%_mode%i%=sqrt(t_tme_rots_sq_bk%bks%_scenario%sc_en%_mode%i%)
+	out_modal_bk%bks%_scenario%sc_en%(i,15)=sqrt(t_tme_bk%bks%_scenario%sc_en%_mode%i%+t_tme_rots_sq_bk%bks%_scenario%sc_en%_mode%i%)
+	!
+	nsel,s,loc,z,e_sizetree/2,bk%bks%_trunk_hgt			!TTME for stem only (based on force, moment, charact. dimension)
+	esln,s
+	fsum
+	*get,f_stem_x,fsum,,item,fx
+	*get,f_stem_y,fsum,,item,fy
+	*get,f_stem_z,fsum,,item,fz
+	eff_m_x=f_stem_x/p_fact_x
+	eff_m_y=f_stem_y/p_fact_y
+	eff_m_z=f_stem_z/p_fact_z
+	*get,m_stem_x,fsum,,item,mx
+	*get,m_stem_y,fsum,,item,my
+	*get,m_stem_z,fsum,,item,mz
+	eff_m_rotx=(m_stem_x/bk%bks%_eff_dim)/p_fact_rotx			!divide by participation factors
+	eff_m_roty=(m_stem_y/bk%bks%_eff_dim)/p_fact_roty
+	eff_m_rotz=(m_stem_z/bk%bks%_eff_dim)/p_fact_rotz
+	stem_sq1_eff_mass_rots_bk%bks%_scenario%sc_en%_mode%i%=eff_m_x**2+eff_m_y**2+eff_m_z**2
+	stem_eff_mass_bk%bks%_scenario%sc_en%_mode%i%=sqrt(stem_sq1_eff_mass_rots_bk%bks%_scenario%sc_en%_mode%i%)
+	stem_sq2_eff_mass_rots_bk%bks%_scenario%sc_en%_mode%i%=eff_m_rotx*eff_m_rotx+eff_m_roty*eff_m_roty+eff_m_rotz*eff_m_rotz
+	stem_sq_eff_mass_rots_bk%bks%_scenario%sc_en%_mode%i%=stem_sq1_eff_mass_rots_bk%bks%_scenario%sc_en%_mode%i%+stem_sq2_eff_mass_rots_bk%bks%_scenario%sc_en%_mode%i%	
+	stem_eff_mass_rots_bk%bks%_scenario%sc_en%_mode%i%=sqrt(stem_sq_eff_mass_rots_bk%bks%_scenario%sc_en%_mode%i%)
+	allsel,all
+	out_modal_bk%bks%_scenario%sc_en%(i,16)=stem_eff_mass_bk%bks%_scenario%sc_en%_mode%i%
+	out_modal_bk%bks%_scenario%sc_en%(i,17)=stem_eff_mass_rots_bk%bks%_scenario%sc_en%_mode%i%
+	!
+	nsel,all			!TTME for all the tree (to compare with EFFM calculated from EFFM)
+	esln,s
+	fsum
+	*get,f_stem_x,fsum,,item,fx
+	*get,f_stem_y,fsum,,item,fy
+	*get,f_stem_z,fsum,,item,fz
+	eff_m_x=f_stem_x/p_fact_x
+	eff_m_y=f_stem_y/p_fact_y
+	eff_m_z=f_stem_z/p_fact_z
+	*get,m_stem_x,fsum,,item,mx
+	*get,m_stem_y,fsum,,item,my
+	*get,m_stem_z,fsum,,item,mz
+	eff_m_rotx=(m_stem_x/bk%bks%_eff_dim)/p_fact_rotx			!divide by participation factors
+	eff_m_roty=(m_stem_y/bk%bks%_eff_dim)/p_fact_roty
+	eff_m_rotz=(m_stem_z/bk%bks%_eff_dim)/p_fact_rotz
+	stem_sq1_eff_mass_rots_bk%bks%_scenario%sc_en%_mode%i%=eff_m_x**2+eff_m_y**2+eff_m_z**2
+	stem_eff_mass_bk%bks%_scenario%sc_en%_mode%i%=sqrt(stem_sq1_eff_mass_rots_bk%bks%_scenario%sc_en%_mode%i%)
+	stem_sq2_eff_mass_rots_bk%bks%_scenario%sc_en%_mode%i%=eff_m_rotx*eff_m_rotx+eff_m_roty*eff_m_roty+eff_m_rotz*eff_m_rotz
+	stem_sq_eff_mass_rots_bk%bks%_scenario%sc_en%_mode%i%=stem_sq1_eff_mass_rots_bk%bks%_scenario%sc_en%_mode%i%+stem_sq2_eff_mass_rots_bk%bks%_scenario%sc_en%_mode%i%	
+	stem_eff_mass_rots_bk%bks%_scenario%sc_en%_mode%i%=sqrt(stem_sq_eff_mass_rots_bk%bks%_scenario%sc_en%_mode%i%)
+	allsel,all
+	out_modal_bk%bks%_scenario%sc_en%(i,18)=stem_eff_mass_bk%bks%_scenario%sc_en%_mode%i%
+	out_modal_bk%bks%_scenario%sc_en%(i,19)=stem_eff_mass_rots_bk%bks%_scenario%sc_en%_mode%i%
+	!
+	set,next
+*enddo
+!
+*cfopen,out_modal_bk%bks%_scenario%sc_en%,txt
+*vwrite,total_mass
+( 'TOTAL MASS of MODEL = ', G15.6, 'kg' )
+*vwrite
+( 'FREQ | PFACTx  | y  | z  | rotx | roty | rotz | EFF MASSx kg | y | z | rotx kgm2 | roty | rotz | TTME - Total Translational Effective Mass kg | TTME incl rots | TTME_fsum stem | TTME_fsum stem incl rots | TTME_fsum tree | TTME_fsum tree incl rots' )	
+*vwrite,out_modal_bk%bks%_scenario%sc_en%(1,1),out_modal_bk%bks%_scenario%sc_en%(1,2),out_modal_bk%bks%_scenario%sc_en%(1,3),out_modal_bk%bks%_scenario%sc_en%(1,4),out_modal_bk%bks%_scenario%sc_en%(1,5),out_modal_bk%bks%_scenario%sc_en%(1,6),out_modal_bk%bks%_scenario%sc_en%(1,7),out_modal_bk%bks%_scenario%sc_en%(1,8),out_modal_bk%bks%_scenario%sc_en%(1,9),out_modal_bk%bks%_scenario%sc_en%(1,10),out_modal_bk%bks%_scenario%sc_en%(1,11),out_modal_bk%bks%_scenario%sc_en%(1,12),out_modal_bk%bks%_scenario%sc_en%(1,13),out_modal_bk%bks%_scenario%sc_en%(1,14),out_modal_bk%bks%_scenario%sc_en%(1,15),out_modal_bk%bks%_scenario%sc_en%(1,16),out_modal_bk%bks%_scenario%sc_en%(1,17),out_modal_bk%bks%_scenario%sc_en%(1,18),out_modal_bk%bks%_scenario%sc_en%(1,19)
+(F,'  ',F,'  ',F,'  ',F,'  ',F,'  ',F,'  ',F,'  ',F,'  ',F,'  ',F,'  ',F,'  ',F,'  ',F,'  ',F,'  ',F,'  ',F,'  ',F,'  ',F,'  ',F)						
+*cfclos
+!
+!
+! ----------------- SOLU HARMONIC ----------------
+!
+cswpla,111,1,1,1			!local cylindric CS for radial loading of tree by inertia
+csys,111
+!
+/solu
+antype,3
+acel,10,0,0				!unity value of loading
+! 
+hropt,full			
+hrout,on,,			
+lumpm,off 			
+!alphad,0.6				!damping is realistic but not for comparing with modal analysis		
+pstres,0		
+!
+harfq,0,2
+nsubst,num_steps_harm
+kbc,1
+!
+solve
+finish
+!
+!--------------------post_harmonic------------------
+!
+/post26
+!
+nsel,s,loc,z,bk%bks%_trunk_hgt				!stem height or anchorage height???????????????
+*get,top_stem_node,node,0,num,min
+!
+nsel,s,loc,z,bk%bks%_trunk_hgt/2			!half of stem
+*get,half_stem_node,node,0,num,min
+!
+nsel,s,loc,z,bk%bks%_trunk_hgt-bk%bks%_trunk_hgt/4	!3/4 of geight of stem
+*get,quart_stem_node,node,0,num,min
+!
+numvar,num_steps_harm  
+!
+nsol,2,top_stem_node,U,X,UX_top_stem,   
+nsol,3,top_stem_node,U,Y,UY_top_stem,   
+nsol,4,top_stem_node,U,Z,UZ_top_stem, 
+!
+nsol,5,half_stem_node,U,X,UX_half_stem,   
+nsol,6,half_stem_node,U,Y,UY_half_stem,   
+nsol,7,half_stem_node,U,Z,UZ_half_stem, 
+!
+nsol,8,quart_stem_node,U,X,UX_quart_stem,   
+nsol,9,quart_stem_node,U,Y,UY_quart_stem,   
+nsol,10,quart_stem_node,U,Z,UZ_quart_stem, 
+!
+store,merge 
+xvar,1  
+plvar,2,3,4,5,6,7,8,9,10
+!
+!
+vget,out_harm_bk%bks%_scenario%sc_en%(1,1),1   
+vget,out_harm_bk%bks%_scenario%sc_en%(1,2),2 
+vget,out_harm_bk%bks%_scenario%sc_en%(1,3),3  
+vget,out_harm_bk%bks%_scenario%sc_en%(1,4),4   
+vget,out_harm_bk%bks%_scenario%sc_en%(1,5),5 
+vget,out_harm_bk%bks%_scenario%sc_en%(1,6),6 
+vget,out_harm_bk%bks%_scenario%sc_en%(1,7),7   
+vget,out_harm_bk%bks%_scenario%sc_en%(1,8),8 
+vget,out_harm_bk%bks%_scenario%sc_en%(1,9),9 
+vget,out_harm_bk%bks%_scenario%sc_en%(1,10),10
+!
+*cfopen,out_harmonic_bk%bks%_scenario%sc_en%,txt
+*vwrite
+( 'TIME | Top_ux  | Top_uy | Top_uz | Half_ux | Half_uy | Half_uz | Quart_ux | Quart_uy | Quart_uz' )	
+*vwrite,out_harm_bk%bks%_scenario%sc_en%(1,1),out_harm_bk%bks%_scenario%sc_en%(1,2),out_harm_bk%bks%_scenario%sc_en%(1,3),,out_harm_bk%bks%_scenario%sc_en%(1,4),out_harm_bk%bks%_scenario%sc_en%(1,5),out_harm_bk%bks%_scenario%sc_en%(1,6),out_harm_bk%bks%_scenario%sc_en%(1,7),out_harm_bk%bks%_scenario%sc_en%(1,8),out_harm_bk%bks%_scenario%sc_en%(1,9),out_harm_bk%bks%_scenario%sc_en%(1,10)
+(F,'  ',F,'  ',F,'  ',F,'  ',F,'  ',F,'  ',F,'  ',F,'  ',F,'  ',F)						
+*cfclos
+!
+save,finalt_bk%bks%,db
+/eof

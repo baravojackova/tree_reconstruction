@@ -73,7 +73,7 @@ DATA_ROOT = r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstructio
 # Trees to process in this run - just add a name to extend this to a
 # production beech tree once its data folder exists; nothing else needs
 # to change.
-TREES_TO_RUN = ["B21_S11"]
+TREES_TO_RUN = ["B21_S24"]
 
 # Optional: real field-measured DBH per tree, in METERS, for a
 # horizontal reference line on the chart - e.g. {"IND07_083": 0.75}.
@@ -83,7 +83,7 @@ TREES_TO_RUN = ["B21_S11"]
 # own FIELD_DBH, which DOES rescale the taper curve - this script never
 # rescales anything, it shows each variant's RAW curve so they stay
 # comparable to each other).
-MEASURED_DBH_M = {"B21_S11": 0.46}
+MEASURED_DBH_M = {"B21_S24": 0.47}
 
 SUMMARY_CSV_PATH = "taper_curve_compare_summary.csv"
 # One row per (tree, variant) across every tree in THIS run's

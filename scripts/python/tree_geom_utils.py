@@ -215,7 +215,20 @@ def parse_adqsm_taper_file(path, factor=2.0, raw=False):
     return _reject_taper_spikes(heights, diameters, path, factor=factor)
 
 
-def _reject_taper_spikes(heights, diameters, path, factor=2.0, detect_only=False):
+# Maximum plausible ratio between the taper curve's base row (h = 0 m) and the
+# next row (breast height). Deliberately SEPARATE from the interior-row spike
+# threshold (the `factor` parameter below), because the two encode different
+# physical expectations:
+#   - interior rows sit ~1 m apart on a monotonically tapering stem, so a real
+#     adjacent-row ratio never exceeds 1.0
+#   - the base row spans the buttress zone, where field-measured stump/DBH
+#     diameter ratios on the Babice beeches range from 1.34 to 2.08
+# 3.0 sits 44% above the largest real value measured in the field, and an
+# order of magnitude below the smallest defect observed (29.9x on B21_S08).
+BASE_ROW_MAX_RATIO = 3.0
+
+
+def _reject_taper_spikes(heights, diameters, path, factor=2.0, detect_only=False, base_factor=BASE_ROW_MAX_RATIO):
     """Drop isolated "spike" rows from an AdQSM taper curve before it's used
     for radius calibration.
 
@@ -271,6 +284,27 @@ def _reject_taper_spikes(heights, diameters, path, factor=2.0, detect_only=False
     heights from every variant, not whatever each one independently fails
     at - see that file's own build_median_taper() for the two-pass logic
     this enables).
+
+    `base_factor` (default BASE_ROW_MAX_RATIO): a SEPARATE, additional check
+    on row 0 (the base row, h = 0 m) only - the interior loop below can never
+    reach it (there's no row "before" it to compare against), so a defective
+    base row previously passed through this function completely unchecked.
+    Confirmed for real on B21_S08: all 8 of its taper.txt files (7 sweep
+    variants + 999) carry a base-row diameter of 10.29-23.01 m instead of
+    ~0.34 m, which make_trunk_radius_func() then interpolates into a frustum
+    accounting for 97.8%/99.8% of that tree's recorded trunk volume. One-
+    sided by design: a base value that's too SMALL is either an exact zero
+    (already dropped by make_trunk_radius_func() itself) or a genuinely
+    tapering curve, which must never be rejected - only "too large" is ever
+    a defect here. Applied AFTER the interior loop (not before) so the
+    existing interior-row WARNING ordering in the console log is completely
+    undisturbed by this addition; the base-row check's own WARNING (if any)
+    always appears after them, never interleaved.
+
+    Assumes row 1 is breast height (1.3 m) - true for every file the
+    pipeline currently uses. If `h[1]` is not within 0.5 m of 1.3 m, this
+    check is SKIPPED for that file (with a warning), rather than comparing
+    against a row that isn't actually breast height.
     """
     keep = np.ones(len(diameters), dtype=bool)
     for i in range(1, len(diameters) - 1):
@@ -282,6 +316,22 @@ def _reject_taper_spikes(heights, diameters, path, factor=2.0, detect_only=False
                   "(diameter %.4f m vs. neighbouring rows %.4f m / %.4f m) from %s "
                   "- looks like an AdQSM export artifact, not real trunk data."
                   % (heights[i], diameters[i], left, right, path))
+
+    if len(diameters) < 2:
+        pass   # no row 1 to compare the base row against - nothing to check
+    elif abs(heights[1] - 1.3) > 0.5:
+        print("  WARNING: taper.txt's second row is at height %.2f m, not ~1.3 m "
+              "(breast height) - skipping the base-row (h=0) plausibility check "
+              "for %s, since it assumes row 1 IS breast height and comparing "
+              "against the wrong row would be worse than not checking at all."
+              % (heights[1], path))
+    elif diameters[1] > 0 and diameters[0] > base_factor * diameters[1]:
+        keep[0] = False
+        print("  WARNING: dropping implausible taper.txt BASE row at height %.2f m "
+              "(diameter %.4f m vs. breast-height row %.4f m at %.2f m) from %s "
+              "- looks like an AdQSM export artifact, not a real buttress "
+              "(base_factor=%.2g)." % (heights[0], diameters[0], diameters[1], heights[1], path, base_factor))
+
     if detect_only:
         return heights[~keep]
     return heights[keep], diameters[keep]

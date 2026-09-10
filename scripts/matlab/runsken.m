@@ -243,7 +243,7 @@ archive_by_tag = false;
 % hand before enabling the switch above. A file is selected if its name
 % contains AT LEAST ONE of these strings anywhere (case-sensitive exact
 % substring match - see the filter step below for why).
-archive_tags = {'_man_pd05-001-09_mo9_sr005_ri0'};
+archive_tags = {'_aut_mo9_sr020_ri0','_man_pd066-01-099_mo9_sr005_ri4'};
 
 % Switch 2 (dry run): default TRUE here (unlike clean_start's current
 % false) - this is a NEW, less-tested code path, so it defaults to the
@@ -437,8 +437,8 @@ end
 % run's results with different settings. See section 2 for the exact
 % auto-generation formula.
 % --- tree identification -------------------------------------
-tree_id   = 'B21_S11';           % short name used for ALL output files
-cloud_txt = 'B21_S11_noplate_clean.txt';   % input point cloud (text file, 3 columns X Y Z)
+tree_id   = 'B21_S24';           % short name used for ALL output files
+cloud_txt = 'B21_S24_noplate_clean.txt';   % input point cloud (text file, 3 columns X Y Z)
 
 % --- number of models ----------------------------------------
 n_models_first = 5;    % models per parameter combination, first (coarse) run
@@ -470,9 +470,9 @@ manual_patchdiam = true;   % false = keep everything from define_input
 
 % PatchDiam1 (rought first cover) has to be t ≥ PatchDiam2Max (gentle cover)
 
-man_PD1    = 0.06;   % PatchDiam1     - AdQSM paper, Indonesian site 0,08
-man_PD2Min = 0.002;   % PatchDiam2Min
-man_PD2Max = 0.11;   % PatchDiam2Max
+man_PD1    = 0.04;   % PatchDiam1     - AdQSM paper, Indonesian site 0,08
+man_PD2Min = 0.02;   % PatchDiam2Min
+man_PD2Max = 0.05;   % PatchDiam2Max
 man_MinCylRad = 0.0025; % MinCylRad default 0.0025 0.0373
 
 % --- which model is simplified and exported ------------------
@@ -526,7 +526,7 @@ save_figures_png = true;
 % Set to a non-blank string to use that instead (e.g. for a one-off export
 % you want named something more memorable). See section 20 for where this
 % is actually applied (as ansys_tag, not used directly).
-ansys_export_name = '';
+ansys_export_name = 'man_pd045-005-05_mo9_sr020_ri3';
 
 % Blank (default) = export whatever simplification is CURRENTLY LIVE in
 % memory (today's behaviour, via the ansys_source switch in section 20).
@@ -536,7 +536,7 @@ ansys_export_name = '';
 % retroactively export any previously-saved simplification variant, even
 % one no longer in the workspace (e.g. after re-running section 2 + 16 for
 % a second variant, per the "Solution A" workflow).
-EXPORT_FROM_SAVED_RUN_TAG = '';
+EXPORT_FROM_SAVED_RUN_TAG = 'man_pd045-005-05_mo9_sr020_ri3';
 
 %% 2) DERIVED NAMES -------------------------------------------
 %  - built automatically from tree_id + run_tag
