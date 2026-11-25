@@ -44,6 +44,7 @@ How to use it:
 """
 
 import re
+import time
 
 import numpy as np
 import pandas as pd
@@ -52,6 +53,7 @@ import matplotlib.colors as mcolors
 from matplotlib.patches import Patch
 from matplotlib.lines import Line2D
 from pathlib import Path
+from datetime import datetime
 
 # =========================================================================
 # CONFIGURATION - edit these values, then run the script
@@ -86,17 +88,90 @@ TREE_ID_PREFIX = "B21_S"
 # False = draw every tree present in the experimental data.
 ONLY_TREES_WITH_FEM = True
 
+# Set once by main() (after TREES is resolved against the actual data),
+# read by with_filter_suffix() below. Stays "" - meaning "no suffix" -
+# whenever TREES is "all", which is what keeps every filename unchanged by
+# this particular filter (GRAVITY_VARIANT/MODEL_INCLUDE add their own
+# suffixes independently - see with_filter_suffix()).
+TREES_SUFFIX = ""
+
+# Set once by main() before any figure is built, read by
+# add_provenance_footer() via build_stiffness_figure(). See
+# check_input_freshness() for how PROVENANCE_NEWEST_INPUT_MTIME is computed.
+PROVENANCE_NEWEST_INPUT_MTIME = None
+PROVENANCE_FILTERS_TEXT = ""
+
+
+def gravity_variant_filename_suffix(variant: str) -> str:
+    """
+    Filename fragment for GRAVITY_VARIANT. "" for "with_gravity" ONLY - the
+    81 unsuffixed PNGs/CSVs already on disk were all written before
+    GRAVITY_VARIANT existed, under what was effectively a gravity-on
+    default, so "with_gravity" is the one setting that keeps filenames
+    unchanged. "no_acel" (the new default) and "both" both get an explicit
+    suffix, so a gravity-off figure can never silently overwrite one of
+    those gravity-on files - see GRAVITY_VARIANT's own comment.
+    """
+    return {"no_acel": "gravity-noacel", "both": "gravity-both"}.get(variant, "")
+
+
+def with_filter_suffix(path) -> Path:
+    """
+    Append every ACTIVE **drawing** filter's suffix to path, before its
+    extension, in a fixed order (gravity variant, then model filter, then
+    tree filter) - e.g. "stiffness_comparison_rotation_all.png" ->
+    "..._gravity-noacel_noacel_trees-07-12.png". Used for FIGURE
+    (PNG) paths ONLY - see csv_filter_suffix() for stiffness_deviation.csv,
+    whose content GRAVITY_VARIANT/MODEL_INCLUDE never narrow (draw-only
+    filters), so neither may appear in ITS name. Returns path unchanged
+    only when GRAVITY_VARIANT="with_gravity" AND nothing else is filtered -
+    see gravity_variant_filename_suffix()'s own comment for why
+    "with_gravity" (not "all=nothing filtered") is the unsuffixed case now.
+    """
+    parts = []
+    gravity_suffix = gravity_variant_filename_suffix(GRAVITY_VARIANT)
+    if gravity_suffix:
+        parts.append(gravity_suffix)
+    if MODEL_INCLUDE is not None:
+        parts.append(MODEL_INCLUDE_SUFFIX)
+    if TREES_SUFFIX:
+        parts.append(TREES_SUFFIX)
+    if not parts:
+        return Path(path)
+    root, ext = str(path).rsplit(".", 1)
+    return Path(f"{root}_{'_'.join(parts)}.{ext}")
+
+
+def csv_filter_suffix(path) -> Path:
+    """
+    Append ONLY the TREES suffix to path - used for stiffness_deviation.csv.
+    Unlike the PNGs (with_filter_suffix()), stiffness_deviation.csv's ROW
+    CONTENT is filtered by TREES but NEVER by MODEL_INCLUDE or
+    GRAVITY_VARIANT (both are draw-only
+    filters - see fem_df vs. fem_df_drawing in main()), so neither may
+    appear in this file's name. This is what lets
+    method_deviation_overview.py always read ONE canonical
+    stiffness_deviation.csv regardless of what THIS script's own
+    MODEL_INCLUDE/GRAVITY_VARIANT happen to be set to - an earlier version
+    of Stage 7 briefly broke that guarantee by reusing with_filter_suffix()
+    here too (see GRAVITY_VARIANT's own comment for the postmortem).
+    """
+    if not TREES_SUFFIX:
+        return Path(path)
+    root, ext = str(path).rsplit(".", 1)
+    return Path(f"{root}_{TREES_SUFFIX}.{ext}")
+
+
 # Each quantity ("rotation", "displacement") is written as TWO figures -
 # see stiffness_plot_path() and DEVIATION_EXCLUDE_MODELS below for why.
 def stiffness_plot_path(quantity: str, variant: str) -> Path:
     """
     quantity: "rotation" or "displacement". variant: "all" or "trimmed".
     -> .../out/stiffness_comparison_<quantity>_<variant>[_<suffix>].png
-    The suffix (MODEL_INCLUDE_SUFFIX) is appended only when MODEL_INCLUDE
-    is set - see that constant's own comment for why.
+    The suffix is built by with_filter_suffix() from whichever of
+    GRAVITY_VARIANT/MODEL_INCLUDE/TREES are active - see that function's comment.
     """
-    suffix = f"_{MODEL_INCLUDE_SUFFIX}" if MODEL_INCLUDE is not None else ""
-    return OUT_FOLDER / f"stiffness_comparison_{quantity}_{variant}{suffix}.png"
+    return with_filter_suffix(OUT_FOLDER / f"stiffness_comparison_{quantity}_{variant}.png")
 
 
 # Table of relative deviations (FEM vs experimental median), written as a
@@ -128,13 +203,108 @@ DEVIATION_EXCLUDE_MODELS = ["treeqsm_pd002"]
 # This is a FILTER ON WHAT IS DRAWN ONLY, independent of
 # DEVIATION_EXCLUDE_MODELS above: fem_df and stiffness_deviation.csv always
 # keep every row for every model, regardless of this setting.
+#
+# NOTE (Stage 7): this had been set to the two no_acel model names as a
+# manual stand-in for "only show the gravity-off reference variant" - that
+# is now GRAVITY_VARIANT's job (see below), applied structurally instead of
+# by remembering to set this correctly. Reset to None so MODEL_INCLUDE goes
+# back to its own job: narrowing by RECONSTRUCTION METHOD (e.g. AdTree
+# only), not by gravity variant. Set it again only for that purpose.
 MODEL_INCLUDE = None
 
 # Appended to every figure filename whenever MODEL_INCLUDE is set (e.g.
 # stiffness_comparison_rotation_all_noacel.png), so a filtered figure can
 # never be confused with, or silently overwrite, the full one. main()
 # refuses to run if MODEL_INCLUDE is set and this is empty.
-MODEL_INCLUDE_SUFFIX = "noacel"
+MODEL_INCLUDE_SUFFIX = "no_acel"
+
+# =========================================================================
+# STALE-OUTPUT / PROVENANCE SAFEGUARDS (added Sep 2026)
+# -------------------------------------------------------------------------
+# WHY these exist: a filtered run (MODEL_INCLUDE set to the two "no acel"
+# models) was left running unattended, its output PNGs sat in out/ next to
+# the unfiltered ones, MODEL_INCLUDE was later reset to None, and every
+# later re-run only refreshed the UNFILTERED files (writing a "_noacel"
+# file is a no-op when MODEL_INCLUDE is None - see with_filter_suffix()).
+# The stale "_noacel" files were then mistaken for current output because
+# nothing on the image said when or how it was made. These three settings
+# make that mistake impossible to repeat silently.
+# =========================================================================
+
+# True = stamp a small grey footer on every figure with: this script's
+# filename, when the figure was generated, the newest modification time
+# among the raw ANSYS files it depends on, the active GRAVITY_VARIANT/TREES/
+# MODEL_INCLUDE filters, and how many trees/models were actually drawn -
+# see add_provenance_footer(). Set to False only for a publication figure
+# where the footer must not appear.
+FIGURE_PROVENANCE_FOOTER = True
+
+# True = before plotting, refuse to run if any raw ANSYS file this script
+# ultimately depends on (out_static_bk*_scenario*.txt) is NEWER than
+# FEM_CSV_PATH - i.e. compute_slopes.py/load_static_scenarios.py have not
+# been re-run since new ANSYS results landed, so FEM_CSV_PATH is stale.
+# False = print the same warning but keep going (useful when you know why
+# it is stale and want the figures anyway). See check_input_freshness().
+ABORT_ON_STALE_INPUT = True
+
+# Folder holding the raw ANSYS output files, needed ONLY for the freshness
+# check above (this script otherwise never reads raw ANSYS files directly -
+# it reads FEM_CSV_PATH, which load_static_scenarios.py/compute_slopes.py
+# already built from them). Same folder every other ansys_eval script reads.
+ANSYS_RAW_FOLDER = r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\scripts\ansys"
+ANSYS_RAW_PATTERN_FOR_FRESHNESS = "out_static_bk*_scenario*.txt"
+
+# =========================================================================
+# THE GRAVITY-VARIANT STRUCTURAL LOCK (added Stage 7)
+# -------------------------------------------------------------------------
+# WHY this exists: before this, "only show the gravity-off reference
+# variant" was a CONVENTION - something to remember to set correctly via
+# MODEL_INCLUDE, SCENARIOS, or DEVIATION_PANEL_VARIANT depending on which
+# script you were looking at. Those disagreed with each other at least once
+# (method_deviation_overview.py's MODEL_INCLUDE, set to the two no_acel
+# names, intersected with base_models - "every NON-no_acel model" - to
+# nothing, silently starving every panel).
+#
+# GRAVITY_VARIANT is applied ONCE, in main(), to fem_df_drawing - the
+# dataframe every FIGURE reads - never to fem_df itself, which stays the
+# complete, both-variants table that feeds stiffness_deviation.csv (see
+# fem_df's own comment in main()). This mirrors MODEL_INCLUDE's existing
+# guarantee exactly, and for the same reason: this script's CSV is a shared
+# pipeline artifact (method_deviation_overview.py reads it), and it must
+# stay ONE canonical, config-independent file - an earlier version of this
+# stage's own work briefly filtered fem_df itself, which silently broke
+# method_deviation_overview.py's self-weight panel (it needs BOTH gravity
+# halves of every pair, and the "no_acel"-filtered CSV no longer had the
+# gravity-on half at all).
+# =========================================================================
+
+# "no_acel"      = only the gravity-off runs (scenarios 3/4) - the reference
+#                  variant, and the default.
+# "with_gravity" = only the gravity-on runs (scenarios 1/2).
+# "both"         = no gravity filtering at all (old, pre-Stage-7 behaviour).
+GRAVITY_VARIANT = "no_acel"
+
+# --- WHICH TREES TO PLOT -------------------------------------------------
+# "all"  = every tree found in FEM_CSV_PATH (this is the old behaviour)
+# or a list, mixed forms allowed:  [7, 12]  /  ["B21_S07", "S12"]  /  ["7"]
+# NOTE: these are TREE NUMBERS, not the bk<N> index from the ANSYS filenames.
+#       bk<N> is a ROW POSITION in the description file (bk3 = tree 7) - see
+#       load_ansys_order_to_tree_id()'s docstring. normalize_tree_selector()
+#       refuses a bare "bk3"-style entry outright rather than guessing.
+TREES = "all"
+
+# If True, the script raises an error (after printing the selection report)
+# when a tree listed above has no data at all. Deliberate: a silently
+# empty/narrower plot is what caused the Sep 2026 incident this option was
+# added to catch. Set to False only if you knowingly want to ask for trees
+# that may not exist yet.
+#
+# NOTE (Stage 8): this used to also gate a SCENARIOS constant. SCENARIOS
+# was retired - it was fully redundant with GRAVITY_VARIANT (model family)
+# x MODEL_INCLUDE (reconstruction method): a scenario number is just that
+# pair, spelled as a number instead of by name - see Stage 7 Part A. Use
+# GRAVITY_VARIANT for which gravity variant to draw.
+STRICT_SELECTION = True
 
 # How much horizontal space (out of 1.0 available per tree) the
 # side-by-side boxes/points occupy within one tree's group.
@@ -156,9 +326,9 @@ PASTEL_SCENARIO_COLORS = [
 
 # --- Style config -----------------------------------------------------------
 TITLE_FONTSIZE = 14
-AXIS_LABEL_FONTSIZE = 11
-TICK_LABEL_FONTSIZE = 9
-LEGEND_FONTSIZE = 9
+AXIS_LABEL_FONTSIZE = 12
+TICK_LABEL_FONTSIZE = 7
+LEGEND_FONTSIZE = 12
 LEGEND_TITLE_FONTSIZE = 10
 LINE_WIDTH = 1.5      # not really used here, but keep for consistency
 MARKER_SIZE = 8        # FEM scenario point size
@@ -209,6 +379,45 @@ STIFFNESS_COMBINED_RIGHT_MARGIN = 0.62
 # CODE - you normally do not need to change anything below this line
 # =========================================================================
 
+# Every name assigned in the CONFIGURATION section above (between the
+# "CONFIGURATION" and "CODE" headers), used by print_active_configuration()
+# below (Stage 8 Part B3). TREES_SUFFIX/PROVENANCE_NEWEST_INPUT_MTIME/
+# PROVENANCE_FILTERS_TEXT are deliberately left out - they are runtime
+# state set once by main(), not something you edit, so their value here
+# (before main() resolves anything) would just be a meaningless "" / None.
+CONFIG_CONSTANT_NAMES = [
+    "WORK_FOLDER", "DATA_FOLDER", "OUT_FOLDER", "EXPERIMENTAL_CSV_PATH", "FEM_CSV_PATH",
+    "DAYS_TO_PROCESS", "MEASUREMENT", "TYPE_FILTER", "REDUCTION_LEVEL_FILTER", "TREE_FILTER",
+    "TREE_ID_PREFIX", "ONLY_TREES_WITH_FEM", "DEVIATION_CSV_PATH", "DEVIATION_EXCLUDE_MODELS",
+    "MODEL_INCLUDE", "MODEL_INCLUDE_SUFFIX", "FIGURE_PROVENANCE_FOOTER", "ABORT_ON_STALE_INPUT",
+    "ANSYS_RAW_FOLDER", "ANSYS_RAW_PATTERN_FOR_FRESHNESS", "GRAVITY_VARIANT", "TREES",
+    "STRICT_SELECTION", "GROUP_WIDTH", "PASTEL_SCENARIO_COLORS", "TITLE_FONTSIZE",
+    "AXIS_LABEL_FONTSIZE", "TICK_LABEL_FONTSIZE", "LEGEND_FONTSIZE", "LEGEND_TITLE_FONTSIZE",
+    "LINE_WIDTH", "MARKER_SIZE", "BOX_EDGE_LINEWIDTH", "LEGEND_BBOX_X", "LEGEND_Y_TOP",
+    "LEGEND_Y_STEP", "RIGHT_MARGIN", "DEVIATION_HEIGHT_RATIO", "DEVIATION_BAR_WIDTH",
+    "DEVIATION_BASE_HATCH", "DEVIATION_BASE2_HATCH", "DEVIATION_BAR_EDGECOLOR",
+    "DEVIATION_BAR_EDGE_LINEWIDTH", "DEVIATION_ZERO_LINE_COLOR", "DEVIATION_ZERO_LINE_WIDTH",
+    "STIFFNESS_PANEL_WIDTH_INCHES", "STIFFNESS_COMBINED_WIDTH_INCHES",
+    "STIFFNESS_COMBINED_RIGHT_MARGIN",
+]
+
+
+def print_active_configuration(script_label: str, config_names: list) -> None:
+    """
+    Print the current value of every name in config_names, one per line -
+    the exact, complete state of this script's CONFIGURATION section for
+    this run (Stage 8 Part B3). Printed first, before any other output, so
+    the console log alone says what produced a given figure - no need to
+    re-open the script and check by eye.
+    """
+    print("\n" + "=" * 78)
+    print(f"ACTIVE CONFIGURATION - {script_label}")
+    print("=" * 78)
+    for name in config_names:
+        print(f"  {name} = {globals()[name]!r}")
+    print("=" * 78)
+
+
 def get_reduction_level(row) -> str:
     """
     Work out the reduction level for a single row of the table, from the
@@ -250,6 +459,18 @@ def filter_column(data: pd.DataFrame, column_name: str, value):
     if isinstance(value, (list, tuple, set)):
         return data[data[column_name].isin(value)]
     return data[data[column_name] == value]
+
+
+def tree_number_to_tree_id(tree_number: int) -> str:
+    """
+    Convert a plain tree number (e.g. 1, 7, 12) into the canonical project
+    tree ID (e.g. "B21_S01", "B21_S07", "B21_S12"). :02d pads the number
+    with a leading zero if it is a single digit.
+
+    Copied from load_static_scenarios.py, not imported - these scripts are
+    deliberately standalone with no shared imports.
+    """
+    return f"{TREE_ID_PREFIX}{tree_number:02d}"
 
 
 def bk_id_to_canonical(bk_id: str) -> str:
@@ -413,6 +634,75 @@ def normalize_model_name_for_matching(name: str) -> str:
     return re.sub(r"[ _]+", "_", str(name)).strip().lower()
 
 
+# Matches either spelling of the no-acel suffix ("_no acel" with a space,
+# "_no_acel" with an underscore) at the end of a model name. Copied from
+# method_deviation_overview.py, not imported - these scripts are
+# deliberately standalone with no shared imports.
+NO_ACEL_PATTERN = re.compile(r"[ _]no[ _]acel$", re.IGNORECASE)
+
+
+def is_no_acel_model(model_name: str) -> bool:
+    """True for a gravity-off ("_no_acel"/"_no acel") model name."""
+    return bool(NO_ACEL_PATTERN.search(str(model_name)))
+
+
+def base_model_name(model_name: str) -> str:
+    """Strip the no-acel suffix (either spelling), for matching only."""
+    return NO_ACEL_PATTERN.sub("", str(model_name))
+
+
+def filter_by_gravity_variant(df: pd.DataFrame, variant: str, model_col: str = "model") -> pd.DataFrame:
+    """
+    THE STRUCTURAL LOCK (see GRAVITY_VARIANT's own comment for why this
+    exists): keep only the rows whose model matches the requested gravity
+    variant. Called ONCE, in main(), immediately after fem_df is loaded -
+    every figure and the CSV are built from what THIS function returns, so
+    a row from the other variant cannot reach them, by construction rather
+    than by remembering to filter correctly in N different places.
+
+      "no_acel"      -> only _no_acel (gravity-off) models
+      "with_gravity" -> only the base (gravity-on) models
+      "both"         -> no filtering - returns df unchanged
+    """
+    if variant == "both":
+        return df
+    if variant == "no_acel":
+        return df[df[model_col].apply(is_no_acel_model)]
+    if variant == "with_gravity":
+        return df[~df[model_col].apply(is_no_acel_model)]
+    raise ValueError(f"Unknown GRAVITY_VARIANT: {variant!r} - use 'no_acel', 'with_gravity', or 'both'.")
+
+
+def assert_gravity_variant(df: pd.DataFrame, expected_variant: str, function_name: str,
+                           model_col: str = "model") -> None:
+    """
+    Loudly fail if df contains a model from the WRONG gravity variant - the
+    check GRAVITY_VARIANT's structural lock is meant to make unnecessary in
+    practice, kept as an assertion so a future code change that bypasses
+    filter_by_gravity_variant() is caught immediately, at the one place a
+    figure gets drawn, rather than discovered later by eye in a PNG.
+
+    expected_variant="both" always passes (no restriction). Otherwise every
+    model in df must agree with expected_variant's no_acel-ness; any that
+    do not are named in the AssertionError, along with this function's own
+    name and the variant that was expected.
+    """
+    if expected_variant == "both" or len(df) == 0:
+        return
+    models = df[model_col].unique()
+    if expected_variant == "no_acel":
+        offenders = [m for m in models if not is_no_acel_model(m)]
+    elif expected_variant == "with_gravity":
+        offenders = [m for m in models if is_no_acel_model(m)]
+    else:
+        raise ValueError(f"Unknown gravity variant to assert: {expected_variant!r}")
+    assert not offenders, (
+        f"{function_name}: expected ONLY '{expected_variant}' models but found "
+        f"{offenders} - the gravity-variant structural lock (filter_by_gravity_variant, "
+        f"applied once in main()) was bypassed somewhere upstream of this function."
+    )
+
+
 def resolve_model_filter(all_models: list, include_filter) -> list:
     """
     Resolve MODEL_INCLUDE (None, or a list of wanted model names) against
@@ -449,6 +739,325 @@ def resolve_model_filter(all_models: list, include_filter) -> list:
     matched = sorted(set(matched))
     print(f"Models drawn (MODEL_INCLUDE active): {matched}")
     return matched
+
+
+# Rejects the ANSYS row-position spelling outright (lowercase "bk<N>",
+# e.g. copy-pasted from "out_static_bk3_scenario1.txt") - see
+# normalize_tree_selector()'s own docstring for why this must never be
+# read as a tree number.
+BK_INDEX_REJECT_PATTERN = re.compile(r"^bk\d+$")
+
+
+def normalize_tree_selector(value) -> str:
+    """
+    Convert one TREES entry into the canonical tree ID "B21_Snn".
+
+    Accepts: 7, "7", "07", "S07", "s07", "B21_S07", "BK07" (uppercase only).
+    Rejects: "bk3"-style (lowercase "bk" + digits) with a clear error.
+
+    WHY the BK/bk case matters (read before touching this function): ANSYS
+    filenames use a LOWERCASE "bk<N>" for the tree's ROW POSITION in the
+    description file (bk3 is position 3, i.e. whichever tree happens to sit
+    at that row - see load_ansys_order_to_tree_id()'s own docstring). That
+    number is NOT a tree number and must never be typed into TREES. An
+    UPPERCASE "BK07" is accepted here only as another way of writing the
+    TREE NUMBER 7 - deliberately spelled differently from the lowercase
+    ANSYS row-position so a copy-pasted "bk3" from a filename is caught
+    immediately instead of silently selecting the wrong tree.
+    """
+    text = str(value).strip()
+
+    if BK_INDEX_REJECT_PATTERN.match(text):
+        raise ValueError(
+            f"TREES entry {value!r} looks like an ANSYS row-position index "
+            f"(lowercase 'bk<N>', as it appears in a filename like "
+            f"'out_static_bk3_scenario1.txt'). bk<N> is that tree's ROW "
+            f"POSITION in the description file, NOT its tree number - see "
+            f"load_ansys_order_to_tree_id()'s docstring. Use the tree's own "
+            f"number instead, e.g. 7, 'S07', or 'B21_S07'."
+        )
+
+    for pattern in (r"^B21_S0*(\d+)$", r"^BK0*(\d+)$"):
+        match = re.fullmatch(pattern, text)
+        if match:
+            return tree_number_to_tree_id(int(match.group(1)))
+
+    match = re.fullmatch(r"^[sS]0*(\d+)$", text)
+    if match:
+        return tree_number_to_tree_id(int(match.group(1)))
+
+    match = re.fullmatch(r"^\d+$", text)
+    if match:
+        return tree_number_to_tree_id(int(text))
+
+    raise ValueError(
+        f"TREES entry {value!r} is not a recognised tree selector. Use a "
+        f"plain number (7), 'S07', 's07', 'B21_S07', or 'BK07'."
+    )
+
+
+def resolve_tree_selection(trees_config, available_trees: list) -> dict:
+    """
+    Resolve TREES ("all" or a list of mixed-form entries) against the trees
+    actually present in the data (available_trees).
+
+    Returns a dict:
+      requested_display - what to print for "requested trees" (e.g. "all"
+                           or the resolved canonical list)
+      resolved          - sorted list of canonical tree IDs to actually use
+                           (found in available_trees)
+      missing           - sorted list of requested tree IDs NOT found in
+                           available_trees (empty when trees_config="all")
+    "all" never produces a MISSING entry by construction - it can only ask
+    for what is already there.
+    """
+    if trees_config == "all":
+        resolved = sorted(available_trees)
+        return {"requested_display": "all", "resolved": resolved, "missing": [],
+                "is_all": True}
+
+    requested = sorted({normalize_tree_selector(v) for v in trees_config})
+    available_set = set(available_trees)
+    resolved = sorted(t for t in requested if t in available_set)
+    missing = sorted(t for t in requested if t not in available_set)
+    return {"requested_display": requested, "resolved": resolved, "missing": missing,
+            "is_all": False}
+
+
+def apply_tree_selection(df: pd.DataFrame, tree_sel: dict, tree_col: str = "tree") -> pd.DataFrame:
+    """
+    Filter df down to tree_sel["resolved"]. is_all=True keeps every row
+    unchanged (no-op) - this is what keeps an "everything=all" run's data
+    identical to before this feature existed.
+    """
+    if not tree_sel["is_all"]:
+        df = df[df[tree_col].isin(tree_sel["resolved"])]
+    return df
+
+
+def build_filter_suffix(tree_sel: dict) -> str:
+    """
+    Build the deterministic filename-suffix fragment for an active TREES
+    selection, e.g. tree_sel resolved to B21_S07/B21_S12 -> "trees-07-12".
+    Returns "" when "all" (no-op - keeps default filenames unchanged by
+    this particular filter). Numbers only (not the full "B21_Snn" string)
+    to keep filenames short.
+
+    NOTE (Stage 8): this used to also carry a SCENARIOS fragment ("sc-3-4")
+    - removed along with SCENARIOS itself (see STRICT_SELECTION's own
+    comment for why: fully redundant with GRAVITY_VARIANT x MODEL_INCLUDE).
+    """
+    if tree_sel["is_all"]:
+        return ""
+    numbers = sorted(t.split("_S")[-1] for t in tree_sel["resolved"])
+    return "trees-" + "-".join(numbers)
+
+
+def print_selection_report(script_label: str, tree_sel: dict) -> bool:
+    """
+    Print the SELECTION REPORT block (trees only - see STRICT_SELECTION's
+    own comment for why the scenario section was retired in Stage 8) and
+    return True if STRICT_SELECTION should raise for this script (i.e.
+    something requested is genuinely missing from the data).
+    """
+    print(f"\nSELECTION REPORT - {script_label}")
+
+    if tree_sel["is_all"]:
+        print(f"  requested trees      : all  ->  resolved to {len(tree_sel['resolved'])}")
+    else:
+        print(f"  requested trees      : {tree_sel['requested_display']}")
+    print(f"  found in data        : {len(tree_sel['resolved'])}")
+    print(f"  plotted              : {len(tree_sel['resolved'])}")
+    if tree_sel["missing"]:
+        print(f"  requested but MISSING : {', '.join(tree_sel['missing'])}")
+    else:
+        print(f"  requested but MISSING : (none)")
+
+    return bool(tree_sel["missing"])
+
+
+def newest_mtime(folder, pattern: str):
+    """
+    Return (newest_mtime_float, newest_path) among files in folder matching
+    pattern, or (None, None) if nothing matches. Used by
+    check_input_freshness() and add_provenance_footer().
+    """
+    matches = sorted(Path(folder).glob(pattern))
+    if not matches:
+        return None, None
+    newest_path = max(matches, key=lambda p: p.stat().st_mtime)
+    return newest_path.stat().st_mtime, newest_path
+
+
+def check_input_freshness(script_label: str, raw_folder, raw_pattern: str,
+                          csv_paths_being_read: dict, abort_if_stale: bool) -> float:
+    """
+    Compare the newest modification time among raw ANSYS files (raw_folder/
+    raw_pattern) against every CSV path in csv_paths_being_read ({label:
+    path}). If any such CSV is OLDER than the newest raw file, print a
+    clearly visible warning naming both files, and - if abort_if_stale -
+    raise SystemExit instead of plotting from data that does not yet
+    reflect the latest ANSYS results.
+
+    Returns the newest raw-file mtime found (or None), for reuse by the
+    provenance footer, so "newest input" always means the same thing on the
+    figure as it did in this check.
+    """
+    newest_raw_mtime, newest_raw_path = newest_mtime(raw_folder, raw_pattern)
+    if newest_raw_mtime is None:
+        print(f"FRESHNESS CHECK ({script_label}): no files match '{raw_pattern}' in "
+              f"{raw_folder} - skipping.")
+        return None
+
+    stale_found = False
+    for label, csv_path in csv_paths_being_read.items():
+        csv_path = Path(csv_path)
+        if not csv_path.is_file():
+            continue  # a missing file is reported elsewhere (FileNotFoundError on read)
+        csv_mtime = csv_path.stat().st_mtime
+        if csv_mtime < newest_raw_mtime:
+            stale_found = True
+            print(f"*** WARNING: STALE INPUT - {label} ({csv_path.name}, "
+                  f"{datetime.fromtimestamp(csv_mtime):%Y-%m-%d %H:%M:%S}) is OLDER than "
+                  f"{newest_raw_path.name} ({datetime.fromtimestamp(newest_raw_mtime):%Y-%m-%d %H:%M:%S}). "
+                  f"The pipeline that builds {csv_path.name} has not been re-run since "
+                  f"that raw ANSYS file last changed - this script would be plotting "
+                  f"data that does not yet reflect it. ***")
+
+    if stale_found and abort_if_stale:
+        raise SystemExit(
+            f"{script_label}: aborting because ABORT_ON_STALE_INPUT=True and at least one "
+            f"input CSV is older than a raw ANSYS file it depends on (see WARNING(s) above). "
+            f"Re-run the upstream pipeline (load_static_scenarios.py / compute_slopes.py) "
+            f"first, or set ABORT_ON_STALE_INPUT=False to plot anyway."
+        )
+    return newest_raw_mtime
+
+
+# Filter-suffix markers this family of scripts writes into filenames - used
+# only to FIND and DESCRIBE a previously-written filtered output, never to
+# read or write its contents. Extend this tuple if a new suffix style is
+# ever introduced (the trees/scenarios suffix is matched separately, by
+# TREES_SUFFIX_PATTERN, since it embeds tree/scenario numbers).
+KNOWN_MODEL_SUFFIX_MARKERS = ("_noacel",)
+TREES_SUFFIX_PATTERN = re.compile(r"_trees-[0-9-]+|_sc-[0-9-]+")
+
+
+def find_filtered_output_files(out_folder, name_prefixes: tuple) -> list:
+    """
+    Return every FILE (not directory) in out_folder whose name starts with
+    one of name_prefixes (this script's own output family) and carries a
+    filter-suffix marker anywhere in its name (KNOWN_MODEL_SUFFIX_MARKERS,
+    or a "_trees-.../_sc-..." tree/scenario suffix).
+    """
+    hits = []
+    for path in sorted(Path(out_folder).iterdir()):
+        if not path.is_file() or not path.name.startswith(name_prefixes):
+            continue
+        if any(marker in path.name for marker in KNOWN_MODEL_SUFFIX_MARKERS) \
+                or TREES_SUFFIX_PATTERN.search(path.name):
+            hits.append(path)
+    return hits
+
+
+def unfiltered_sibling_path(filtered_path) -> Path:
+    """
+    Strip every known filter-suffix marker from filtered_path's name to
+    recover the UNFILTERED filename it was derived from, e.g.
+    "stiffness_comparison_rotation_all_noacel.png" ->
+    "stiffness_comparison_rotation_all.png". Used only to COMPARE
+    timestamps in report_orphaned_filtered_outputs() - never to read or
+    write that file automatically.
+    """
+    filtered_path = Path(filtered_path)
+    stem = filtered_path.stem
+    for marker in KNOWN_MODEL_SUFFIX_MARKERS:
+        stem = stem.replace(marker, "")
+    stem = TREES_SUFFIX_PATTERN.sub("", stem)
+    return filtered_path.with_name(stem + filtered_path.suffix)
+
+
+def report_orphaned_filtered_outputs(out_folder, name_prefixes: tuple, script_label: str) -> None:
+    """
+    Print (NEVER touch - no delete/move/rename) every existing filtered-
+    output file in out_folder whose UNFILTERED sibling is newer than it -
+    i.e. the unfiltered figure has been regenerated since this filtered one
+    was last written, so the filtered one is now stale and, with nothing on
+    either file saying which is which, could be mistaken for current. This
+    is exactly the Sep 2026 incident that motivated this whole safeguard.
+    """
+    hits = find_filtered_output_files(out_folder, name_prefixes)
+    if not hits:
+        return
+    print(f"\nORPHANED FILTERED OUTPUTS ({script_label}) - these were NOT (necessarily) "
+          f"regenerated by this run and may be stale. NOTHING is touched - review them "
+          f"by hand before using them:")
+    for path in hits:
+        sibling = unfiltered_sibling_path(path)
+        mtime_text = datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
+        if sibling.exists():
+            sibling_mtime = sibling.stat().st_mtime
+            if sibling_mtime > path.stat().st_mtime:
+                sibling_text = datetime.fromtimestamp(sibling_mtime).strftime("%Y-%m-%d %H:%M")
+                status = f"STALE - its unfiltered sibling ({sibling.name}) is newer ({sibling_text})"
+            else:
+                status = "unfiltered sibling is not newer than this file - may still be current"
+        else:
+            status = "no unfiltered sibling found to compare against"
+        print(f"  {path}   {mtime_text}   {status}")
+
+
+def add_provenance_footer(fig, script_filename: str, newest_input_mtime, active_filters_text: str,
+                          n_trees: int, n_models: int) -> None:
+    """
+    Stamp a small grey monospace footer along the bottom edge of fig,
+    below the axes, with: this script's filename, when the figure was
+    generated (now), the newest modification time among the raw ANSYS
+    files it was built from, the active filters, and how many trees/models
+    were actually drawn - see FIGURE_PROVENANCE_FOOTER's own comment for
+    why. A no-op when FIGURE_PROVENANCE_FOOTER is False.
+
+    Stage 9 Part A1: also stashes the SAME provenance as fig.stage9_png_metadata,
+    picked up by savefig_with_provenance() below when the figure is actually
+    written to disk. The footer above is pixels only - reading it back needs
+    OCR. This is a real PNG tEXt chunk, readable afterwards via PIL's
+    Image.info without OCR or guessing a run's configuration from its
+    filename - see check_png_provenance.py.
+    """
+    if not FIGURE_PROVENANCE_FOOTER:
+        fig.stage9_png_metadata = {}
+        return
+    generated_text = datetime.now().strftime("%Y-%m-%d %H:%M")
+    newest_input_text = (datetime.fromtimestamp(newest_input_mtime).strftime("%Y-%m-%d %H:%M")
+                         if newest_input_mtime is not None else "unknown")
+    line1 = f"{script_filename} | generated {generated_text} | newest input {newest_input_text}"
+    line2 = f"{active_filters_text}  |  {n_trees} trees, {n_models} models"
+    fig.text(0.01, -0.045, line1 + "\n" + line2, ha="left", va="bottom",
+             fontsize=6, family="monospace", color="0.55")
+
+    fig.stage9_png_metadata = {
+        "Script": script_filename,
+        "Generated": generated_text,
+        "NewestInput": newest_input_text,
+        "GravityVariant": str(GRAVITY_VARIANT),
+        "ModelInclude": str(MODEL_INCLUDE),
+        "Trees": str(TREES),
+        "NTrees": str(n_trees),
+        "NModels": str(n_models),
+    }
+
+
+def savefig_with_provenance(fig, path) -> None:
+    """
+    The ONLY way a figure should be written to disk in this script (Stage 9
+    Part A1) - every build_*() function calls add_provenance_footer(fig,
+    ...) before saving, which stashes fig.stage9_png_metadata; this passes
+    that dict straight to savefig(metadata=...), embedding it as real PNG
+    metadata alongside the existing visible footer. A PNG with no such
+    metadata predates Stage 9 and its configuration cannot be verified this
+    way - see check_png_provenance.py.
+    """
+    plt.savefig(path, dpi=150, bbox_inches="tight", metadata=getattr(fig, "stage9_png_metadata", {}))
 
 
 def darker(hex_color: str, factor: float = 0.7):
@@ -558,6 +1167,9 @@ def overlay_fem_points(ax, fem_df: pd.DataFrame, value_specs: list, tree_order: 
     FEM column they come from. Legends are drawn outside the axes (to the
     right), stacked below plot_experimental_boxplots()'s year legend.
 
+    THE STRUCTURAL LOCK'S ASSERTION runs first (see assert_gravity_variant()):
+    every row this function draws must already agree with GRAVITY_VARIANT.
+
     show_legend=False skips drawing the legend(s) - see
     plot_experimental_boxplots() for why.
 
@@ -569,6 +1181,8 @@ def overlay_fem_points(ax, fem_df: pd.DataFrame, value_specs: list, tree_order: 
     lists models actually PRESENT in this fem_df, so a filtered-out
     model's colour is reserved but its legend entry does not appear.
     """
+    assert_gravity_variant(fem_df, GRAVITY_VARIANT, "overlay_fem_points")
+
     if model_colors is None:
         model_colors = assign_model_colors(fem_df["model"].unique())
 
@@ -853,7 +1467,7 @@ def save_stiffness_figure_variants(fig, ax_dev, deviation_table: pd.DataFrame, b
         path = stiffness_plot_path(quantity, variant)
         plt.tight_layout()
         fig.subplots_adjust(right=right_margin)
-        plt.savefig(path, dpi=150)
+        savefig_with_provenance(fig, path)
         print(f"{quantity_label.capitalize()} comparison plot ({variant}) saved to: {path}")
 
 
@@ -928,6 +1542,10 @@ def build_stiffness_figure(quantity: str, panel_specs: list, fem_df: pd.DataFram
     if visible_models is not None:
         fig.suptitle(f"Models shown: {', '.join(visible_models)}", fontsize=TITLE_FONTSIZE)
 
+    add_provenance_footer(fig, "plot_stiffness_comparison.py", PROVENANCE_NEWEST_INPUT_MTIME,
+                          PROVENANCE_FILTERS_TEXT, n_trees=len(tree_order),
+                          n_models=int(fem_df["model"].nunique()))
+
     panel_titles = "/".join(title for title, _, _ in panel_specs)
     n_points_per_panel = count_fem_points(fem_df, value_specs, tree_order)
     print(f"{print_label}: {n_points_per_panel} FEM point(s) per stiffness panel "
@@ -959,6 +1577,9 @@ def build_rotation_figure(experimental: pd.DataFrame, fem_df_full: pd.DataFrame,
     resolved list of models being drawn, passed straight to
     build_stiffness_figure() for its legend/title/dodge-width behaviour.
     """
+    assert_gravity_variant(fem_df_full, "both", "build_rotation_figure (fem_df_full)")  # feeds the CSV - always both variants
+    assert_gravity_variant(fem_df_drawing, GRAVITY_VARIANT, "build_rotation_figure (fem_df_drawing)")
+
     combined = pair_and_median(experimental, "slope_root_stiff_cam", "slope_root_stiff_nocam")
 
     value_specs = [
@@ -1023,6 +1644,9 @@ def build_displacement_figure(experimental: pd.DataFrame, fem_df_full: pd.DataFr
     See build_rotation_figure()'s own docstring for fem_df_full vs.
     fem_df_drawing vs. visible_models.
     """
+    assert_gravity_variant(fem_df_full, "both", "build_displacement_figure (fem_df_full)")  # feeds the CSV - always both variants
+    assert_gravity_variant(fem_df_drawing, GRAVITY_VARIANT, "build_displacement_figure (fem_df_drawing)")
+
     combined = pair_and_median(experimental, "slope_Pt3", "slope_Pt4")
 
     value_specs = [("slope_displacement", "o", "displacement")]
@@ -1080,6 +1704,10 @@ def print_summary(experimental: pd.DataFrame, fem_df: pd.DataFrame):
 
 
 def main():
+    global TREES_SUFFIX, PROVENANCE_NEWEST_INPUT_MTIME, PROVENANCE_FILTERS_TEXT
+
+    print_active_configuration("plot_stiffness_comparison.py", CONFIG_CONSTANT_NAMES)
+
     # --- Part 0: MODEL_INCLUDE / MODEL_INCLUDE_SUFFIX sanity check --------------
     # Writing filtered figures under the same filenames as the full ones
     # would silently and irreversibly overwrite them - refuse outright.
@@ -1090,6 +1718,14 @@ def main():
               "non-empty string and re-run.")
         return
 
+    # --- Part 0b: freshness guard --------------------------------------------
+    # Would have caught the Sep 2026 incident: raw ANSYS files for S04/S08/
+    # S09/S10 finished AFTER slopes_combined.csv was last built from them.
+    PROVENANCE_NEWEST_INPUT_MTIME = check_input_freshness(
+        "plot_stiffness_comparison.py", ANSYS_RAW_FOLDER, ANSYS_RAW_PATTERN_FOR_FRESHNESS,
+        {"FEM_CSV_PATH": FEM_CSV_PATH}, ABORT_ON_STALE_INPUT,
+    )
+
     # --- Part 1: load and filter experimental data --------------------------
     experimental = load_and_filter_experimental(EXPERIMENTAL_CSV_PATH)
 
@@ -1099,7 +1735,33 @@ def main():
         return
 
     # --- Part 3: load FEM data ------------------------------------------------
-    fem_df = load_fem_data(FEM_CSV_PATH)   # UNFILTERED - always feeds the CSV, never MODEL_INCLUDE-restricted
+    # UNFILTERED - always feeds stiffness_deviation.csv. Neither MODEL_INCLUDE
+    # nor GRAVITY_VARIANT ever narrows fem_df itself - both are DRAW-ONLY
+    # filters (see each one's own comment) - specifically so this script's
+    # CSV output stays ONE complete, config-independent file that
+    # method_deviation_overview.py can always read regardless of what THIS
+    # script's own GRAVITY_VARIANT happens to be set to (an earlier version
+    # of this stage's own work briefly broke that guarantee - see
+    # GRAVITY_VARIANT's own comment for the postmortem).
+    fem_df = load_fem_data(FEM_CSV_PATH)
+
+    # --- TREES: resolve the selection against what is actually in fem_df,
+    # print the SELECTION REPORT, then narrow fem_df to it. This runs
+    # BEFORE MODEL_INCLUDE so a tree request is checked against the full
+    # data, not an already model-narrowed slice. (SCENARIOS retired in
+    # Stage 8 - see STRICT_SELECTION's own comment.) ---
+    tree_sel = resolve_tree_selection(TREES, sorted(fem_df["tree"].unique()))
+    any_missing = print_selection_report("plot_stiffness_comparison.py", tree_sel)
+    if STRICT_SELECTION and any_missing:
+        raise SystemExit(
+            "plot_stiffness_comparison.py: STRICT_SELECTION=True and the SELECTION REPORT "
+            "above lists a requested tree with no data - see 'requested but MISSING'. "
+            "Set STRICT_SELECTION=False to plot the partial selection anyway."
+        )
+    fem_df = apply_tree_selection(fem_df, tree_sel)
+    TREES_SUFFIX = build_filter_suffix(tree_sel)
+    PROVENANCE_FILTERS_TEXT = (f"GRAVITY_VARIANT={GRAVITY_VARIANT}  MODEL_INCLUDE={MODEL_INCLUDE}  "
+                               f"TREES={TREES}")
 
     # --- MODEL_INCLUDE: resolve which models are DRAWN (never affects fem_df
     # itself, which stays the full table for compute_deviation_table/CSV) ---
@@ -1110,6 +1772,16 @@ def main():
         return
     fem_df_drawing = fem_df if MODEL_INCLUDE is None else fem_df[fem_df["model"].isin(visible_models_list)]
     visible_models = None if MODEL_INCLUDE is None else visible_models_list
+
+    # --- THE GRAVITY-VARIANT STRUCTURAL LOCK - applied to DRAWING ONLY -----
+    # Mirrors MODEL_INCLUDE exactly (same reasoning, same guarantee): this
+    # narrows fem_df_drawing further, never fem_df/the CSV. See
+    # GRAVITY_VARIANT's own comment for why this must never reach the CSV.
+    fem_df_drawing_before_gravity = fem_df_drawing
+    fem_df_drawing = filter_by_gravity_variant(fem_df_drawing, GRAVITY_VARIANT)
+    print(f"GRAVITY_VARIANT={GRAVITY_VARIANT!r} - fem_df_drawing narrowed from "
+          f"{len(fem_df_drawing_before_gravity)} to {len(fem_df_drawing)} row(s); "
+          f"models drawn: {sorted(fem_df_drawing['model'].unique())}")
 
     # --- Shared axis categories -----------------------------------------------
     # With ONLY_TREES_WITH_FEM the x-axis is restricted to trees that have
@@ -1159,11 +1831,16 @@ def main():
           "(positive = model stiffer than measurement):")
     print(deviation_table.to_string(index=False))
 
-    deviation_table.to_csv(DEVIATION_CSV_PATH, index=False)
-    print(f"\nDeviation table saved to: {DEVIATION_CSV_PATH}")
+    deviation_csv_path = csv_filter_suffix(DEVIATION_CSV_PATH)
+    deviation_table.to_csv(deviation_csv_path, index=False)
+    print(f"\nDeviation table saved to: {deviation_csv_path}")
 
     # --- Part 7: console summary ----------------------------------------------
     print_summary(experimental, fem_df)
+
+    # --- Part 8: orphaned filtered outputs (list only, never touched) --------
+    report_orphaned_filtered_outputs(OUT_FOLDER, ("stiffness_comparison_", "stiffness_deviation"),
+                                     "plot_stiffness_comparison.py")
 
     plt.show()
 

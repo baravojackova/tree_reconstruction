@@ -74,6 +74,7 @@ How to use it:
 
 import re
 from pathlib import Path
+from datetime import datetime
 
 import numpy as np
 import pandas as pd
@@ -87,7 +88,7 @@ from matplotlib.lines import Line2D
 # =========================================================================
 
 # Folder holding the ANSYS output files (out_modal_*, out_harmonic_*, ...).
-# This folder did not move - it is read from the same scripts\ansys folder
+# This folder did not move - it is read from the same scripts/ansys folder
 # every other script in this group reads it from.
 INPUT_FOLDER = r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\scripts\ansys"
 MODAL_FILE_PATTERN = "out_modal_bk*_scenario*.txt"
@@ -113,22 +114,33 @@ GEOMETRY_COLUMN_TREE_NUMBER = 2
 
 # What each ANSYS scenario number actually is, under the settled model
 # selection (handoff_2026-09-10_part2.md section 1):
-#   1   adtree_r5mm     = AdTree r5mm, regression-perorder, -wlen,
-#                         seg50-500-k80, calibrated against that tree's
-#                         selected AdQSM variant
-#   2   treeqsm_pd002   = TreeQSM pd2min 0.002, mo9, sr010, ri1, Simplified
-#   999 adtree_r5_pilot = the cost-model pilot run on B21_S07, kept for
-#                         reference (unchanged by the relabel)
-# Scenario numbers 3 and 4 are deliberately left unassigned - no model is
-# using them right now. ADD A LINE HERE whenever a new scenario is run -
-# nothing else in the script needs changing. A scenario number that is
-# missing from this dict still gets loaded, but is labelled "scenario<N>"
-# and reported as a warning. Identical to the dict in
-# load_static_scenarios.py.
+#   1   adtree_r5mm            = AdTree r5mm, regression-perorder, -wlen,
+#                                seg50-500-k80, calibrated against that
+#                                tree's selected AdQSM variant
+#   2   treeqsm_pd002          = TreeQSM pd2min 0.002, mo9, sr010, ri1,
+#                                Simplified
+#   3   adtree_r5mm_no_acel    = same as 1, gravity (self-weight) OFF -
+#                                the reference variant since Stage 7
+#   4   treeqsm_pd002_no_acel  = same as 2, gravity (self-weight) OFF -
+#                                the reference variant since Stage 7
+#   999 adtree_r5_pilot        = the cost-model pilot run on B21_S07, kept
+#                                for reference (unchanged by the relabel)
+# (Stage 9 Part D: this used to say "scenario numbers 3 and 4 are
+# deliberately left unassigned" - stale ever since scenarios 3/4 were
+# added as the "_no_acel" gravity-off twins, which by Stage 7 became the
+# REFERENCE variant, not an unused placeholder.) ADD A LINE HERE whenever a
+# new scenario is run - nothing else in the script needs changing. A
+# scenario number that is missing from this dict still gets loaded, but is
+# labelled "scenario<N>" and reported as a warning.
+#
+# Copy-pasted (not imported - see the ansys_eval self-contained convention)
+# from load_static_scenarios.py; also copy-pasted into method_deviation_overview.py
+# and plot_frequency_spectra.py. Kept in sync by check_scenario_dicts_in_sync.py
+# (Stage 8 Part C4) - run it after editing this dict.
 SCENARIO_MODELS = {
         1: "adtree_r5mm",
         2: "treeqsm_pd002",
-        3: "adtree_r5mm_no acel",
+        3: "adtree_r5mm_no_acel",
         4: "treeqsm_pd002_no_acel",
         999: "adtree_r5_pilot",   # high cylinder count run kept from the cost-model session
 }
@@ -171,6 +183,34 @@ MODAL_EFFMASS_CSV_PATH = str(Path(OUTPUT_DIR) / "modal_effmass.csv")
 # only controls whether the extra abs variant is ALSO written.
 HARMONIC_USE_ABS = True
 
+# The harmonic PEAK frequency (compute_harmonic_peak_frequency() - the main
+# frequency identified from the sweep) is searched only ABOVE this
+# frequency (Hz), so a low-frequency artifact near the start of the sweep
+# cannot win over the tree's real resonance peak. Does not affect the
+# swept data itself or the spectrum figures - only where the single
+# "harmonic_peak" frequency number is picked from.
+HARMONIC_PEAK_MIN_FREQUENCY_HZ = 0.05
+
+# Per-tree UPPER limit (Hz) on the same search, for a tree whose sweep has
+# a known artifact ABOVE its real resonance peak that would otherwise win
+# the max|Top_ux| search. A tree not listed here has no upper limit (the
+# search still runs to the top of its sweep). Same scope as
+# HARMONIC_PEAK_MIN_FREQUENCY_HZ - only affects where "harmonic_peak" is
+# picked from, not the swept data or the spectrum figures.
+HARMONIC_PEAK_MAX_FREQUENCY_HZ_BY_TREE = {
+    "B21_S16": 0.5,
+    "B21_S13": 0.3,
+    "B21_S12": 0.5,
+}
+
+# Per-tree LOWER limit (Hz), overriding HARMONIC_PEAK_MIN_FREQUENCY_HZ for
+# a tree listed here - same idea as the MAX dict above, at the other end of
+# the search. A tree not listed here still uses the global
+# HARMONIC_PEAK_MIN_FREQUENCY_HZ.
+HARMONIC_PEAK_MIN_FREQUENCY_HZ_BY_TREE = {
+    "B21_S12": 0.25,
+}
+
 # True  = the frequency-summary figure (build_frequency_summary_figure())
 #         shows the modal quantities (modal_peak points in the upper panel,
 #         modal_peak bars in the deviation panel, and their legend entries)
@@ -201,7 +241,68 @@ MODEL_INCLUDE = None
 # modal_comparison_B21_S04_elasto_noacel.png), so a filtered figure can
 # never be confused with, or silently overwrite, the full one. main()
 # refuses to run if MODEL_INCLUDE is set and this is empty.
-MODEL_INCLUDE_SUFFIX = "noacel"
+MODEL_INCLUDE_SUFFIX = "no_acel"
+
+# =========================================================================
+# STALE-OUTPUT / PROVENANCE SAFEGUARDS (added Sep 2026)
+# -------------------------------------------------------------------------
+# Same incident, same fix, as plot_stiffness_comparison.py's own copy of
+# this block (see there for the full story): a MODEL_INCLUDE-filtered run's
+# "_noacel" output PNGs were left behind after MODEL_INCLUDE was reset to
+# None, and nothing on the image said when or how it was made.
+# =========================================================================
+
+# True = stamp a small grey footer on every figure - see
+# add_provenance_footer(). False only for a publication figure.
+FIGURE_PROVENANCE_FOOTER = True
+
+# True = refuse to run if any raw ANSYS file this script depends on is
+# newer than a CSV it is about to read. This script parses out_modal_bk*/
+# out_harmonic_bk* directly on every run (no intermediate CSV between them
+# and the figures - see load_modal_data()/load_harmonic_data()), so there
+# is nothing that can go stale in that direction for the modal/harmonic
+# data itself; the check still runs, for interface consistency with the
+# other two scripts, against EXPERIMENTAL_CSV_PATH (which is not ANSYS-
+# derived, so it will simply report "nothing to check" - see
+# check_input_freshness()'s call in main()).
+ABORT_ON_STALE_INPUT = True
+
+# =========================================================================
+# THE GRAVITY-VARIANT STRUCTURAL LOCK (added Stage 7)
+# -------------------------------------------------------------------------
+# Same mechanism, same reason, as plot_stiffness_comparison.py's own copy of
+# this block: applied ONCE, right after modal_df/harmonic_df are loaded (see
+# main()), to the dataframes every figure in this script reads - not a
+# convention to remember per figure, a structural fact about the data by
+# the time any drawing function sees it.
+# =========================================================================
+
+# "no_acel"      = only the gravity-off runs (scenarios 3/4) - the reference
+#                  variant, and the default.
+# "with_gravity" = only the gravity-on runs (scenarios 1/2).
+# "both"         = no gravity filtering at all (old, pre-Stage-7 behaviour).
+GRAVITY_VARIANT = "no_acel"
+
+# --- WHICH TREES TO PLOT -------------------------------------------------
+# "all"  = every tree found in the modal/harmonic data (old behaviour)
+# or a list, mixed forms allowed:  [7, 12]  /  ["B21_S07", "S12"]  /  ["7"]
+# NOTE: these are TREE NUMBERS, not the bk<N> index from the ANSYS filenames.
+#       bk<N> is a ROW POSITION in the description file (bk3 = tree 7) - see
+#       load_ansys_order_to_tree_id()'s docstring. normalize_tree_selector()
+#       refuses a bare "bk3"-style entry outright rather than guessing.
+TREES = "all"
+
+# If True, the script raises an error (after printing the selection report)
+# when a tree listed above has no data at all. Deliberate: a silently
+# empty/narrower plot is what caused the Sep 2026 incident this option was
+# added to catch. Set to False only if you knowingly want to ask for trees
+# that may not exist yet.
+#
+# NOTE (Stage 8): this used to also gate a SCENARIOS constant. SCENARIOS
+# was retired - fully redundant with GRAVITY_VARIANT (model family) x
+# MODEL_INCLUDE (reconstruction method) - see Stage 7 Part A. Use
+# GRAVITY_VARIANT for which gravity variant to draw.
+STRICT_SELECTION = True
 
 # X-axis crop, in Hz, applied to every figure whose x-axis is frequency:
 # both harmonic figures (signed and abs) and both modal figures. Set to
@@ -214,7 +315,12 @@ MODEL_INCLUDE_SUFFIX = "noacel"
 # specifically to make that fact visible instead of silent.
 # NOT applied to the frequency_summary figure - there, frequency is on the
 # Y axis, not X, so this constant does not apply to it (see main()).
-FREQUENCY_AXIS_LIMITS = (0.0,1)   # Hz, x axis; set to None for auto
+FREQUENCY_AXIS_LIMITS = None  # Hz, x axis; set to None for auto - see PART C1 of the Sep 2026
+                                # stale-figure investigation: this had been left at (0.0, 1),
+                                # cropping every harmonic sweep curve at 1 Hz for every tree/model
+                                # equally (a leftover debug value, not a per-tree filter - it did
+                                # not cause the "some trees missing" symptom that investigation was
+                                # about, but was a real, separate bug worth fixing while here).
 
 # Same list as in plot_stiffness_comparison.py, for visual consistency.
 PASTEL_SCENARIO_COLORS = [
@@ -223,15 +329,15 @@ PASTEL_SCENARIO_COLORS = [
 ]
 
 # --- Style config -----------------------------------------------------------
-TITLE_FONTSIZE = 16
-AXIS_LABEL_FONTSIZE = 12
-TICK_LABEL_FONTSIZE = 10
-LEGEND_FONTSIZE = 10
+TITLE_FONTSIZE = 18
+AXIS_LABEL_FONTSIZE = 16
+TICK_LABEL_FONTSIZE = 14
+LEGEND_FONTSIZE = 16
 LEGEND_TITLE_FONTSIZE = 10
 LINE_WIDTH = 1.5          # FEM harmonic curves
 BAR_EDGE_LINEWIDTH = 0.0  # modal EFF MASS bars (no edge by default)
 BOX_EDGE_LINEWIDTH = 1.0  # experimental boxplots (still used by plot_stiffness_comparison.py's convention; kept for any future boxplot use)
-MARKER_SIZE = 8            # FEM/summary point size
+MARKER_SIZE = 14          # FEM/summary point size
 
 # Legends, moved outside the axes (CHANGE 2). bbox_to_anchor is in axes
 # fraction coordinates: LEGEND_BBOX_X > 1 sits just right of the axes edge,
@@ -388,6 +494,61 @@ HARMONIC_COLUMN_NAMES = [
 # =========================================================================
 # CODE - you normally do not need to change anything below this line
 # =========================================================================
+
+# Every name assigned in the CONFIGURATION section above (between the
+# "CONFIGURATION" and "CODE" headers), used by print_active_configuration()
+# below (Stage 8 Part B3). TREES_SUFFIX/PROVENANCE_NEWEST_INPUT_MTIME/
+# PROVENANCE_FILTERS_TEXT are deliberately left out - they are runtime
+# state set once by main(), not something you edit, so their value here
+# (before main() resolves anything) would just be a meaningless "" / None.
+CONFIG_CONSTANT_NAMES = [
+    "INPUT_FOLDER", "MODAL_FILE_PATTERN", "HARMONIC_FILE_PATTERN", "GEOMETRY_FILE_NAME",
+    "GEOMETRY_FILE_PATH", "TREE_ID_PREFIX", "GEOMETRY_COLUMN_ANSYS_ORDER",
+    "GEOMETRY_COLUMN_TREE_NUMBER", "SCENARIO_MODELS", "DATA_FOLDER", "EXPERIMENTAL_CSV_PATH",
+    "DAYS_TO_PROCESS", "FREQUENCY_MEASUREMENT_FILTER", "TYPE_FILTER", "REDUCTION_LEVEL_FILTER",
+    "TREE_FILTER", "OUTPUT_DIR", "FREQUENCY_DEVIATION_CSV_PATH", "MODAL_EFFMASS_CSV_PATH",
+    "HARMONIC_USE_ABS", "HARMONIC_PEAK_MIN_FREQUENCY_HZ", "HARMONIC_PEAK_MAX_FREQUENCY_HZ_BY_TREE",
+    "HARMONIC_PEAK_MIN_FREQUENCY_HZ_BY_TREE",
+    "SUMMARY_SHOW_MODAL", "MODEL_INCLUDE", "MODEL_INCLUDE_SUFFIX",
+    "FIGURE_PROVENANCE_FOOTER", "ABORT_ON_STALE_INPUT", "GRAVITY_VARIANT", "TREES",
+    "STRICT_SELECTION", "FREQUENCY_AXIS_LIMITS", "PASTEL_SCENARIO_COLORS", "TITLE_FONTSIZE",
+    "AXIS_LABEL_FONTSIZE", "TICK_LABEL_FONTSIZE", "LEGEND_FONTSIZE", "LEGEND_TITLE_FONTSIZE",
+    "LINE_WIDTH", "BAR_EDGE_LINEWIDTH", "BOX_EDGE_LINEWIDTH", "MARKER_SIZE", "LEGEND_BBOX_X",
+    "LEGEND_Y_TOP", "LEGEND_Y_STEP", "RIGHT_MARGIN", "BAND_ALPHA", "BAND_ZORDER", "BAND_MIN_N",
+    "MEDIAN_LINE_WIDTH", "SUMMARY_MARKER_HARMONIC", "SUMMARY_MARKER_MODAL",
+    "SUMMARY_MARKER_EXPERIMENTAL", "SUMMARY_EXPERIMENTAL_COLOR", "SUMMARY_ERRORBAR_LINEWIDTH",
+    "SUMMARY_GROUP_WIDTH", "SUMMARY_MIN_WIDTH_INCHES", "SUMMARY_RIGHT_MARGIN",
+    "SUMMARY_DEVIATION_HEIGHT_RATIO", "SUMMARY_DEVIATION_BAR_WIDTH", "SUMMARY_HARMONIC_HATCH",
+    "SUMMARY_MODAL_HATCH", "SUMMARY_DEVIATION_BAR_EDGECOLOR",
+    "SUMMARY_DEVIATION_BAR_EDGE_LINEWIDTH", "SUMMARY_ZERO_LINE_COLOR", "SUMMARY_ZERO_LINE_WIDTH",
+    "MODAL_MASS_MARKER_TIME_KG", "MODAL_MASS_MARKER_TIME_INCL_ROTS", "MODAL_MASS_MARKER_SIZE",
+    "MODAL_MASS_LEGEND_MARKERSIZE", "MODAL_MASS_LEGEND_COLOR", "MODAL_MASS_ZORDER",
+    "MODAL_MASS_AXIS_LABEL", "MODAL_MASS_AXIS_COLOR", "FRACTION_AXIS_OFFSET",
+    "FRACTION_AXIS_LABEL", "FRACTION_AXIS_COLOR", "FRACTION_MARKER_F_CAPTURED",
+    "FRACTION_MARKER_F_TOTAL", "FRACTION_MARKER_SIZE", "FRACTION_LEGEND_MARKERSIZE",
+    "FRACTION_LEGEND_COLOR", "FRACTION_ZORDER", "FRACTION_ANNOTATION_FONTSIZE",
+    "HARMONIC_LEGEND_BBOX_X", "HARMONIC_RIGHT_MARGIN", "HARMONIC_SIMPLE_FIGSIZE",
+    "HARMONIC_SIMPLE_RIGHT_MARGIN", "MODAL_FILENAME_PATTERN", "HARMONIC_FILENAME_PATTERN",
+    "TOTAL_MASS_SEARCH_LINES", "TOTAL_MASS_PATTERN", "MODAL_COLUMN_NAMES",
+    "MODAL_COL_TIME_KG_FROM_END", "MODAL_COL_TIME_INCL_ROTS_FROM_END", "HARMONIC_COLUMN_NAMES",
+]
+
+
+def print_active_configuration(script_label: str, config_names: list) -> None:
+    """
+    Print the current value of every name in config_names, one per line -
+    the exact, complete state of this script's CONFIGURATION section for
+    this run (Stage 8 Part B3). Printed first, before any other output, so
+    the console log alone says what produced a given figure - no need to
+    re-open the script and check by eye.
+    """
+    print("\n" + "=" * 78)
+    print(f"ACTIVE CONFIGURATION - {script_label}")
+    print("=" * 78)
+    for name in config_names:
+        print(f"  {name} = {globals()[name]!r}")
+    print("=" * 78)
+
 
 def get_reduction_level(row) -> str:
     """
@@ -600,6 +761,80 @@ def normalize_model_name_for_matching(name: str) -> str:
     return re.sub(r"[ _]+", "_", str(name)).strip().lower()
 
 
+# Matches either spelling of the no-acel suffix. Copied from
+# method_deviation_overview.py, not imported.
+NO_ACEL_PATTERN = re.compile(r"[ _]no[ _]acel$", re.IGNORECASE)
+
+
+def is_no_acel_model(model_name: str) -> bool:
+    """True for a gravity-off ("_no_acel"/"_no acel") model name."""
+    return bool(NO_ACEL_PATTERN.search(str(model_name)))
+
+
+def base_model_name(model_name: str) -> str:
+    """Strip the no-acel suffix (either spelling), for matching only."""
+    return NO_ACEL_PATTERN.sub("", str(model_name))
+
+
+def filter_by_gravity_variant(df: pd.DataFrame, variant: str, model_col: str = "model") -> pd.DataFrame:
+    """
+    THE STRUCTURAL LOCK - see GRAVITY_VARIANT's own comment. Keep only rows
+    whose model matches the requested gravity variant. Called ONCE, in
+    main(), immediately after modal_df/harmonic_df are loaded.
+    """
+    if variant == "both":
+        return df
+    if variant == "no_acel":
+        return df[df[model_col].apply(is_no_acel_model)]
+    if variant == "with_gravity":
+        return df[~df[model_col].apply(is_no_acel_model)]
+    raise ValueError(f"Unknown GRAVITY_VARIANT: {variant!r} - use 'no_acel', 'with_gravity', or 'both'.")
+
+
+def models_matching_gravity_variant(models, variant: str) -> list:
+    """
+    Filter a plain collection of model NAMES (not a dataframe) down to
+    those matching GRAVITY_VARIANT. Needed specifically for
+    build_frequency_summary_figure(): that function's modal_df/harmonic_df
+    are the FULL, both-variant tables by design (it also builds
+    frequency_deviation.csv, which must keep every model), so
+    filter_by_gravity_variant() cannot be applied to the dataframe itself -
+    this filters the MODEL LIST used to gate drawing instead (folded into
+    visible_models in main(), the same mechanism MODEL_INCLUDE already used
+    there before Stage 7).
+    """
+    if variant == "both":
+        return list(models)
+    if variant == "no_acel":
+        return [m for m in models if is_no_acel_model(m)]
+    if variant == "with_gravity":
+        return [m for m in models if not is_no_acel_model(m)]
+    raise ValueError(f"Unknown GRAVITY_VARIANT: {variant!r} - use 'no_acel', 'with_gravity', or 'both'.")
+
+
+def assert_gravity_variant(df: pd.DataFrame, expected_variant: str, function_name: str,
+                           model_col: str = "model") -> None:
+    """
+    Loudly fail if df contains a model from the WRONG gravity variant - see
+    plot_stiffness_comparison.py's copy of this function for the full WHY.
+    expected_variant="both" always passes.
+    """
+    if expected_variant == "both" or len(df) == 0:
+        return
+    models = df[model_col].unique()
+    if expected_variant == "no_acel":
+        offenders = [m for m in models if not is_no_acel_model(m)]
+    elif expected_variant == "with_gravity":
+        offenders = [m for m in models if is_no_acel_model(m)]
+    else:
+        raise ValueError(f"Unknown gravity variant to assert: {expected_variant!r}")
+    assert not offenders, (
+        f"{function_name}: expected ONLY '{expected_variant}' models but found "
+        f"{offenders} - the gravity-variant structural lock (filter_by_gravity_variant, "
+        f"applied once in main()) was bypassed somewhere upstream of this function."
+    )
+
+
 def resolve_model_filter(all_models: list, include_filter) -> list:
     """
     Resolve MODEL_INCLUDE (None, or a list of wanted model names) against
@@ -638,26 +873,372 @@ def resolve_model_filter(all_models: list, include_filter) -> list:
     return matched
 
 
+# Set once by main() (after TREES is resolved against the actual data),
+# read by add_model_include_suffix()/add_provenance_footer() below. Stays
+# "" whenever TREES is "all", which keeps filenames unchanged by this
+# particular filter (GRAVITY_VARIANT/MODEL_INCLUDE add their own suffixes).
+TREES_SUFFIX = ""
+PROVENANCE_NEWEST_INPUT_MTIME = None
+PROVENANCE_FILTERS_TEXT = ""
+
+
+def gravity_variant_filename_suffix(variant: str) -> str:
+    """
+    Filename fragment for GRAVITY_VARIANT - see
+    plot_stiffness_comparison.py's copy of this function for the full WHY
+    ("with_gravity" is the one setting that keeps filenames unchanged).
+    """
+    return {"no_acel": "gravity-noacel", "both": "gravity-both"}.get(variant, "")
+
+
 def add_model_include_suffix(path_str: str) -> str:
     """
-    Insert MODEL_INCLUDE_SUFFIX before the file extension whenever
-    MODEL_INCLUDE is set (e.g. ".../modal_comparison_B21_S04_elasto.png"
-    -> "..._noacel.png") - see MODEL_INCLUDE's own comment for why. A no-op
-    when MODEL_INCLUDE is None.
+    Insert the GRAVITY_VARIANT suffix, MODEL_INCLUDE_SUFFIX, and/or the
+    active TREES suffix before the file extension whenever any is
+    set (e.g. ".../modal_comparison_B21_S04_elasto.png" ->
+    "..._gravity-noacel_noacel_trees-07-12.png") - see
+    GRAVITY_VARIANT's, MODEL_INCLUDE's and TREES's own comments
+    for why. A no-op (path unchanged) only when GRAVITY_VARIANT is
+    "with_gravity" AND nothing else is filtered - see
+    gravity_variant_filename_suffix()'s own comment for why "with_gravity"
+    (not "all=nothing filtered") is now the unsuffixed case.
     """
-    if MODEL_INCLUDE is None:
+    parts = []
+    gravity_suffix = gravity_variant_filename_suffix(GRAVITY_VARIANT)
+    if gravity_suffix:
+        parts.append(gravity_suffix)
+    if MODEL_INCLUDE is not None:
+        parts.append(MODEL_INCLUDE_SUFFIX)
+    if TREES_SUFFIX:
+        parts.append(TREES_SUFFIX)
+    if not parts:
         return path_str
     root, ext = path_str.rsplit(".", 1)
-    return f"{root}_{MODEL_INCLUDE_SUFFIX}.{ext}"
+    return f"{root}_{'_'.join(parts)}.{ext}"
 
 
-def add_light_grid(ax):
+def csv_filter_suffix(path_str: str) -> str:
+    """
+    Append ONLY the TREES suffix - used for modal_effmass.csv/
+    frequency_deviation.csv, whose ROW CONTENT is filtered by TREES
+    but NEVER by MODEL_INCLUDE or GRAVITY_VARIANT (both are
+    draw-only filters - see modal_df/harmonic_df's own comment in main()),
+    so neither may appear in these files' names. See
+    plot_stiffness_comparison.py's copy of this function for the full WHY
+    (an earlier version of Stage 7 briefly broke this guarantee).
+    """
+    if not TREES_SUFFIX:
+        return path_str
+    root, ext = path_str.rsplit(".", 1)
+    return f"{root}_{TREES_SUFFIX}.{ext}"
+
+
+# Rejects the ANSYS row-position spelling outright (lowercase "bk<N>",
+# e.g. copy-pasted from "out_modal_bk3_scenario1.txt") - see
+# normalize_tree_selector()'s own docstring for why this must never be
+# read as a tree number. Copied from plot_stiffness_comparison.py.
+BK_INDEX_REJECT_PATTERN = re.compile(r"^bk\d+$")
+
+
+def normalize_tree_selector(value) -> str:
+    """
+    Convert one TREES entry into the canonical tree ID "B21_Snn".
+
+    Accepts: 7, "7", "07", "S07", "s07", "B21_S07", "BK07" (uppercase only).
+    Rejects: "bk3"-style (lowercase "bk" + digits) with a clear error.
+
+    WHY the BK/bk case matters (read before touching this function): ANSYS
+    filenames use a LOWERCASE "bk<N>" for the tree's ROW POSITION in the
+    description file (bk3 is position 3, i.e. whichever tree happens to sit
+    at that row - see load_ansys_order_to_tree_id()'s own docstring). That
+    number is NOT a tree number and must never be typed into TREES. An
+    UPPERCASE "BK07" is accepted here only as another way of writing the
+    TREE NUMBER 7 - deliberately spelled differently from the lowercase
+    ANSYS row-position so a copy-pasted "bk3" from a filename is caught
+    immediately instead of silently selecting the wrong tree.
+
+    Copied from plot_stiffness_comparison.py, not imported.
+    """
+    text = str(value).strip()
+
+    if BK_INDEX_REJECT_PATTERN.match(text):
+        raise ValueError(
+            f"TREES entry {value!r} looks like an ANSYS row-position index "
+            f"(lowercase 'bk<N>', as it appears in a filename like "
+            f"'out_modal_bk3_scenario1.txt'). bk<N> is that tree's ROW "
+            f"POSITION in the description file, NOT its tree number - see "
+            f"load_ansys_order_to_tree_id()'s docstring. Use the tree's own "
+            f"number instead, e.g. 7, 'S07', or 'B21_S07'."
+        )
+
+    for pattern in (r"^B21_S0*(\d+)$", r"^BK0*(\d+)$"):
+        match = re.fullmatch(pattern, text)
+        if match:
+            return tree_number_to_tree_id(int(match.group(1)))
+
+    match = re.fullmatch(r"^[sS]0*(\d+)$", text)
+    if match:
+        return tree_number_to_tree_id(int(match.group(1)))
+
+    match = re.fullmatch(r"^\d+$", text)
+    if match:
+        return tree_number_to_tree_id(int(text))
+
+    raise ValueError(
+        f"TREES entry {value!r} is not a recognised tree selector. Use a "
+        f"plain number (7), 'S07', 's07', 'B21_S07', or 'BK07'."
+    )
+
+
+def resolve_tree_selection(trees_config, available_trees: list) -> dict:
+    """
+    Resolve TREES ("all" or a list of mixed-form entries) against the trees
+    actually present in the data. Returns {requested_display, resolved,
+    missing, is_all} - see plot_stiffness_comparison.py's copy of this
+    function for the full contract. Copied, not imported.
+    """
+    if trees_config == "all":
+        resolved = sorted(available_trees)
+        return {"requested_display": "all", "resolved": resolved, "missing": [],
+                "is_all": True}
+
+    requested = sorted({normalize_tree_selector(v) for v in trees_config})
+    available_set = set(available_trees)
+    resolved = sorted(t for t in requested if t in available_set)
+    missing = sorted(t for t in requested if t not in available_set)
+    return {"requested_display": requested, "resolved": resolved, "missing": missing,
+            "is_all": False}
+
+
+def apply_tree_selection(df: pd.DataFrame, tree_sel: dict, tree_col: str = "tree") -> pd.DataFrame:
+    """
+    Filter df down to tree_sel["resolved"] - a no-op when is_all=True.
+    Copied from plot_stiffness_comparison.py. (SCENARIOS retired in
+    Stage 8 - see STRICT_SELECTION's own comment.)
+    """
+    if not tree_sel["is_all"]:
+        df = df[df[tree_col].isin(tree_sel["resolved"])]
+    return df
+
+
+def build_filter_suffix(tree_sel: dict) -> str:
+    """
+    Build the deterministic filename-suffix fragment for an active TREES
+    selection, e.g. "trees-07-12". Returns "" for "all". Copied from
+    plot_stiffness_comparison.py.
+    """
+    if tree_sel["is_all"]:
+        return ""
+    numbers = sorted(t.split("_S")[-1] for t in tree_sel["resolved"])
+    return "trees-" + "-".join(numbers)
+
+
+def print_selection_report(script_label: str, tree_sel: dict) -> bool:
+    """
+    Print the SELECTION REPORT block (trees only) and return True if
+    STRICT_SELECTION should raise for this script. Copied from
+    plot_stiffness_comparison.py.
+    """
+    print(f"\nSELECTION REPORT - {script_label}")
+
+    if tree_sel["is_all"]:
+        print(f"  requested trees      : all  ->  resolved to {len(tree_sel['resolved'])}")
+    else:
+        print(f"  requested trees      : {tree_sel['requested_display']}")
+    print(f"  found in data        : {len(tree_sel['resolved'])}")
+    print(f"  plotted              : {len(tree_sel['resolved'])}")
+    if tree_sel["missing"]:
+        print(f"  requested but MISSING : {', '.join(tree_sel['missing'])}")
+    else:
+        print(f"  requested but MISSING : (none)")
+
+    return bool(tree_sel["missing"])
+
+
+def newest_mtime(folder, pattern: str):
+    """
+    Return (newest_mtime_float, newest_path) among files in folder matching
+    pattern, or (None, None) if nothing matches. Copied from
+    plot_stiffness_comparison.py.
+    """
+    matches = sorted(Path(folder).glob(pattern))
+    if not matches:
+        return None, None
+    newest_path = max(matches, key=lambda p: p.stat().st_mtime)
+    return newest_path.stat().st_mtime, newest_path
+
+
+def check_input_freshness(script_label: str, raw_folder, raw_pattern: str,
+                          csv_paths_being_read: dict, abort_if_stale: bool) -> float:
+    """
+    Compare the newest modification time among raw ANSYS files against
+    every CSV in csv_paths_being_read; warn (and optionally abort) if any
+    is older. Copied from plot_stiffness_comparison.py - see that copy's
+    docstring. For THIS script, csv_paths_being_read is normally empty (no
+    intermediate CSV sits between the raw modal/harmonic files and the
+    figures - see ABORT_ON_STALE_INPUT's own comment), so this call is a
+    documented no-op kept for interface consistency.
+    """
+    newest_raw_mtime, newest_raw_path = newest_mtime(raw_folder, raw_pattern)
+    if newest_raw_mtime is None:
+        print(f"FRESHNESS CHECK ({script_label}): no files match '{raw_pattern}' in "
+              f"{raw_folder} - skipping.")
+        return None
+
+    if not csv_paths_being_read:
+        print(f"FRESHNESS CHECK ({script_label}): this script reads {raw_pattern} "
+              f"directly every run (no intermediate CSV to go stale) - nothing to check.")
+        return newest_raw_mtime
+
+    stale_found = False
+    for label, csv_path in csv_paths_being_read.items():
+        csv_path = Path(csv_path)
+        if not csv_path.is_file():
+            continue
+        csv_mtime = csv_path.stat().st_mtime
+        if csv_mtime < newest_raw_mtime:
+            stale_found = True
+            print(f"*** WARNING: STALE INPUT - {label} ({csv_path.name}, "
+                  f"{datetime.fromtimestamp(csv_mtime):%Y-%m-%d %H:%M:%S}) is OLDER than "
+                  f"{newest_raw_path.name} ({datetime.fromtimestamp(newest_raw_mtime):%Y-%m-%d %H:%M:%S}). ***")
+
+    if stale_found and abort_if_stale:
+        raise SystemExit(
+            f"{script_label}: aborting because ABORT_ON_STALE_INPUT=True and at least one "
+            f"input CSV is older than a raw ANSYS file it depends on (see WARNING(s) above)."
+        )
+    return newest_raw_mtime
+
+
+KNOWN_MODEL_SUFFIX_MARKERS = ("_noacel",)
+TREES_SUFFIX_PATTERN = re.compile(r"_trees-[0-9-]+|_sc-[0-9-]+")
+
+
+def find_filtered_output_files(out_folder, name_prefixes: tuple) -> list:
+    """
+    Return every FILE in out_folder whose name starts with one of
+    name_prefixes and carries a filter-suffix marker. Copied from
+    plot_stiffness_comparison.py.
+    """
+    hits = []
+    for path in sorted(Path(out_folder).iterdir()):
+        if not path.is_file() or not path.name.startswith(name_prefixes):
+            continue
+        if any(marker in path.name for marker in KNOWN_MODEL_SUFFIX_MARKERS) \
+                or TREES_SUFFIX_PATTERN.search(path.name):
+            hits.append(path)
+    return hits
+
+
+def unfiltered_sibling_path(filtered_path) -> Path:
+    """
+    Strip every known filter-suffix marker to recover the UNFILTERED
+    filename a filtered output was derived from - comparison only, never
+    used to read/write that file. Copied from plot_stiffness_comparison.py.
+    """
+    filtered_path = Path(filtered_path)
+    stem = filtered_path.stem
+    for marker in KNOWN_MODEL_SUFFIX_MARKERS:
+        stem = stem.replace(marker, "")
+    stem = TREES_SUFFIX_PATTERN.sub("", stem)
+    return filtered_path.with_name(stem + filtered_path.suffix)
+
+
+def report_orphaned_filtered_outputs(out_folder, name_prefixes: tuple, script_label: str) -> None:
+    """
+    Print (NEVER touch) every filtered-output file whose unfiltered sibling
+    is newer - i.e. it is stale and could be mistaken for current. Copied
+    from plot_stiffness_comparison.py - see that copy's docstring.
+    """
+    hits = find_filtered_output_files(out_folder, name_prefixes)
+    if not hits:
+        return
+    print(f"\nORPHANED FILTERED OUTPUTS ({script_label}) - these were NOT (necessarily) "
+          f"regenerated by this run and may be stale. NOTHING is touched - review them "
+          f"by hand before using them:")
+    for path in hits:
+        sibling = unfiltered_sibling_path(path)
+        mtime_text = datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
+        if sibling.exists():
+            sibling_mtime = sibling.stat().st_mtime
+            if sibling_mtime > path.stat().st_mtime:
+                sibling_text = datetime.fromtimestamp(sibling_mtime).strftime("%Y-%m-%d %H:%M")
+                status = f"STALE - its unfiltered sibling ({sibling.name}) is newer ({sibling_text})"
+            else:
+                status = "unfiltered sibling is not newer than this file - may still be current"
+        else:
+            status = "no unfiltered sibling found to compare against"
+        print(f"  {path}   {mtime_text}   {status}")
+
+
+def add_provenance_footer(fig, script_filename: str, newest_input_mtime, active_filters_text: str,
+                          n_trees: int, n_models: int) -> None:
+    """
+    Stamp a small grey monospace footer along the bottom edge of fig - see
+    FIGURE_PROVENANCE_FOOTER's own comment for why. Copied from
+    plot_stiffness_comparison.py. A no-op when FIGURE_PROVENANCE_FOOTER is
+    False.
+
+    Stage 9 Part A1: also stashes the SAME provenance as fig.stage9_png_metadata,
+    picked up by savefig_with_provenance() below when the figure is actually
+    written to disk. The footer above is pixels only - reading it back needs
+    OCR. This is a real PNG tEXt chunk, readable afterwards via PIL's
+    Image.info without OCR or guessing a run's configuration from its
+    filename - see check_png_provenance.py.
+    """
+    if not FIGURE_PROVENANCE_FOOTER:
+        fig.stage9_png_metadata = {}
+        return
+    generated_text = datetime.now().strftime("%Y-%m-%d %H:%M")
+    newest_input_text = (datetime.fromtimestamp(newest_input_mtime).strftime("%Y-%m-%d %H:%M")
+                         if newest_input_mtime is not None else "unknown")
+    line1 = f"{script_filename} | generated {generated_text} | newest input {newest_input_text}"
+    line2 = f"{active_filters_text}  |  {n_trees} trees, {n_models} models"
+    fig.text(0.01, -0.045, line1 + "\n" + line2, ha="left", va="bottom",
+             fontsize=6, family="monospace", color="0.55")
+
+    fig.stage9_png_metadata = {
+        "Script": script_filename,
+        "Generated": generated_text,
+        "NewestInput": newest_input_text,
+        "GravityVariant": str(GRAVITY_VARIANT),
+        "ModelInclude": str(MODEL_INCLUDE),
+        "Trees": str(TREES),
+        "NTrees": str(n_trees),
+        "NModels": str(n_models),
+    }
+
+
+def savefig_with_provenance(fig, path) -> None:
+    """
+    The ONLY way a figure should be written to disk in this script (Stage 9
+    Part A1) - every build_*()/render function calls add_provenance_footer(
+    fig, ...) before saving, which stashes fig.stage9_png_metadata; this
+    passes that dict straight to savefig(metadata=...), embedding it as
+    real PNG metadata alongside the existing visible footer. A PNG with no
+    such metadata predates Stage 9 and its configuration cannot be verified
+    this way - see check_png_provenance.py.
+    """
+    plt.savefig(path, dpi=150, bbox_inches="tight", metadata=getattr(fig, "stage9_png_metadata", {}))
+
+
+def add_light_grid(ax, n_trees: int = None):
     """
     Draw the same light background grid used in plot_stiffness_comparison.py,
     placed behind the data (low zorder).
+
+    n_trees: when given (the tree-summary figures - trees sit at integer x
+    positions 0..n_trees-1), also draws a thin vertical separator line
+    BETWEEN each tree's group (at x=0.5, 1.5, ...), so one tree's dodged
+    points are visually separated from its neighbour's. None (default) -
+    every other caller here plots a single tree against frequency, where a
+    tree separator would be meaningless.
     """
     ax.set_axisbelow(True)
-    ax.grid(axis="y", color="#e1e0d9", linewidth=0.6, zorder=0)
+    ax.grid(axis="y", color="#b0aea3", linewidth=1.0, zorder=0)
+    if n_trees is not None:
+        for boundary in range(1, n_trees):
+            ax.axvline(boundary - 0.5, color="#b0aea3", linewidth=1.0, zorder=0)
 
 
 def get_year_grey_shades(years) -> dict:
@@ -1416,6 +1997,7 @@ def plot_modal_figure(tree: str, modal_df: pd.DataFrame, model_colors: dict, fre
     place subplot 0's and 1's "outside to the right" legends on top of
     their neighbouring subplots instead of in empty margin.
     """
+    assert_gravity_variant(modal_df, GRAVITY_VARIANT, "plot_modal_figure")
     tree_modes = modal_df[modal_df["tree"] == tree]
 
     directions = [
@@ -1473,9 +2055,11 @@ def plot_modal_figure(tree: str, modal_df: pd.DataFrame, model_colors: dict, fre
 
     title_suffix = f" - models shown: {', '.join(sorted(tree_modes['model'].unique()))}" if MODEL_INCLUDE is not None else ""
     fig.suptitle(f"Modal comparison - {tree}{title_suffix}")
+    add_provenance_footer(fig, "plot_modal_harmonic.py", PROVENANCE_NEWEST_INPUT_MTIME,
+                          PROVENANCE_FILTERS_TEXT, n_trees=1, n_models=int(tree_modes["model"].nunique()))
     plt.tight_layout()
     fig.subplots_adjust(right=RIGHT_MARGIN)
-    plt.savefig(output_path, dpi=150)
+    savefig_with_provenance(fig, output_path)
     plt.close(fig)
     print(f"Modal figure saved to: {output_path}")
 
@@ -1546,6 +2130,7 @@ def plot_harmonic_simple_figure(tree: str, harmonic_df: pd.DataFrame, experiment
     plot_model_response_lines() for the curves themselves, and
     add_experimental_frequency_band() for the band/median overlay.
     """
+    assert_gravity_variant(harmonic_df, GRAVITY_VARIANT, "plot_harmonic_simple_figure")
     tree_harmonic = harmonic_df[harmonic_df["tree"] == tree]
     freq_lo, freq_hi = compute_harmonic_frequency_range(tree_harmonic)
 
@@ -1568,9 +2153,11 @@ def plot_harmonic_simple_figure(tree: str, harmonic_df: pd.DataFrame, experiment
 
     title_suffix = f" - models shown: {', '.join(sorted(tree_harmonic['model'].unique()))}" if MODEL_INCLUDE is not None else ""
     fig.suptitle(f"Harmonic (simplified) - {tree}{title_suffix}")
+    add_provenance_footer(fig, "plot_modal_harmonic.py", PROVENANCE_NEWEST_INPUT_MTIME,
+                          PROVENANCE_FILTERS_TEXT, n_trees=1, n_models=int(tree_harmonic["model"].nunique()))
     plt.tight_layout()
     fig.subplots_adjust(right=HARMONIC_SIMPLE_RIGHT_MARGIN)
-    plt.savefig(output_path, dpi=150)
+    savefig_with_provenance(fig, output_path)
     plt.close(fig)
     print(f"Simplified harmonic figure saved to: {output_path}")
 
@@ -1610,6 +2197,8 @@ def plot_harmonic_figure(tree: str, harmonic_df: pd.DataFrame, modal_df: pd.Data
     is unchanged and still available - this is an additional option, not
     a replacement.
     """
+    assert_gravity_variant(harmonic_df, GRAVITY_VARIANT, "plot_harmonic_figure (harmonic_df)")
+    assert_gravity_variant(modal_df, GRAVITY_VARIANT, "plot_harmonic_figure (modal_df)")
     tree_harmonic = harmonic_df[harmonic_df["tree"] == tree]
     tree_modal = modal_df[modal_df["tree"] == tree] if len(modal_df) > 0 else modal_df
 
@@ -1771,9 +2360,11 @@ def plot_harmonic_figure(tree: str, harmonic_df: pd.DataFrame, modal_df: pd.Data
 
     title_suffix = f" - models shown: {', '.join(sorted(tree_harmonic['model'].unique()))}" if MODEL_INCLUDE is not None else ""
     fig.suptitle(f"Harmonic comparison - {tree}" + (" (abs)" if use_abs else "") + title_suffix)
+    add_provenance_footer(fig, "plot_modal_harmonic.py", PROVENANCE_NEWEST_INPUT_MTIME,
+                          PROVENANCE_FILTERS_TEXT, n_trees=1, n_models=int(tree_harmonic["model"].nunique()))
     plt.tight_layout()
     fig.subplots_adjust(right=HARMONIC_RIGHT_MARGIN)
-    plt.savefig(output_path, dpi=150)
+    savefig_with_provenance(fig, output_path)
     plt.close(fig)
     print(f"Harmonic figure saved to: {output_path}")
 
@@ -1785,8 +2376,21 @@ def compute_harmonic_peak_frequency(harmonic_df: pd.DataFrame, tree: str, model:
     Return the frequency (Hz) at which the |Top_ux| harmonic response
     reaches its maximum for this tree/model, or None if there is no usable
     data (no rows, or Top_ux entirely missing).
+
+    Only frequencies above HARMONIC_PEAK_MIN_FREQUENCY_HZ are searched, so a
+    low-frequency artifact near the start of the sweep cannot be picked as
+    the "main" frequency instead of the tree's real resonance peak. A tree
+    listed in HARMONIC_PEAK_MAX_FREQUENCY_HZ_BY_TREE and/or
+    HARMONIC_PEAK_MIN_FREQUENCY_HZ_BY_TREE is bounded at its own limit(s)
+    instead of the global default, for the same reason at either end of
+    the sweep.
     """
-    subset = harmonic_df[(harmonic_df["tree"] == tree) & (harmonic_df["model"] == model)]
+    min_freq = HARMONIC_PEAK_MIN_FREQUENCY_HZ_BY_TREE.get(tree, HARMONIC_PEAK_MIN_FREQUENCY_HZ)
+    subset = harmonic_df[(harmonic_df["tree"] == tree) & (harmonic_df["model"] == model)
+                        & (harmonic_df["frequency_hz"] > min_freq)]
+    max_freq = HARMONIC_PEAK_MAX_FREQUENCY_HZ_BY_TREE.get(tree)
+    if max_freq is not None:
+        subset = subset[subset["frequency_hz"] <= max_freq]
     values = subset["Top_ux"].abs()
     if values.notna().sum() == 0:
         return None
@@ -2099,6 +2703,17 @@ def build_frequency_summary_figure(tree_order: list, modal_df: pd.DataFrame, har
     the caller to combine with the other variant's table and write to
     FREQUENCY_DEVIATION_CSV_PATH.
     """
+    # NOTE: modal_df/harmonic_df here are the FULL, both-variant tables BY
+    # DESIGN (see this function's own docstring - it also builds
+    # frequency_deviation.csv, which must keep every model) - so, unlike
+    # every other drawing function in this script, the assertion here
+    # expects "both", not GRAVITY_VARIANT. The actual gravity restriction on
+    # what gets DRAWN happens through visible_models (see main()'s own
+    # comment for where GRAVITY_VARIANT is folded into it), the same
+    # mechanism MODEL_INCLUDE already used here before Stage 7.
+    assert_gravity_variant(modal_df, "both", "build_frequency_summary_figure (modal_df)")
+    assert_gravity_variant(harmonic_df, "both", "build_frequency_summary_figure (harmonic_df)")
+
     # Dodge geometry is computed over visible_models when MODEL_INCLUDE is
     # active (a more compact spread, matching that filter's whole point of
     # a less dense figure) - otherwise over every model in model_colors, as
@@ -2113,7 +2728,7 @@ def build_frequency_summary_figure(tree_order: list, modal_df: pd.DataFrame, har
                        base_height * (1.0 + SUMMARY_DEVIATION_HEIGHT_RATIO)),
         sharex=True, gridspec_kw={"height_ratios": [1.0, SUMMARY_DEVIATION_HEIGHT_RATIO]},
     )
-    add_light_grid(ax)
+    add_light_grid(ax, n_trees=len(tree_order))
 
     deviation_rows = []
 
@@ -2227,7 +2842,7 @@ def build_frequency_summary_figure(tree_order: list, modal_df: pd.DataFrame, har
     # per model per quantity: solid = modal_peak, hatched = harmonic_peak
     # (SUMMARY_HARMONIC_HATCH/SUMMARY_MODAL_HATCH) - colour still means
     # "model", as everywhere else. ---
-    add_light_grid(ax_dev)
+    add_light_grid(ax_dev, n_trees=len(tree_order))
     ax_dev.axhline(0.0, color=SUMMARY_ZERO_LINE_COLOR, linewidth=SUMMARY_ZERO_LINE_WIDTH, zorder=2)
 
     bar_quantities = [("harmonic_peak", SUMMARY_HARMONIC_HATCH, "Harmonic peak (hatched)")]
@@ -2280,10 +2895,15 @@ def build_frequency_summary_figure(tree_order: list, modal_df: pd.DataFrame, har
               bbox_to_anchor=(LEGEND_BBOX_X, LEGEND_Y_TOP - 2 * LEGEND_Y_STEP), frameon=False,
               fontsize=LEGEND_FONTSIZE, title_fontsize=LEGEND_TITLE_FONTSIZE)
 
+    footer_models = visible_models if visible_models is not None else sorted(
+        set(modal_df["model"].unique()) | set(harmonic_df["model"].unique()))
+    add_provenance_footer(fig, "plot_modal_harmonic.py", PROVENANCE_NEWEST_INPUT_MTIME,
+                          PROVENANCE_FILTERS_TEXT, n_trees=len(tree_order), n_models=len(footer_models))
+
     plt.tight_layout()
     fig.subplots_adjust(right=SUMMARY_RIGHT_MARGIN, hspace=0.08)
 
-    plt.savefig(output_path, dpi=150)
+    savefig_with_provenance(fig, output_path)
     plt.close(fig)
     print(f"Frequency summary figure saved to: {output_path}")
 
@@ -2294,6 +2914,10 @@ def build_frequency_summary_figure(tree_order: list, modal_df: pd.DataFrame, har
 
 
 def main():
+    global TREES_SUFFIX, PROVENANCE_NEWEST_INPUT_MTIME, PROVENANCE_FILTERS_TEXT
+
+    print_active_configuration("plot_modal_harmonic.py", CONFIG_CONSTANT_NAMES)
+
     # --- Part -1: MODEL_INCLUDE / MODEL_INCLUDE_SUFFIX sanity check -------------
     # Writing filtered figures under the same filenames as the full ones
     # would silently and irreversibly overwrite them - refuse outright.
@@ -2304,6 +2928,14 @@ def main():
               "non-empty string and re-run.")
         return
 
+    # --- Part -1b: freshness guard ---------------------------------------------
+    # See ABORT_ON_STALE_INPUT's own comment: this script reads raw ANSYS
+    # files directly, so there is no intermediate CSV to check here - kept
+    # for interface consistency with the other two scripts.
+    PROVENANCE_NEWEST_INPUT_MTIME = check_input_freshness(
+        "plot_modal_harmonic.py", INPUT_FOLDER, "out_*_bk*_scenario*.txt", {}, ABORT_ON_STALE_INPUT,
+    )
+
     # --- Part 0: build the position -> tree ID lookup ---------------------------
     print(f"Loading tree list from: {GEOMETRY_FILE_PATH}")
     order_to_tree_id = load_ansys_order_to_tree_id(GEOMETRY_FILE_PATH)
@@ -2313,6 +2945,14 @@ def main():
     print()
 
     # --- Parts 1-3: load all data sources --------------------------------------
+    # UNFILTERED - modal_df/harmonic_df feed modal_effmass.csv/
+    # frequency_deviation.csv. Neither MODEL_INCLUDE nor GRAVITY_VARIANT
+    # ever narrows them - both are DRAW-ONLY filters (see each one's own
+    # comment) - specifically so those CSVs stay complete, config-
+    # independent files method_deviation_overview.py can always read. See
+    # GRAVITY_VARIANT's own comment for the postmortem: an earlier version
+    # of this stage's own work briefly filtered these dataframes here,
+    # which silently broke that downstream script's self-weight panel.
     modal_df = load_modal_data(INPUT_FOLDER, MODAL_FILE_PATTERN, order_to_tree_id)
     harmonic_df = load_harmonic_data(INPUT_FOLDER, HARMONIC_FILE_PATTERN, order_to_tree_id)
 
@@ -2331,6 +2971,27 @@ def main():
     if len(modal_df) == 0 and len(harmonic_df) == 0:
         print("No modal or harmonic files found - nothing to plot.")
         return
+
+    # --- TREES: resolve the selection against modal_df/harmonic_df COMBINED
+    # (a tree present in either counts as "found"), print the SELECTION
+    # REPORT, then narrow BOTH tables to it. Runs BEFORE MODEL_INCLUDE, so a
+    # tree request is checked against the full data, not an already
+    # model-narrowed slice. (SCENARIOS retired in Stage 8 - see
+    # STRICT_SELECTION's own comment.) ---
+    available_trees = sorted(set(modal_df["tree"].unique()) | set(harmonic_df["tree"].unique()))
+    tree_sel = resolve_tree_selection(TREES, available_trees)
+    any_missing = print_selection_report("plot_modal_harmonic.py", tree_sel)
+    if STRICT_SELECTION and any_missing:
+        raise SystemExit(
+            "plot_modal_harmonic.py: STRICT_SELECTION=True and the SELECTION REPORT above "
+            "lists a requested tree with no data - see 'requested but MISSING'. "
+            "Set STRICT_SELECTION=False to plot the partial selection anyway."
+        )
+    modal_df = apply_tree_selection(modal_df, tree_sel)
+    harmonic_df = apply_tree_selection(harmonic_df, tree_sel)
+    TREES_SUFFIX = build_filter_suffix(tree_sel)
+    PROVENANCE_FILTERS_TEXT = (f"GRAVITY_VARIANT={GRAVITY_VARIANT}  MODEL_INCLUDE={MODEL_INCLUDE}  "
+                               f"TREES={TREES}")
 
     # Mass-normalized effective-mass columns (effmass_sum_kg,
     # effmass_norm_kg, f_total, f_captured) - computed purely from columns
@@ -2355,11 +3016,12 @@ def main():
     print_n_modes_extracted(modal_df)
     print_top_mode_vs_harmonic_peak(modal_df, harmonic_df)
 
+    modal_effmass_csv_path = csv_filter_suffix(MODAL_EFFMASS_CSV_PATH)
     if len(modal_df) > 0:
-        modal_df.to_csv(MODAL_EFFMASS_CSV_PATH, index=False)
-        print(f"\nPer-mode effective-mass table saved to: {MODAL_EFFMASS_CSV_PATH}")
+        modal_df.to_csv(modal_effmass_csv_path, index=False)
+        print(f"\nPer-mode effective-mass table saved to: {modal_effmass_csv_path}")
     else:
-        print(f"\nNo modal data loaded - {MODAL_EFFMASS_CSV_PATH} was not written.")
+        print(f"\nNo modal data loaded - {modal_effmass_csv_path} was not written.")
 
     all_models = set(modal_df["model"].unique()) | set(harmonic_df["model"].unique())
     model_colors = assign_scenario_colors(all_models)   # ALWAYS the full set - keeps a model's colour fixed regardless of MODEL_INCLUDE
@@ -2374,6 +3036,18 @@ def main():
     modal_df_drawing = modal_df if MODEL_INCLUDE is None else modal_df[modal_df["model"].isin(visible_models_list)]
     harmonic_df_drawing = harmonic_df if MODEL_INCLUDE is None else harmonic_df[harmonic_df["model"].isin(visible_models_list)]
     visible_models = None if MODEL_INCLUDE is None else visible_models_list
+
+    # --- THE GRAVITY-VARIANT STRUCTURAL LOCK - applied to DRAWING ONLY -----
+    # Mirrors MODEL_INCLUDE exactly, same guarantee: narrows *_drawing
+    # further, never modal_df/harmonic_df/the CSVs. See GRAVITY_VARIANT's
+    # own comment for why this must never reach modal_effmass.csv/
+    # frequency_deviation.csv.
+    modal_drawing_before_gravity, harmonic_drawing_before_gravity = len(modal_df_drawing), len(harmonic_df_drawing)
+    modal_df_drawing = filter_by_gravity_variant(modal_df_drawing, GRAVITY_VARIANT)
+    harmonic_df_drawing = filter_by_gravity_variant(harmonic_df_drawing, GRAVITY_VARIANT)
+    print(f"GRAVITY_VARIANT={GRAVITY_VARIANT!r} - modal_df_drawing narrowed from "
+          f"{modal_drawing_before_gravity} to {len(modal_df_drawing)} row(s), harmonic_df_drawing from "
+          f"{harmonic_drawing_before_gravity} to {len(harmonic_df_drawing)} row(s)")
 
     # One consistent grey-shade mapping per year, shared across every
     # figure/tree so a given year always looks the same.
@@ -2458,15 +3132,28 @@ def main():
               f"x-axis (including {dropped_by_filter}) even though MODEL_INCLUDE leaves them "
               f"with no visible model - narrowing tree_order here would also drop those "
               f"trees' rows from frequency_deviation.csv, which must keep every row.")
+
+    # --- THE GRAVITY-VARIANT STRUCTURAL LOCK, for THIS figure only --------
+    # build_frequency_summary_figure() receives the FULL modal_df/
+    # harmonic_df (see its own docstring/assertion) - GRAVITY_VARIANT is
+    # folded into visible_models here instead, the same drawing-gate
+    # mechanism MODEL_INCLUDE already used, so this figure cannot silently
+    # keep drawing both gravity variants regardless of GRAVITY_VARIANT.
+    all_models_for_summary = sorted(set(modal_df["model"].unique()) | set(harmonic_df["model"].unique()))
+    gravity_ok_models = models_matching_gravity_variant(all_models_for_summary, GRAVITY_VARIANT)
+    visible_models_for_summary = (sorted(gravity_ok_models) if visible_models is None
+                                  else sorted(set(visible_models) & set(gravity_ok_models)))
+    print(f"GRAVITY_VARIANT={GRAVITY_VARIANT!r} - frequency_summary figures draw: {visible_models_for_summary}")
+
     elasto_deviation = build_frequency_summary_figure(
         all_trees, modal_df, harmonic_df, model_colors, freq_elasto, "elasto",
         output_path=add_model_include_suffix(f"{OUTPUT_DIR}/frequency_summary_elasto.png"),
-        visible_models=visible_models,
+        visible_models=visible_models_for_summary,
     )
     median_deviation = build_frequency_summary_figure(
         all_trees, modal_df, harmonic_df, model_colors, freq_median, "median",
         output_path=add_model_include_suffix(f"{OUTPUT_DIR}/frequency_summary_median.png"),
-        visible_models=visible_models,
+        visible_models=visible_models_for_summary,
     )
 
     # VARIANT 3 - harmonic-only frequency summary for the write-up:
@@ -2483,17 +3170,26 @@ def main():
     _ = build_frequency_summary_figure(
         all_trees, modal_df, harmonic_df, model_colors, freq_elasto, "elasto",
         output_path=add_model_include_suffix(f"{OUTPUT_DIR}/frequency_summary_harmonic_elasto.png"),
-        show_modal=False, visible_models=visible_models,
+        show_modal=False, visible_models=visible_models_for_summary,
     )
     _ = build_frequency_summary_figure(
         all_trees, modal_df, harmonic_df, model_colors, freq_median, "median",
         output_path=add_model_include_suffix(f"{OUTPUT_DIR}/frequency_summary_harmonic_median.png"),
-        show_modal=False, visible_models=visible_models,
+        show_modal=False, visible_models=visible_models_for_summary,
     )
 
+    frequency_deviation_csv_path = csv_filter_suffix(FREQUENCY_DEVIATION_CSV_PATH)
     frequency_deviation_table = pd.concat([elasto_deviation, median_deviation], ignore_index=True)
-    frequency_deviation_table.to_csv(FREQUENCY_DEVIATION_CSV_PATH, index=False)
-    print(f"\nFrequency deviation table saved to: {FREQUENCY_DEVIATION_CSV_PATH}")
+    frequency_deviation_table.to_csv(frequency_deviation_csv_path, index=False)
+    print(f"\nFrequency deviation table saved to: {frequency_deviation_csv_path}")
+
+    # --- orphaned filtered outputs (list only, never touched) -----------------
+    report_orphaned_filtered_outputs(
+        Path(OUTPUT_DIR),
+        ("modal_comparison_", "harmonic_comparison_", "harmonic_simple_",
+         "frequency_summary_", "frequency_deviation", "modal_effmass"),
+        "plot_modal_harmonic.py",
+    )
 
     # --- Part 6: console summary ----------------------------------------------
     print(f"\nSummary: {len(modal_trees)} tree(s) with modal data "

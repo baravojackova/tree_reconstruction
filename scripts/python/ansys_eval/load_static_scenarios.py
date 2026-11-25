@@ -85,21 +85,34 @@ GEOMETRY_COLUMN_TREE_NUMBER = 2
 
 # What each ANSYS scenario number actually is, under the settled model
 # selection (handoff_2026-09-10_part2.md section 1):
-#   1   adtree_r5mm     = AdTree r5mm, regression-perorder, -wlen,
-#                         seg50-500-k80, calibrated against that tree's
-#                         selected AdQSM variant
-#   2   treeqsm_pd002   = TreeQSM pd2min 0.002, mo9, sr010, ri1, Simplified
-#   999 adtree_r5_pilot = the cost-model pilot run on B21_S07, kept for
-#                         reference (unchanged by the relabel)
-# Scenario numbers 3 and 4 are deliberately left unassigned - no model is
-# using them right now. ADD A LINE HERE whenever a new scenario is run -
-# nothing else in the script needs changing. A scenario number that is
-# missing from this dict still gets loaded, but is labelled "scenario<N>"
-# and reported as a warning.
+#   1   adtree_r5mm            = AdTree r5mm, regression-perorder, -wlen,
+#                                seg50-500-k80, calibrated against that
+#                                tree's selected AdQSM variant
+#   2   treeqsm_pd002          = TreeQSM pd2min 0.002, mo9, sr010, ri1,
+#                                Simplified
+#   3   adtree_r5mm_no_acel    = same as 1, gravity (self-weight) OFF -
+#                                the reference variant since Stage 7
+#   4   treeqsm_pd002_no_acel  = same as 2, gravity (self-weight) OFF -
+#                                the reference variant since Stage 7
+#   999 adtree_r5_pilot        = the cost-model pilot run on B21_S07, kept
+#                                for reference (unchanged by the relabel)
+# (Stage 9 Part D: this used to say "scenario numbers 3 and 4 are
+# deliberately left unassigned" - stale ever since scenarios 3/4 were
+# added as the "_no_acel" gravity-off twins, which by Stage 7 became the
+# REFERENCE variant, not an unused placeholder.) ADD A LINE HERE whenever a
+# new scenario is run - nothing else in the script needs changing. A
+# scenario number that is missing from this dict still gets loaded, but is
+# labelled "scenario<N>" and reported as a warning.
+#
+# Copy-pasted (not imported - see the ansys_eval self-contained convention)
+# into three other scripts: plot_modal_harmonic.py, method_deviation_overview.py,
+# and plot_frequency_spectra.py - each has its own SCENARIO_MODELS at/near
+# its own top of file. Kept in sync by check_scenario_dicts_in_sync.py
+# (Stage 8 Part C4) - run it after editing this dict.
 SCENARIO_MODELS = {
     1: "adtree_r5mm",
     2: "treeqsm_pd002",
-    3: "adtree_r5mm_no acel",
+    3: "adtree_r5mm_no_acel",
     4: "treeqsm_pd002_no_acel",
     999: "adtree_r5_pilot",   # high cylinder count run kept from the cost-model session
 }
