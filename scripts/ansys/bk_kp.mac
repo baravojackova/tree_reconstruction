@@ -11,33 +11,32 @@
 *set,pi,2*asin(1)   		!pi calculation 
 *afun,deg   			!use degrees
 !
+!-----------------------MUSI SE NASTAVIT--------------------
+bks=12				!select tree - bks=1 - order of tree  1 not the number of tree (bk1)!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+sc_en=4				!1 of 6 scenarios of model
+n_rad=15435			!number of rows - keep the same number without first row (0)
+n_sl=10				!pocet sloupcu of table with scan
+a_cel=0			!if acel in static put 1
 !
-bks=3				!select tree - bks=1 - order of tree  1 not the number of tree (bk1)!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-sc_en=1				!1 of 6 scenarios of model
-!
-num_modes=20			!number of nat. freqs and mode shapes 
-zero_mass=0			!if 1 then the root-plate has near-zero density to neglect its modes (any other numbere, e.g. 0, will calculate realistic mass)
-!
-!
-num_steps_harm=100		!number of steps for harmonic
-!
-!----------vstupni parametry
-!
-n_rad=35387					!number of rows - keep the same number without first row (0)
-n_sl=10							!pocet sloupcu of table with scan
 *dim,geom,table,n_rad,n_sl,1,,		!nacteni tabulky s geometrii ze skenu (x,y,z,lenght,radius,xaxis,yaxis,zaxis,parent,branchorder)
-*tread,geom,geom_B21_S07_r5mm_adqsm080_seg50-500-k80-wlen,txt,,,
 !
+*tread,geom,geom_B21_S21_man_pd066-002-099_mo9_sr010_ri1_1,txt,,,
+!
+!----------------------------------------------------------------
 *dim,dendr,table,13,44,1,,	!read table with 41+3 dendrometric parameters of all 13 trees bk1-bk13
 *tread,dendr,Popis_Babice_VSE_09012025_ans_lev6_0_azimcor,txt,,1
 !
 *dim,for_ces,table,13,6,1,,		!read table with loading forces, displacements and inclinations of all 13 trees bk1-bk13
 *tread,for_ces,for_ces,txt,,1,
 !
+num_modes=20			!number of nat. freqs and mode shapes 
+zero_mass=0			!if 1 then the root-plate has near-zero density to neglect its modes (any other numbere, e.g. 0, will calculate realistic mass)
+!
+num_steps_harm=100		!number of steps for harmonic
+!
 !*dim,out_static_bk%bks%_scenario%sc_en%,table,1,3,1,,			!create table - outputs of statics	force - displacement - inclination (for every scenario of bk%bks%)
 *dim,out_modal_bk%bks%_scenario%sc_en%,table,num_modes,19,,,1,,		!create table - outputs of modal	20 freqs + 20 partic. factors (for every scenario of bk%bks%)
 *dim,out_harm_bk%bks%_scenario%sc_en%,table,num_steps_harm,10,,,1,,	!create table - outputs of harmonics	200 amplitudes (frequency step 0.1 Hz) (for every scenario of bk%bks%)
-!
 !
 ! ---------------- general parameters (common for all trees) --------
 !
@@ -69,7 +68,6 @@ bk%bks%_u=for_ces(bks,5)			!loading displ. for bk%bks%  bk1-bk13 (moment for dis
 bk%bks%_i=for_ces(bks,6)			!loading incl. for bk%bks%  bk1-bk13 (moment for incl = F*(an_height-0.05)
 !
 !
-!
 !vypocet pozice druhehu bodu strednice valce
 *dim,geom_2,array,n_rad,5,1,,
 *do,i,1,n_rad,1    
@@ -94,7 +92,7 @@ bk%bks%_i=for_ces(bks,6)			!loading incl. for bk%bks%  bk1-bk13 (moment for incl
 !
 !----------tvorba kp
 !
-*do,i,1,n_rad,1  								
+*do,i,1,n_rad,1					
  k,i,geom(i,1),geom(i,2),geom(i,3)
  k,n_rad+1000+i,geom_2(i,3),geom_2(i,4),geom_2(i,5)									
 *enddo
@@ -108,7 +106,11 @@ bk%bks%_i=for_ces(bks,6)			!loading incl. for bk%bks%  bk1-bk13 (moment for incl
  ksel,s,kp,,i						!vyber kp baze sekce
  ksel,a,kp,,n_rad+1000+i				!vyber kp top sekce
  lslk,s,1
- latt,1,1,1,,,,i
+ *if,geom(i,10),eq,0,then
+  latt,1,1,1,,,,i
+  *else
+  latt,2,1,1,,,,i
+ *endif
 *enddo
 allsel,all
 !
@@ -247,24 +249,60 @@ ce,(7*n_rad)+6,0,num_kmen,uy,1,num_ks,uy,-1
 eplot
 !-----------MATERIAL---------
 !**********kmen*******
-!---------material kmen parametry
-e_x=(11.147e9)*0.9					!mat model beech all - kluci
-e_z=e_x*1			
-e_y=e_x*1			
+!---------material kmen parametry from Zlamal et al. validated
 !
-g_xy=0.934e9					
-g_yz=e_x*1			
-g_xz=e_x*1		
+densw=1184
 !
-pr_xy=0.43					
-pr_yz=0.43		
-pr_xz=0.43		
+e_l=10663e6*0.9				!L = X !EL 10 663 from PDS, *0.9 - ohybova tuhost, vstupuje pouze ex,gxy a prxy
+e_r=1245e6				!R = Y 
+e_t=474e6				!T = Z 
+g_lr=1202e6				!LR = XY
+g_rt=97.4e6 				!RT = YZ
+g_lt=934e6				!LT = XZ
+pr_lr=0.54				!LR = XY
+pr_rt=0.69				!RT = YZ
+pr_lt=0.43				!LT = XZ
 !
-densw=966
+!conditions for proper setting of poisson numbers - needs to be checked
+!
+*if,e_l,gt,e_r,then			!z gt x
+ pr_xz = pr_lr*e_r/e_l
+ *elseif,e_r,gt,e_l,			!x gt z
+ pr_xz = pr_lr
+*endif
+!
+*if,e_l,gt,e_t,then			!z gt y
+ pr_yz = pr_lt*e_t/e_l
+ *elseif,e_t,gt,e_l,			!y gt z
+ pr_yz = pr_lt
+*endif
+ !
+*if,e_r,gt,e_t,then			!x gt y
+ pr_xy = pr_rt
+ *elseif,e_t,gt,e_r,			!y gt x
+ pr_xy = = pr_rt*e_r/e_t
+*endif
+!---------------------
+e_x=e_l				
+e_y=e_r						
+e_z=e_t								
+!
+g_xy=g_lr										
+g_yz=g_rt					
+g_xz=g_lt					
+!
+pr_lr=0.54
+pr_rt=0.69
+pr_lt=0.43
+!
+pr_xy=pr_lr								
+pr_yz=pr_rt					
+pr_xz=pr_lt					
+!
 !--------vytvoreni mat. modelu kmen
 mp,ex,1,e_x				!definice materialovych vlastnosti
-mp,ey,1,e_z
-mp,ez,1,e_y
+mp,ey,1,e_y
+mp,ez,1,e_z
 !
 mp,gxy,1,g_xy
 mp,gyz,1,g_yz	
@@ -276,19 +314,34 @@ mp,prxz,1,pr_xz
 !
 mp,dens,1,densw
 !
+!-----------vetve
+mp,ex,2,e_x				!definice materialovych vlastnosti
+mp,ey,2,e_y
+mp,ez,2,e_z
+!
+mp,gxy,2,g_xy
+mp,gyz,2,g_yz	
+mp,gxz,2,g_xz
+!
+mp,prxy,2,pr_xy
+mp,pryz,2,pr_yz
+mp,prxz,2,pr_xz
+!
+mp,dens,2,densw
+!
 !*********korenovy system*********
 !---------material ks parametry
 e_koren_1=e_x					!modul pruznosti dreva
-e_koren_2=e_koren_1/2
+e_koren_2=e_koren_1
 e_koren_3=e_koren_1/4
-e_puda=11.95e6					!Foundation analysis
-pr_xy_p=0.33					!Foundation analysis
+e_puda=11.88e6					!Foundation analysis
+pr_xy_p=0.3					!Foundation analysis
 !
-podil_koren_1=0.6				!podil korenu oddenek
-podil_koren_2=0.2				!podil korenu 1. vrstva
+podil_koren_1=0.5				!podil korenu oddenek 0.6
+podil_koren_2=podil_koren_1/2			!podil korenu 1. vrstva 0.2
 podil_koren_3=0					!podil korenu 3. vrstva (bal)
 !
-densp=1000					!Foucard
+densp=1200					!Foucard
 !--------------nacteni tabulky koeficentu a cykly------------------
 !
 *dim,koef_mat,table,3,12,1,vrstva,vysec						!vytvoreni tabulky
@@ -318,9 +371,11 @@ finish
 /solu
 antype,0,
 nlgeom,off
-!                                                                                                       
+!                                                                                              
 kbc,1						    !pokud se nezmeni automaticky se prevadi do dalsich LS
-!acel,0,0,9.81
+*if,a_cel,eq,1,then 
+ acel,0,0,9.81
+*endif
 csys,11
 lsel,s,loc,x,d_ks3/2
 lsel,r,loc,z,0
@@ -375,6 +430,7 @@ nsel,s,loc,z,bk%bks%_lev3_height-0.05,bk%bks%_lev3_height+0.05
 *get,u_xtah3_bk%bks%_scenario%sc_en%,node,n3,u,x				!get displacement at level 3
 allsel,all
 !
+!
 plnsol,u,x,0,1
 *get,u_max_bk%bks%_scenario%sc_en%,plnsol,0,max					!!get max. displacement ??????????
 !
@@ -410,7 +466,6 @@ PNGR,TMOD,1
 /DEVICE,VECTOR,0
 ! 
 /rename,file000,png,,bk%bks%_scenario%sc_en%_ux,png
-
 !
 ! ----------------- SOLU MODAL ----------------
 !
@@ -429,8 +484,10 @@ finish
 allsel,all
 antype,2
 !
-fdele,all,all				!delete all loading by forces from STATIC  
-!acel,0,0,9.81                          
+fdele,all,all				!delete all loading by forces from STATIC 
+*if,a_cel,eq,1,then 
+ acel,0,0,9.81
+*endif                        
 !
 modopt,lanb,num_modes,,,,off,both,8			
 mxpand,all,,,yes

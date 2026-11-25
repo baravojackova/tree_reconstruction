@@ -437,8 +437,8 @@ end
 % run's results with different settings. See section 2 for the exact
 % auto-generation formula.
 % --- tree identification -------------------------------------
-tree_id   = 'B21_S24';           % short name used for ALL output files
-cloud_txt = 'B21_S24_noplate_clean.txt';   % input point cloud (text file, 3 columns X Y Z)
+tree_id   = 'B21_S21';           % short name used for ALL output files
+cloud_txt = 'B21_S21_noplate_clean.txt';   % input point cloud (text file, 3 columns X Y Z)
 
 % --- number of models ----------------------------------------
 n_models_first = 5;    % models per parameter combination, first (coarse) run
@@ -489,7 +489,7 @@ plot_optimal = true;   % true = plot the optimal QSM before simplification
 %                    cylinders inside one branch with one longer cylinder
 % --- simplification settings ---------------------------------
 simp_MaxOrder          = 9;
-simp_SmallRadii        = 0.005;          %def 0.005
+simp_SmallRadii        = 0.02;          %def 0.005
 simp_ReplaceIterations = 0;              %def 0
 simp_Plot              = 1;
 simp_Disp              = 1;
@@ -526,8 +526,7 @@ save_figures_png = true;
 % Set to a non-blank string to use that instead (e.g. for a one-off export
 % you want named something more memorable). See section 20 for where this
 % is actually applied (as ansys_tag, not used directly).
-ansys_export_name = 'man_pd045-005-05_mo9_sr020_ri3';
-
+ansys_export_name = 'man_pd066-002-099_mo9_sr010_ri1';
 % Blank (default) = export whatever simplification is CURRENTLY LIVE in
 % memory (today's behaviour, via the ansys_source switch in section 20).
 % Non-blank = instead load 'simplified_<tree_id>_<THIS VALUE>.mat' from
@@ -536,7 +535,7 @@ ansys_export_name = 'man_pd045-005-05_mo9_sr020_ri3';
 % retroactively export any previously-saved simplification variant, even
 % one no longer in the workspace (e.g. after re-running section 2 + 16 for
 % a second variant, per the "Solution A" workflow).
-EXPORT_FROM_SAVED_RUN_TAG = 'man_pd045-005-05_mo9_sr020_ri3';
+EXPORT_FROM_SAVED_RUN_TAG = 'man_pd066-002-099_mo9_sr010_ri1';
 
 %% 2) DERIVED NAMES -------------------------------------------
 %  - built automatically from tree_id + run_tag
