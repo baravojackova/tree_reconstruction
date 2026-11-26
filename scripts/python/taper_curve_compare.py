@@ -67,8 +67,12 @@ from plot_style import (
     DEFAULT_LINEWIDTH,
 )
 
+# paths.py (same folder as this script) knows where the project lives on
+# THIS computer, so no folder path has to be typed in by hand here.
+import paths
+
 # =====================  PARAMETERS  ===================================
-DATA_ROOT = r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\data"
+DATA_ROOT = str(paths.DATA_DIR)
 
 # Trees to process in this run - just add a name to extend this to a
 # production beech tree once its data folder exists; nothing else needs

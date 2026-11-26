@@ -37,6 +37,10 @@ import numpy as np
 
 from tree_geom_utils import read_ply, merge_vertices, smooth_centerline, convert
 
+# paths.py (same folder as this script) knows where the project lives on
+# THIS computer, so no folder path has to be typed in by hand here.
+import paths
+
 # =====================  PARAMETERS  ===================================
 # TREE_NAME / ADQSM_VARIANT / INPUT_PLY are edited TOGETHER when switching
 # trees, run once per tree (no multi-tree loop here - see STEP 3's own
@@ -80,10 +84,9 @@ from tree_geom_utils import read_ply, merge_vertices, smooth_centerline, convert
 # --- IND07_083 - ACTIVE ---
 TREE_NAME = "IND07_083"
 ADQSM_VARIANT = "06"
-INPUT_PLY = (r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction"
-             r"\data\IND07_083\IND07_083 - Cloud_nobutt_skeleton.ply")
+INPUT_PLY = str(paths.DATA_DIR / "IND07_083" / "IND07_083 - Cloud_nobutt_skeleton.ply")
 
-DATA_ROOT = r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\data"
+DATA_ROOT = str(paths.DATA_DIR)
 BRANCH_FILE = os.path.join(DATA_ROOT, TREE_NAME, ADQSM_VARIANT, "BranchStructure.txt")
 
 # Copied verbatim from adtree_reconstruct_compare.py's own PARAMETERS block -
@@ -114,6 +117,9 @@ K_SHIFTS = list(range(0, 7))   # k = 0..6
 # results can be compared without re-running anything. A scratch file in
 # this session's own scratchpad directory - NOT volume_results.csv, NOT
 # under plots/ - purely this diagnostic's own accumulating record.
+# NOTE: this path is deliberately left hard-coded. It points into a temporary
+# scratchpad folder of the Claude session OUTSIDE the project (not into
+# tree_reconstruction), so paths.py has no equivalent for it.
 RESULTS_SUMMARY_PATH = (
     r"C:\Users\Spravce\AppData\Local\Temp\claude\c--Users-Spravce-Documents-BARA-01-Skeny-Babice-tree-reconstruction"
     r"\72accd12-932f-436d-b4d0-4dc437d3c140\scratchpad\order_alignment_summary.csv")

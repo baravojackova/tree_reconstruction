@@ -19,9 +19,10 @@
 #  scripts...) - if this file imported, say, compare_volumes.py (which
 #  itself might one day want a path from here), that would create a
 #  circular import the moment compare_volumes.py tried to import
-#  something from this file. Keeping this module's only dependency on the
-#  standard library (os) means it can be imported from literally anywhere
-#  in this project with zero risk of an import cycle, now or later.
+#  something from this file. Keeping this module's only dependencies on the
+#  standard library (os, pathlib, json) means it can be imported from
+#  literally anywhere in this project with zero risk of an import cycle,
+#  now or later.
 #
 #  Every directory name below is relative, matching this project's
 #  existing convention throughout scripts/python: every script assumes it
@@ -32,6 +33,54 @@
 # =====================================================================
 
 import os
+import json
+from pathlib import Path
+
+# ---- ABSOLUTE project locations (computed, NOT hard-coded) ------------
+# Path(__file__) is the location of THIS file (paths.py). .resolve() turns
+# it into a full absolute path and .parent goes one folder up. Everything
+# below is derived from where paths.py lives, so the same code works on
+# Windows and on the Mac, and no matter which folder a script is launched
+# from. Nothing here has to be edited when the project is moved.
+PYTHON_DIR     = Path(__file__).resolve().parent   # .../scripts/python
+PROJECT_ROOT   = PYTHON_DIR.parent.parent          # .../tree_reconstruction
+SCRIPTS_DIR    = PROJECT_ROOT / "scripts"
+ANSYS_DIR      = SCRIPTS_DIR / "ansys"
+MATLAB_DIR     = SCRIPTS_DIR / "matlab"
+ANSYS_EVAL_DIR = PYTHON_DIR / "ansys_eval"
+DATA_DIR       = PROJECT_ROOT / "data"
+
+# local_paths.json holds the paths that DIFFER between computers (scan
+# folders, TreeGraph results, ...). It is listed in .gitignore, so every
+# computer keeps its own copy. local_paths.example.json is the template
+# that IS stored in Git - copy it to local_paths.json and fill in the paths.
+LOCAL_PATHS_FILE = PROJECT_ROOT / "local_paths.json"
+
+
+def get_local_path(key):
+    """Return the folder stored under `key` in local_paths.json as a Path.
+    Stops with a readable (Czech) error if the file is missing, the key is
+    missing, or the folder it points to does not exist."""
+    if not LOCAL_PATHS_FILE.is_file():
+        raise FileNotFoundError(
+            f"Soubor {LOCAL_PATHS_FILE} neexistuje. Zkopíruj "
+            f"local_paths.example.json na local_paths.json a doplň cesty "
+            f"pro tento počítač.")
+    with open(LOCAL_PATHS_FILE, encoding="utf-8") as f:
+        data = json.load(f)
+    if key not in data:
+        raise KeyError(
+            f"V souboru {LOCAL_PATHS_FILE.name} chybí klíč '{key}'. "
+            f"Dostupné klíče: {', '.join(data) or '(žádné)'}. "
+            f"Doplň ho podle local_paths.example.json.")
+    path = Path(data[key])
+    if not path.is_dir():
+        raise FileNotFoundError(
+            f"Složka '{path}' (klíč '{key}' v {LOCAL_PATHS_FILE.name}) "
+            f"neexistuje. Oprav cestu v {LOCAL_PATHS_FILE.name} nebo "
+            f"tento klíč smaž.")
+    return path
+
 
 # ---- Directory NAMES (the literal strings) ---------------------------
 # PLOTS_DIR: every PNG chart this project produces, of any kind, lives

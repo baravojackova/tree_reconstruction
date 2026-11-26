@@ -81,12 +81,19 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from matplotlib.patches import Patch
 from matplotlib.lines import Line2D
+import sys
+
+# This script lives in scripts/python/ansys_eval, but paths.py lives one
+# folder up (scripts/python). Python only looks for imports next to the
+# script, so we first add the folder above to its search list.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import paths
 
 # =========================================================================
 # CONFIGURATION - edit these values, then run the script
 # =========================================================================
 
-WORK_FOLDER = r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\scripts\python\ansys_eval"
+WORK_FOLDER = str(paths.ANSYS_EVAL_DIR)
 OUT_FOLDER = Path(WORK_FOLDER) / "out"
 DATA_FOLDER = Path(WORK_FOLDER) / "data"
 REPO_ROOT = Path(WORK_FOLDER).resolve().parents[2]
@@ -161,7 +168,7 @@ ABORT_ON_STALE_INPUT = True
 
 # Folder holding the raw ANSYS output files, needed ONLY for the freshness
 # check above - this script otherwise never reads raw ANSYS files directly.
-ANSYS_RAW_FOLDER = r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\scripts\ansys"
+ANSYS_RAW_FOLDER = str(paths.ANSYS_DIR)
 ANSYS_RAW_PATTERN_FOR_FRESHNESS = "out_*_bk*_scenario*.txt"
 
 # What each ANSYS scenario number actually is - identical to the dict in

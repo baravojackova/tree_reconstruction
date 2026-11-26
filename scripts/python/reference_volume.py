@@ -22,6 +22,10 @@
 import csv
 import os
 
+# paths.py (same folder as this script) knows where the project lives on
+# THIS computer, so no folder path has to be typed in by hand here.
+import paths
+
 # =====================  PARAMETERS  ==================================
 # Tree ID for THIS run. This is the ONLY thing you need to change to switch
 # trees - it must match a value in the "treeID" column of the source file
@@ -35,7 +39,7 @@ TREE_NAME = "IND07_083"  # e.g. "IND01_054" or "IND07_083" (must match the sourc
 
 # Base folder holding every tree's data, one subfolder per tree (normally
 # named exactly like TREE_NAME - see the note above for the one exception).
-DATA_ROOT = r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\data"
+DATA_ROOT = str(paths.DATA_DIR)
 
 # Folder that contains the source measurement file.
 DATA_DIR = os.path.join(DATA_ROOT, TREE_NAME)

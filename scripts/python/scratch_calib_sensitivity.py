@@ -40,6 +40,10 @@ from tree_geom_utils import (
     group_orders_for_fitting, compute_order_calibration_factors,
 )
 
+# paths.py (same folder as this script) knows where the project lives on
+# THIS computer, so no folder path has to be typed in by hand here.
+import paths
+
 # =====================  PARAMETERS  ===================================
 TREE_NAME = "B21_S01"
 ADQSM_VARIANT = "999"
@@ -62,7 +66,7 @@ MIN_PAIRS_PER_ORDER = 15     # adtree_reconstruct_compare.py PARAMETERS block
 # imported, same reasoning as the constants below).
 CALREF_THRESHOLD_M = 0.005
 
-DATA_ROOT = r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\data"
+DATA_ROOT = str(paths.DATA_DIR)
 # Same convention as adtree_reconstruct_compare.py:113/117 (AdTree_DIR,
 # INPUT_PLY) and :110-111/314-315 (ADQSM_BASE_DIR, BranchStructure.txt path).
 AdTree_DIR = os.path.join(DATA_ROOT, TREE_NAME)

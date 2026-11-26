@@ -82,6 +82,13 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from matplotlib.patches import Patch
 from matplotlib.lines import Line2D
+import sys
+
+# This script lives in scripts/python/ansys_eval, but paths.py lives one
+# folder up (scripts/python). Python only looks for imports next to the
+# script, so we first add the folder above to its search list.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import paths
 
 # =========================================================================
 # CONFIGURATION - edit these values, then run the script
@@ -90,7 +97,7 @@ from matplotlib.lines import Line2D
 # Folder holding the ANSYS output files (out_modal_*, out_harmonic_*, ...).
 # This folder did not move - it is read from the same scripts/ansys folder
 # every other script in this group reads it from.
-INPUT_FOLDER = r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\scripts\ansys"
+INPUT_FOLDER = str(paths.ANSYS_DIR)
 MODAL_FILE_PATTERN = "out_modal_bk*_scenario*.txt"
 HARMONIC_FILE_PATTERN = "out_harmonic_bk*_scenario*.txt"
 
@@ -146,7 +153,7 @@ SCENARIO_MODELS = {
 }
 
 # Folder holding the input data and this script's output files.
-DATA_FOLDER = r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\scripts\python\ansys_eval\data"
+DATA_FOLDER = str(paths.ANSYS_EVAL_DIR / "data")
 EXPERIMENTAL_CSV_PATH = str(Path(DATA_FOLDER) / "dynatree_data_merge_0926.csv")
 
 DAYS_TO_PROCESS = ["2021-03-22", "2022-04-05"]   # configurable, same convention as before
@@ -162,7 +169,7 @@ TYPE_FILTER = "normal"
 REDUCTION_LEVEL_FILTER = "none"
 TREE_FILTER = None
 
-OUTPUT_DIR = r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\scripts\python\ansys_eval\out"
+OUTPUT_DIR = str(paths.ANSYS_EVAL_DIR / "out")
 
 # Where the frequency-summary figure's deviation table is written (CHANGE 4).
 # One combined file for both the elasto and median variants (see main()),

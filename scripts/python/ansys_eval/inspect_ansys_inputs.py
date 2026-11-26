@@ -30,6 +30,13 @@ How to use it:
 
 import re
 from pathlib import Path
+import sys
+
+# This script lives in scripts/python/ansys_eval, but paths.py lives one
+# folder up (scripts/python). Python only looks for imports next to the
+# script, so we first add the folder above to its search list.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import paths
 
 # =========================================================================
 # CONFIGURATION - edit these values, then run the script
@@ -39,10 +46,12 @@ from pathlib import Path
 # The r"" prefix means "raw string" - it stops Python from treating the
 # backslashes in a Windows path as escape characters, so the path can be
 # pasted in exactly as Explorer shows it.
-ANSYS_FOLDER = r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\scripts\ansys"
+ANSYS_FOLDER = str(paths.ANSYS_DIR)
 
 # Full path to the geometry / description file.
-GEOMETRY_FILE_PATH = r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\scripts\python\Popis_Babice_VSE_09012025_ans_lev6_0.txt"
+# NOTE: this is a DATA file - Git ignores it, so on a new computer (e.g. the
+# Mac) it must be copied by hand into scripts/python/ before running.
+GEOMETRY_FILE_PATH = str(paths.PYTHON_DIR / "Popis_Babice_VSE_09012025_ans_lev6_0.txt")
 
 # How many data rows of the geometry file to print in full detail
 # (column by column). 2 is usually enough to see the pattern.

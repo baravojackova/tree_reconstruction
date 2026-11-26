@@ -59,6 +59,10 @@ import numpy as np
 # counts as a spike" - for the cross-variant union-based dropping.
 from tree_geom_utils import parse_adqsm_taper_file, _reject_taper_spikes
 
+# paths.py (same folder as this script) knows where the project lives on
+# THIS computer, so no folder path has to be typed in by hand here.
+import paths
+
 # =====================  PARAMETERS  ===================================
 TREE_NAME = "B21_S24"
 
@@ -79,7 +83,7 @@ SOURCE_VARIANTS = ["040", "050", "060", "070", "080", "090", "100"]
 # folders, "040".."100"; no tree has a "999" folder today).
 NEW_VARIANT_NAME = "999"
 
-DATA_ROOT = r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\data"
+DATA_ROOT = str(paths.DATA_DIR)
 
 # Threshold (ratio of a taper.txt row's diameter to the max of its two
 # immediate neighbours) above which _reject_taper_spikes()

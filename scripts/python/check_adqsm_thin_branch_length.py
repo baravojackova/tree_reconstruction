@@ -48,13 +48,17 @@ from tree_geom_utils import (
 # top-level plots/ folder.
 from paths import ensure_tree_plots_dir
 
+# paths.py (same folder as this script) knows where the project lives on
+# THIS computer, so no folder path has to be typed in by hand here.
+import paths
+
 # =====================  PARAMETERS  ===================================
 # Same tree/AdQSM-variant this project is currently focused on (see
 # TREE_NAME/AdQSM_DIR in adtree_reconstruct_compare.py). Change these two
 # lines to point at a different tree/variant - this is a one-off diagnostic,
 # not part of the multi-variant pipeline, so the path is just hard-coded
 # here instead of rebuilding ADQSM_VARIANTS machinery.
-DATA_ROOT = r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\data"
+DATA_ROOT = str(paths.DATA_DIR)
 TREE_NAME = "IND01_054"
 ADQSM_DIR = os.path.join(DATA_ROOT, TREE_NAME, "05")
 

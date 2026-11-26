@@ -10,10 +10,50 @@ clc
 %  USER SETTINGS - directory
 %  ------------------------------------------------------------
 % Folder with the TreeQSM source code (contains treeqsm.m, +myfun, ...)
-src_dir = 'C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\scripts\matlab';
+% Slozka se zdrojovymi kody TreeQSM (je to slozka, kde lezi tento skript).
+% Hleda se postupne trema zpusoby:
+%   1) cesta k tomuto skriptu - funguje, kdyz skript spustis pres F5 / Run,
+%   2) cesta k souboru otevrenemu v editoru - funguje pri spousteni po
+%      bunkach (Ctrl+Enter), kdy je 1) prazdne,
+%   3) aktualni slozka MATLABu (pwd) jako posledni zachrana.
+src_dir = fileparts(mfilename('fullpath'));
+if isempty(src_dir)
+    try
+        src_dir = fileparts(matlab.desktop.editor.getActiveFilename);
+    catch
+        src_dir = '';
+    end
+end
+if isempty(src_dir)
+    src_dir = pwd;
+end
 
 % Folder with the point clouds and where all results will be written
-data_dir = 'C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\scripts\matlab';
+% Slozka s mraky bodu, do ktere se zapisuji vsechny vysledky.
+% Vychozi hodnota je stejna jako src_dir (tak to bylo dosud).
+data_dir = src_dir;
+
+% Pokud v korenu projektu existuje soubor local_paths.json a obsahuje klic
+% "matlab_data_dir", prepise vychozi hodnotu data_dir. Koren projektu je
+% o dve slozky vys nez src_dir (scripts/matlab -> scripts -> projekt).
+local_file = fullfile(src_dir, '..', '..', 'local_paths.json');
+if isfile(local_file)
+    local_cfg = jsondecode(fileread(local_file));
+    if isfield(local_cfg, 'matlab_data_dir')
+        if ~isfolder(local_cfg.matlab_data_dir)
+            % Zadne tiche vraceni k src_dir - radsi se zastavime a receme proc.
+            error(['Slozka "%s" (klic matlab_data_dir v souboru ' ...
+                   'local_paths.json) neexistuje. Opravte cestu v ' ...
+                   'local_paths.json, nebo tento klic smazte ' ...
+                   '(pak se pouzije slozka se skriptem).'], ...
+                   local_cfg.matlab_data_dir);
+        end
+        data_dir = local_cfg.matlab_data_dir;
+    end
+end
+
+% Rucni zmena (odkomentuj a uprav; prepise vse vyse):
+% data_dir = 'D:\cesta\k\jinym\datum';
 %
 %% 1) CLEAN START (OPTIONAL) ------------------------------------
 %     CLEAN START (OPTIONAL) - delete ALL previously generated outputs

@@ -36,10 +36,14 @@ import numpy as np
 
 from tree_geom_utils import read_ply, merge_vertices, smooth_centerline
 
+# paths.py (same folder as this script) knows where the project lives on
+# THIS computer, so no folder path has to be typed in by hand here.
+import paths
+
 # =====================  PARAMETERS  ===================================
 TREE_NAME = "B21_S01"
 
-DATA_ROOT = r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\data"
+DATA_ROOT = str(paths.DATA_DIR)
 # Same convention as adtree_reconstruct_compare.py:104 (AdTree_DIR =
 # os.path.join(DATA_ROOT, TREE_NAME)) and :108 (INPUT_PLY).
 AdTree_DIR = os.path.join(DATA_ROOT, TREE_NAME)

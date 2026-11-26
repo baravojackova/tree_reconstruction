@@ -38,6 +38,10 @@ How to use it:
 import csv
 from pathlib import Path
 
+# paths.py (same folder as this script) knows where the project lives on
+# THIS computer, so no folder path has to be typed in by hand here.
+import paths
+
 # =========================================================================
 # CONFIGURATION - edit these values, then run the script
 # =========================================================================
@@ -51,8 +55,8 @@ SCAN_ALL_TREES = True
 
 # The r"" prefix means "raw string": it stops Python from treating
 # backslashes in a Windows path as escape characters.
-ANSYS_GEOM_ROOT = r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\scripts\python\ansys_geom"
-MATLAB_FOLDER = r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\scripts\matlab"
+ANSYS_GEOM_ROOT = str(paths.PYTHON_DIR / "ansys_geom")
+MATLAB_FOLDER = str(paths.MATLAB_DIR)
 
 # Which files count as geometry exports.
 FILE_GLOB = "geom_*.txt"
@@ -68,7 +72,7 @@ MIN_NAME_COLUMN_WIDTH = 40
 # Folder the CSV is written into. Shared with the rest of the ANSYS-eval
 # output, so the numbers sit next to everything else that gets typed into
 # or compared against ANSYS.
-OUT_FOLDER = r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\scripts\python\ansys_eval\out"
+OUT_FOLDER = str(paths.ANSYS_EVAL_DIR / "out")
 
 # True  = also write the printed table to a CSV in OUT_FOLDER, so the
 #         n_rad values can be reopened, sorted and pasted from later

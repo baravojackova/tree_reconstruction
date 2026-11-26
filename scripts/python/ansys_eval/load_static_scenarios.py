@@ -44,6 +44,13 @@ import re
 from pathlib import Path
 
 import pandas as pd
+import sys
+
+# This script lives in scripts/python/ansys_eval, but paths.py lives one
+# folder up (scripts/python). Python only looks for imports next to the
+# script, so we first add the folder above to its search list.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import paths
 
 # =========================================================================
 # CONFIGURATION - edit these values, then run the script
@@ -53,7 +60,7 @@ import pandas as pd
 # prefix means "raw string": it stops Python from treating backslashes in
 # a Windows path as escape characters, so the path can be pasted exactly
 # as Explorer shows it.
-INPUT_FOLDER = r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\scripts\ansys"
+INPUT_FOLDER = str(paths.ANSYS_DIR)
 
 # Name of the description file (one row per tree), inside INPUT_FOLDER.
 # It is deliberately read from the SAME folder that ANSYS itself reads,
@@ -69,7 +76,7 @@ GEOMETRY_FILE_PATH = Path(INPUT_FOLDER) / GEOMETRY_FILE_NAME
 FILE_PATTERN = "out_static_bk*_scenario*.txt"   # glob pattern - ONLY static files
 
 # Folder this script's output CSV is written into.
-OUTPUT_FOLDER = r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\scripts\python\ansys_eval\out"
+OUTPUT_FOLDER = str(paths.ANSYS_EVAL_DIR / "out")
 OUTPUT_PATH = Path(OUTPUT_FOLDER) / "static_scenarios_combined.csv"
 DECIMAL_PLACES = 6
 

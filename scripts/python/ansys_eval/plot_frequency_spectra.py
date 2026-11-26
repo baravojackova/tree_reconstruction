@@ -48,12 +48,19 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from matplotlib.lines import Line2D
+import sys
+
+# This script lives in scripts/python/ansys_eval, but paths.py lives one
+# folder up (scripts/python). Python only looks for imports next to the
+# script, so we first add the folder above to its search list.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import paths
 
 # =========================================================================
 # CONFIGURATION - edit these values, then run the script
 # =========================================================================
 
-INPUT_FOLDER = r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\scripts\ansys"
+INPUT_FOLDER = str(paths.ANSYS_DIR)
 HARMONIC_FILE_PATTERN = "out_harmonic_bk*_scenario*.txt"
 
 GEOMETRY_FILE_NAME = "Popis_Babice_VSE_09012025_ans_lev6_0_azimcor.txt"
@@ -74,7 +81,7 @@ SCENARIO_MODELS = {
     999: "adtree_r5_pilot",
 }
 
-OUTPUT_DIR = Path(r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\scripts\python\ansys_eval\out")
+OUTPUT_DIR = paths.ANSYS_EVAL_DIR / "out"
 SPECTRA_COMBINED_PNG_PATH = OUTPUT_DIR / "frequency_spectra_combined.png"
 SPECTRA_GRID_PNG_PATH = OUTPUT_DIR / "frequency_spectra_grid.png"
 SPECTRA_AUC_PNG_PATH = OUTPUT_DIR / "frequency_spectra_auc.png"

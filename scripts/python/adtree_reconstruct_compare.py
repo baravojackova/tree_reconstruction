@@ -74,6 +74,10 @@ from tree_geom_utils import (
 # both named 'geom'" distinction).
 from paths import PLOTS_DIR, ensure_tree_geom_dir
 
+# paths.py (same folder as this script) knows where the project lives on
+# THIS computer, so no folder path has to be typed in by hand here.
+import paths
+
 # =====================  PARAMETERS  ===================================
 # PRINT_TIMING: print wall-clock elapsed seconds (time.perf_counter()) for
 # the initial read_ply+merge_vertices+smoothing stage, each convert() call
@@ -93,7 +97,7 @@ TREE_NAME = "B21_S08"
 # TREE_NAME (e.g. ".../data/IND07_083/..."). Change this only if you move the
 # whole "data" folder somewhere else - it does NOT depend on which tree you're
 # processing.
-DATA_ROOT = r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\data"
+DATA_ROOT = str(paths.DATA_DIR)
 
 # Directory holding this tree's source input files (the AdTree skeleton .ply,
 # and the AdQSM taper/branch/params exports) - built from DATA_ROOT + TREE_NAME

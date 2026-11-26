@@ -56,13 +56,17 @@ from pathlib import Path
 
 import pandas as pd
 
+# paths.py (same folder as this script) knows where the project lives on
+# THIS computer, so no folder path has to be typed in by hand here.
+import paths
+
 # =========================================================================
 # CONFIGURATION - edit these values, then run the script
 # =========================================================================
 
 # The r"" prefix means "raw string": it stops Python from treating the
 # backslashes in a Windows path as escape characters.
-WORK_FOLDER = r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\scripts\python"
+WORK_FOLDER = str(paths.PYTHON_DIR)
 
 INPUT_CSV = Path(WORK_FOLDER) / "volume_results.csv"
 CSV_OUT_DIR = Path(WORK_FOLDER) / "csv"

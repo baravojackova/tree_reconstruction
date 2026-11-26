@@ -54,6 +54,13 @@ from matplotlib.patches import Patch
 from matplotlib.lines import Line2D
 from pathlib import Path
 from datetime import datetime
+import sys
+
+# This script lives in scripts/python/ansys_eval, but paths.py lives one
+# folder up (scripts/python). Python only looks for imports next to the
+# script, so we first add the folder above to its search list.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import paths
 
 # =========================================================================
 # CONFIGURATION - edit these values, then run the script
@@ -62,7 +69,7 @@ from datetime import datetime
 # Folder this script lives in. Spelled out in full on purpose: a bare
 # filename is resolved against the folder the TERMINAL is in, not the
 # folder this script lives in.
-WORK_FOLDER = r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\scripts\python\ansys_eval"
+WORK_FOLDER = str(paths.ANSYS_EVAL_DIR)
 
 # Input data and output files live in their own subfolders of WORK_FOLDER.
 DATA_FOLDER = Path(WORK_FOLDER) / "data"
@@ -251,7 +258,7 @@ ABORT_ON_STALE_INPUT = True
 # check above (this script otherwise never reads raw ANSYS files directly -
 # it reads FEM_CSV_PATH, which load_static_scenarios.py/compute_slopes.py
 # already built from them). Same folder every other ansys_eval script reads.
-ANSYS_RAW_FOLDER = r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\scripts\ansys"
+ANSYS_RAW_FOLDER = str(paths.ANSYS_DIR)
 ANSYS_RAW_PATTERN_FOR_FRESHNESS = "out_static_bk*_scenario*.txt"
 
 # =========================================================================

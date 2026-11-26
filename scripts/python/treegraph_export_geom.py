@@ -16,9 +16,15 @@ import os
 
 from tree_geom_utils import load_treegraph_json, write_geom_from_treegraph
 
+# paths.py (same folder as this script) knows where the project lives on
+# THIS computer. get_local_path() reads the TreeGraph folder from local_paths.json.
+import paths
+
 # =====================  PARAMETERS  ===================================
 # Path to the TreeGraph output .json to export (from tree2qsm.py).
-JSON_PATH = r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\01_TreeGraph\treegraph_work\results\test_smoke\IND01_054-cs0.15-tipNone.json"
+# The TreeGraph results folder lives OUTSIDE the project, so it is read from
+# local_paths.json (key "treegraph_results_dir"); only the part below it is typed here.
+JSON_PATH = str(paths.get_local_path("treegraph_results_dir") / "test_smoke" / "IND01_054-cs0.15-tipNone.json")
 
 # Where to write the geom.txt. Leave as None to write it next to JSON_PATH,
 # named "geom_<treeid>-cs<cluster_size>.txt".

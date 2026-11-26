@@ -25,9 +25,13 @@ import csv
 import glob
 import os
 
+# paths.py (same folder as this script) knows where the project lives on
+# THIS computer, so no folder path has to be typed in by hand here.
+import paths
+
 # =====================  PARAMETERS  ==================================
 # Folder to scan for the MATLAB volume tables.
-MATLAB_RESULTS_DIR = r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\scripts\matlab"
+MATLAB_RESULTS_DIR = str(paths.MATLAB_DIR)
 
 # Which files to pick up (shell-style wildcard).
 FILE_PATTERN = "volumes_*.csv"

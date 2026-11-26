@@ -68,6 +68,24 @@ else changes.
 - Reference volumes (de Tanago dataset) cover the stem and branches down to
   ~10 cm diameter, so finer branches are not included in the reference.
 
+## Paths on a new computer (`local_paths.json`)
+
+Project folders (`data/`, `scripts/ansys`, `scripts/matlab`, ...) are worked out
+automatically from where `scripts/python/paths.py` lives, so nothing has to be
+edited when the project is moved between the PC and the Mac. Only folders that
+live **outside** the project (scan folders, TreeGraph results, a separate MATLAB
+data folder) differ between computers. They are stored in `local_paths.json`
+in the project root, which is ignored by Git (each computer has its own copy).
+
+To create it on a new computer:
+
+1. Copy `local_paths.example.json` to `local_paths.json`.
+2. Replace every `SEM_DOPLN_CESTU/...` with a real, existing folder. Use `/` in
+   paths (also on Windows). You can delete keys you do not need
+   (`matlab_data_dir` is optional: without it `runsken.m` uses its own folder).
+3. If a key points to a folder that does not exist, the scripts stop with a
+   clear error asking you to fix the path or delete the key.
+
 ## Dependencies
 
 Python: `numpy`, `scipy`, `matplotlib` (`pip install numpy scipy matplotlib`).

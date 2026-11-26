@@ -28,14 +28,21 @@ learn more or adjust the logic later.
 import pandas as pd
 import matplotlib.pyplot as plt
 from pathlib import Path
+import sys
+
+# This script lives in scripts/python/ansys_eval, but paths.py lives one
+# folder up (scripts/python). Python only looks for imports next to the
+# script, so we first add the folder above to its search list.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import paths
 
 # =========================================================================
 # CONFIGURATION - edit these values, then run the script
 # =========================================================================
 
 # Folders holding the input data and this script's output files.
-DATA_FOLDER = Path(r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\scripts\python\ansys_eval\data")
-OUT_FOLDER = Path(r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\scripts\python\ansys_eval\out")
+DATA_FOLDER = paths.ANSYS_EVAL_DIR / "data"
+OUT_FOLDER = paths.ANSYS_EVAL_DIR / "out"
 
 # Path to the CSV file.
 CSV_PATH = DATA_FOLDER / "dynatree_data_merge.csv"

@@ -30,12 +30,19 @@ How to use it:
 import re
 from pathlib import Path
 from datetime import datetime
+import sys
+
+# This script lives in scripts/python/ansys_eval, but paths.py lives one
+# folder up (scripts/python). Python only looks for imports next to the
+# script, so we first add the folder above to its search list.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import paths
 
 # =========================================================================
 # CONFIGURATION - edit these values, then run the script
 # =========================================================================
 
-OUT_FOLDER = Path(r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\scripts\python\ansys_eval\out")
+OUT_FOLDER = paths.ANSYS_EVAL_DIR / "out"
 
 # =========================================================================
 # CODE - you normally do not need to change anything below this line

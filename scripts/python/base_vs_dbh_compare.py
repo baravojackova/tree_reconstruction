@@ -107,11 +107,15 @@ from plot_style import (
 # radius function the real AdTree calibration pipeline uses.
 from tree_geom_utils import parse_adqsm_taper_file, make_trunk_radius_func
 
+# paths.py (same folder as this script) knows where the project lives on
+# THIS computer, so no folder path has to be typed in by hand here.
+import paths
+
 # =====================  PARAMETERS  ===================================
 # Where every tree's taper.txt lives (same convention as every other
 # script in this project that reads AdQSM output - see e.g.
 # adqsm_build_median_variant.py's own DATA_ROOT).
-DATA_ROOT = r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\data"
+DATA_ROOT = str(paths.DATA_DIR)
 
 # Shared master results table - read-only in this script (never written).
 RESULTS_CSV = "volume_results.csv"
@@ -124,7 +128,7 @@ FIELD_FILE = "Popis_Babice_VSE_09012025_ans_lev6_0.txt"
 # tree-tagged subfolder per tree, created when that tree's MATLAB run was
 # archived to make room for the next one - see this script's own STEP 1
 # report for how each of these 12 was located and confirmed on disk).
-MATLAB_ARCHIVE_ROOT = r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\scripts\matlab\archive"
+MATLAB_ARCHIVE_ROOT = str(paths.MATLAB_DIR / "archive")
 
 # Explicit tree -> archive-folder mapping. NOT auto-discovered by a
 # generic glob/pattern match: folder names are hand-typed and

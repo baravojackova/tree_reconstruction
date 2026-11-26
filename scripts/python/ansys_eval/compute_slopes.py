@@ -38,19 +38,26 @@ How to use it:
 from pathlib import Path
 
 import pandas as pd
+import sys
+
+# This script lives in scripts/python/ansys_eval, but paths.py lives one
+# folder up (scripts/python). Python only looks for imports next to the
+# script, so we first add the folder above to its search list.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import paths
 
 # =========================================================================
 # CONFIGURATION - edit these values, then run the script
 # =========================================================================
 
 # Folder this script's own output, and Stage 1's output, live in.
-OUT_FOLDER = r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\scripts\python\ansys_eval\out"
+OUT_FOLDER = str(paths.ANSYS_EVAL_DIR / "out")
 STAGE1_INPUT_PATH = Path(OUT_FOLDER) / "static_scenarios_combined.csv"   # output of load_static_scenarios.py
 
 # The description file is read from the SAME folder that ANSYS reads, so
 # the two copies can never drift apart. These two constants must match
 # the ones in load_static_scenarios.py.
-INPUT_FOLDER = r"C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\scripts\ansys"
+INPUT_FOLDER = str(paths.ANSYS_DIR)
 GEOMETRY_FILE_NAME = "Popis_Babice_VSE_09012025_ans_lev6_0_azimcor.txt"
 GEOMETRY_FILE_PATH = Path(INPUT_FOLDER) / GEOMETRY_FILE_NAME
 
