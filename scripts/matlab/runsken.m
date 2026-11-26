@@ -11,21 +11,31 @@ clc
 %  ------------------------------------------------------------
 % Folder with the TreeQSM source code (contains treeqsm.m, +myfun, ...)
 % Slozka se zdrojovymi kody TreeQSM (je to slozka, kde lezi tento skript).
-% Hleda se postupne trema zpusoby:
-%   1) cesta k tomuto skriptu - funguje, kdyz skript spustis pres F5 / Run,
-%   2) cesta k souboru otevrenemu v editoru - funguje pri spousteni po
-%      bunkach (Ctrl+Enter), kdy je 1) prazdne,
-%   3) aktualni slozka MATLABu (pwd) jako posledni zachrana.
+% Spravna slozka se pozna podle toho, ze v ni lezi soubor treeqsm.m.
+% (Nestaci testovat, jestli je cesta prazdna: pri spousteni po bunkach
+% Ctrl+Enter vraci mfilename docasnou kopii v Temp\Editor_xxxx, ktera
+% neni prazdna, ale treeqsm.m v ni neni.)
+% Hleda se postupne:
+%   1) cesta k tomuto skriptu (mfilename) - funguje pri F5 / Run,
+%   2) cesta k souboru otevrenemu v editoru - funguje pri Ctrl+Enter,
+%   3) aktualni slozka MATLABu (pwd) jako posledni zachrana,
+%   4) kdyz treeqsm.m neni ani tam, skript skonci chybou.
+ma_treeqsm = @(d) ~isempty(d) && isfile(fullfile(d, 'treeqsm.m'));
 src_dir = fileparts(mfilename('fullpath'));
-if isempty(src_dir)
+if ~ma_treeqsm(src_dir)
     try
         src_dir = fileparts(matlab.desktop.editor.getActiveFilename);
     catch
-        src_dir = '';
+        % editor neni k dispozici - zkusime dalsi krok
     end
 end
-if isempty(src_dir)
+if ~ma_treeqsm(src_dir)
     src_dir = pwd;
+end
+if ~ma_treeqsm(src_dir)
+    error(['Nenasel jsem slozku se souborem treeqsm.m. ' ...
+           'Spustte skript otevreny ze slozky scripts/matlab, ' ...
+           'nebo si do ni v MATLABu prepnete (cd) a zkuste to znovu.']);
 end
 
 % Folder with the point clouds and where all results will be written
