@@ -93,15 +93,14 @@ PRINT_TIMING = True
 # right below it automatically, so those don't need editing separately.
 TREE_NAME = "B21_S08"
 
-# Base folder holding every tree's data, one subfolder per tree named after
-# TREE_NAME (e.g. ".../data/IND07_083/..."). Change this only if you move the
-# whole "data" folder somewhere else - it does NOT depend on which tree you're
-# processing.
-DATA_ROOT = str(paths.DATA_DIR)
+# This tree's data folder: data/<series folder>/<TREE_NAME> (e.g.
+# ".../data/2021_bezlisty/B21_S01"). paths.py works out the series folder from
+# the tree ID; a NEW series has to be added to paths.SERIES_DATA_DIRS.
+TREE_DATA_DIR = str(paths.tree_data_dir(TREE_NAME))
 
 # Directory holding this tree's source input files (the AdTree skeleton .ply,
-# and the AdQSM taper/branch/params exports) - built from DATA_ROOT + TREE_NAME
-# above. INPUT_PLY and the ADQSM_*_FILE paths below are all resolved relative
+# and the AdQSM taper/branch/params exports) - TREE_DATA_DIR above.
+# INPUT_PLY and the ADQSM_*_FILE paths below are all resolved relative
 # to these two directories.
 #
 # --- AdQSM variant(s) ---------------------------------------------------
@@ -114,18 +113,18 @@ DATA_ROOT = str(paths.DATA_DIR)
 #       lets you try several radius thresholds in one run).
 #
 # Case (1) - single variant (default, still works exactly as before):
-AdQSM_DIR = os.path.join(DATA_ROOT, TREE_NAME, "05")
+AdQSM_DIR = os.path.join(TREE_DATA_DIR, "05")
 
 # Case (2) - several variants. Leave ADQSM_VARIANTS empty/None to use only
 # AdQSM_DIR above (case 1). To use several variants instead, set BOTH:
-#   ADQSM_BASE_DIR = os.path.join(DATA_ROOT, TREE_NAME, "AdQSM")
+#   ADQSM_BASE_DIR = os.path.join(TREE_DATA_DIR, "AdQSM")
 #   ADQSM_VARIANTS = ["05", "08"]
 # Each name in ADQSM_VARIANTS must be a subfolder of ADQSM_BASE_DIR that
 # contains its own taper.txt, BranchStructure.txt and TreesParams.txt.
-ADQSM_BASE_DIR = os.path.join(DATA_ROOT, TREE_NAME)
+ADQSM_BASE_DIR = TREE_DATA_DIR
 ADQSM_VARIANTS = ["060","999"]
 
-AdTree_DIR = os.path.join(DATA_ROOT, TREE_NAME)
+AdTree_DIR = TREE_DATA_DIR
 
 # input skeleton from AdTree - filename follows the "<TREE_NAME> - Cloud_skeleton.ply"
 # convention used for every tree, so it's derived from TREE_NAME too.

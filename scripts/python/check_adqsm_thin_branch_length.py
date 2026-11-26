@@ -58,9 +58,11 @@ import paths
 # lines to point at a different tree/variant - this is a one-off diagnostic,
 # not part of the multi-variant pipeline, so the path is just hard-coded
 # here instead of rebuilding ADQSM_VARIANTS machinery.
-DATA_ROOT = str(paths.DATA_DIR)
 TREE_NAME = "IND01_054"
-ADQSM_DIR = os.path.join(DATA_ROOT, TREE_NAME, "05")
+# Tree folder = data/<series folder>/<TREE_NAME> (paths.py works out the series
+# from the tree ID, e.g. "IND01_054" -> data/IND_tanago2017/IND01_054).
+TREE_DATA_DIR = str(paths.tree_data_dir(TREE_NAME))
+ADQSM_DIR = os.path.join(TREE_DATA_DIR, "05")
 
 # The two AdQSM export files this script reads.
 BRANCH_FILE = os.path.join(ADQSM_DIR, "BranchStructure.txt")   # per-branch table (diameter, length, ...)

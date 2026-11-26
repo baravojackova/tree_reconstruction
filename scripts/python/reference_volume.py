@@ -37,12 +37,10 @@ import paths
 # set DATA_DIR directly instead of deriving it from TREE_NAME).
 TREE_NAME = "IND07_083"  # e.g. "IND01_054" or "IND07_083" (must match the source file's treeID)
 
-# Base folder holding every tree's data, one subfolder per tree (normally
-# named exactly like TREE_NAME - see the note above for the one exception).
-DATA_ROOT = str(paths.DATA_DIR)
-
-# Folder that contains the source measurement file.
-DATA_DIR = os.path.join(DATA_ROOT, TREE_NAME)
+# Folder that contains the source measurement file: data/<series folder>/
+# <TREE_NAME> (paths.py works out the series from the tree ID, e.g.
+# "IND07_083" -> data/IND_tanago2017/IND07_083).
+DATA_DIR = str(paths.tree_data_dir(TREE_NAME))
 
 # Name of the source measurement file (TAB-separated text), inside DATA_DIR.
 SOURCE_FILE = os.path.join(DATA_DIR, "IND.h.trees.txt")

@@ -1,7 +1,8 @@
 # Tree Reconstruction & Volume Comparison Pipeline — Guide
 
-> Working notes for the project at
-> `C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction`
+> Working notes for the project `tree_reconstruction`. The project can sit
+> anywhere on disk (Windows or Mac): every path is computed from the place
+> where `scripts/python/paths.py` lives, see §2.
 >
 > This file is meant to be edited over time (by you, or by Claude Code on
 > your instructions) as the pipeline evolves. Keep it in the project root
@@ -42,30 +43,107 @@ having to re-type any numbers.
 
 ## 2. Folder / naming conventions you need to know
 
-- `DATA_ROOT` = `C:\Users\Spravce\Documents\BARA\01_Skeny_Babice\tree_reconstruction\data`
-  Every tree has its own subfolder under here, normally named exactly like
-  the tree ID (e.g. `IND01_054`) — **except** a couple of older folders use
-  a shortened name (e.g. `IND01_54`). If a script's automatic
-  `DATA_DIR = os.path.join(DATA_ROOT, TREE_NAME)` doesn't find your files,
-  check this first before assuming something else is wrong.
+- **`scripts/python/paths.py` is the single place that knows where things
+  are.** It computes every location from where `paths.py` itself lives
+  (`PROJECT_ROOT`, `DATA_DIR`, `PLOTS_DIR`, `CSV_DIR`, `NPZ_DIR`,
+  `ANSYS_GEOM_DIR`, `VOLUME_RESULTS_CSV`, ...), so **no path has to be
+  edited when the project moves** to another folder or computer, and the
+  scripts can be started from any folder (VS Code, terminal, project root).
+- **Paths that differ between computers** (scan folders, the TreeGraph
+  results folder outside the project, the MATLAB data folder) are in
+  `local_paths.json` in the project root. That file is **not** in Git (every
+  computer has its own); the template `local_paths.example.json` is. On a
+  new computer: copy the template to `local_paths.json` and fill in the
+  paths (details in `README.md`). Python reads it with
+  `paths.get_local_path("<key>")`, MATLAB (`runsken.m`) reads the key
+  `matlab_data_dir`.
+- **Tree data: `data/<series folder>/<tree ID>/`.** `data/` is split by
+  *series* (one plot / scan year / state); each tree has its own folder:
+
+  ```
+  data/
+    2021_bezlisty/             series B21  (leafless, 2021)
+      B21_S01/  B21_S04/  ...
+    2024_bezlisty_po_redukci/  series B24  (leafless, 2024, after thinning)
+      B24_S01/  ...
+    IND_tanago2017/            series IND  (González de Tánago et al. 2017)
+      IND01_054/  IND03_088/  IND07_083/
+  ```
+
+  Tree ID = `<SERIES>_Sxx` (B = Babice plot, 21/24 = scan year, S01 = tree
+  number). The series is the text before `_S<number>` (`B21_S10_NOBUTT` is
+  still series `B21`). The table `paths.SERIES_DATA_DIRS` says which folder
+  belongs to which series, and **scripts never build a tree path by hand**:
+  they call `paths.tree_data_dir(TREE_NAME)` (returns
+  `data/<series folder>/<TREE_NAME>`). A tree from a series that is not in
+  the table stops with a readable error. Adding a series = one line in
+  `SERIES_DATA_DIRS`.
 - Inside a tree's folder you will typically find:
-  - `<TREE_NAME> - Cloud_skeleton.ply` — the AdTree skeleton output.
-  - one or more AdQSM run subfolders (e.g. `05`, `08`), each containing
+  - the AdTree skeleton `<TREE_NAME>_noplate_clean_skeleton.ply` (B21; the
+    IND trees use e.g. `IND07_083 - Cloud_nobutt_skeleton.ply`).
+  - one or more AdQSM run subfolders (e.g. `05`, `060`), each containing
     `taper.txt`, `BranchStructure.txt`, `TreesParams.txt`.
   - `IND.h.trees.txt` — the destructive field-measurement table (shared
     across trees, filtered by `treeID` column).
   - a `qsm_tanago` subfolder with 20 TreeQSM "de Tanago" realization
     files (published reference reconstructions, not yours).
-- All the Python scripts are run **from the folder that contains them**
-  (relative paths like `"volume_results.csv"` resolve there), while the
-  **input tree data** lives under `DATA_ROOT` and is referenced with full
-  paths built from `TREE_NAME`.
+- The Python scripts can be run **from any folder**: `volume_results.csv`,
+  `plots/`, `csv/`, `npz/`, `ansys_geom/` and `data/` are all resolved by
+  `paths.py` to absolute paths. (One exception is a data file that Git
+  ignores: `Popis_Babice_VSE_09012025_ans_lev6_0.txt` in `scripts/python/`
+  has to be copied to a new computer by hand.)
 - Output files are tagged with the settings that produced them so that
   re-running a script with different parameters **never silently
   overwrites** a previous result — e.g.
   `calib_IND01_054_r5mm_seg100-500-k50.npz` encodes the tree, the radius
   pruning threshold (5 mm) and the resampling settings
   (`seg100-500-k50` = `SEG_LEN_MIN=100mm, SEG_LEN_MAX=500mm, SEG_LEN_K=0.50`).
+
+### 2.1 Jak uložit výsledky AdQSM pro nový strom
+
+AdQSM se spouští ručně mimo Python, skripty výsledky jen **čtou**. Aby je
+našly, ulož je takto:
+
+1. **Série musí být v `paths.SERIES_DATA_DIRS`** (`scripts/python/paths.py`).
+   Pro novou sérii přidej jeden řádek, např.
+   `"B23_po_ol": DATA_DIR / "2023_olisteny_po_redukci",`. Klíč je text
+   před `_S<číslo>` v názvu stromu. Bez toho skript skončí chybou, která
+   sérii jmenuje.
+2. **Založ složku stromu** `data/<složka série>/<ID stromu>/`, např.
+   `data/2024_bezlisty_po_redukci/B24_S07/`. ID stromu je vždy
+   `<SÉRIE>_Sxx`. Číslo stromu se musí shodovat s ostatními sériemi
+   (z `B21_S07` se pro SAG stane `BK07`).
+3. **Jeden běh AdQSM = jedna podsložka varianty** uvnitř složky stromu,
+   např. `data/2024_bezlisty_po_redukci/B24_S07/060/`. Název varianty je
+   libovolný, ale ze samých číslic (skripty je řadí číselně a rozeznají
+   podle toho, že obsahují `taper.txt`). U B21 jsou `040`…`100`, u IND
+   `04`…`10`. Složka `999` je vyhrazená pro **syntetický medián** variant,
+   který vytvoří `adqsm_build_median_variant.py` — ručně do ní nic neukládej.
+4. **Do podsložky varianty zkopíruj výstup AdQSM** (celou jeho složku).
+   Skripty čtou tyto tři soubory (názvy přesně, včetně velkých písmen):
+
+   | Soubor | K čemu |
+   |---|---|
+   | `taper.txt` | průměr kmene po výšce (taper, kalibrace průměrů) |
+   | `BranchStructure.txt` | tabulka větví (řád, průměr, délka, objem, …) |
+   | `TreesParams.txt` | celkové parametry stromu (objem, délky, výška, …) |
+
+   Další soubory z AdQSM (`BranchOrderInfo.txt`, `TreesParams.csv`) se
+   zkopírují také, neškodí.
+5. Výsledná struktura jednoho stromu:
+
+   ```
+   data/2024_bezlisty_po_redukci/B24_S07/
+     060/  taper.txt  BranchStructure.txt  TreesParams.txt  ...
+     070/  ...
+   ```
+
+   Volitelně vedle toho leží vstup (mračno) a skelet AdTree
+   `B24_S07_noplate_clean_skeleton.ply`, jen pokud poběží AdTree skripty.
+6. Jméno stromu pak zadáš jen jako `TREE_NAME = "B24_S07"` na začátku
+   skriptu. Cestu ke složce dopočítá `paths.tree_data_dir()`. Ověření:
+   `python -c "import paths; print(paths.tree_data_dir('B24_S07'))"` ve
+   `scripts/python` vypíše očekávanou cestu.
 
 ---
 

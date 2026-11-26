@@ -17,7 +17,7 @@ tree-qsm-comparison/
 │   └── ansys/           # buk.mac (APDL beam model)
 ├── results/
 │   └── volume_results.csv   # shared master results table (versioned)
-├── data/                # point clouds, .ply skeletons (NOT versioned)
+├── data/                # point clouds, .ply skeletons (NOT versioned), data/<series>/<tree>/
 └── output/              # geom_*.txt, ANSYS files (NOT versioned)
 ```
 

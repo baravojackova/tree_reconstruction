@@ -43,10 +43,9 @@ import paths
 # =====================  PARAMETERS  ===================================
 TREE_NAME = "B21_S01"
 
-DATA_ROOT = str(paths.DATA_DIR)
-# Same convention as adtree_reconstruct_compare.py:104 (AdTree_DIR =
-# os.path.join(DATA_ROOT, TREE_NAME)) and :108 (INPUT_PLY).
-AdTree_DIR = os.path.join(DATA_ROOT, TREE_NAME)
+# Same convention as adtree_reconstruct_compare.py (AdTree_DIR = the tree's
+# data folder, data/<series folder>/<TREE_NAME>) and its INPUT_PLY.
+AdTree_DIR = str(paths.tree_data_dir(TREE_NAME))
 INPUT_PLY = os.path.join(AdTree_DIR, "%s_noplate_clean_skeleton.ply" % TREE_NAME)
 
 # Copied verbatim from adtree_reconstruct_compare.py:207/222/223 (NOT

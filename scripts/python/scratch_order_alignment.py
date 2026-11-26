@@ -84,10 +84,9 @@ import paths
 # --- IND07_083 - ACTIVE ---
 TREE_NAME = "IND07_083"
 ADQSM_VARIANT = "06"
-INPUT_PLY = str(paths.DATA_DIR / "IND07_083" / "IND07_083 - Cloud_nobutt_skeleton.ply")
+INPUT_PLY = str(paths.tree_data_dir("IND07_083") / "IND07_083 - Cloud_nobutt_skeleton.ply")
 
-DATA_ROOT = str(paths.DATA_DIR)
-BRANCH_FILE = os.path.join(DATA_ROOT, TREE_NAME, ADQSM_VARIANT, "BranchStructure.txt")
+BRANCH_FILE = os.path.join(str(paths.tree_data_dir(TREE_NAME)), ADQSM_VARIANT, "BranchStructure.txt")
 
 # Copied verbatim from adtree_reconstruct_compare.py's own PARAMETERS block -
 # NOT imported (see header comment above for why).

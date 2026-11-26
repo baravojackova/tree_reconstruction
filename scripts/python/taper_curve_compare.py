@@ -72,8 +72,6 @@ from plot_style import (
 import paths
 
 # =====================  PARAMETERS  ===================================
-DATA_ROOT = str(paths.DATA_DIR)
-
 # Trees to process in this run - just add a name to extend this to a
 # production beech tree once its data folder exists; nothing else needs
 # to change.
@@ -143,7 +141,7 @@ def _extract_cbh(params_path):
 
 
 def plot_taper_variants(tree_name):
-    tree_dir = os.path.join(DATA_ROOT, tree_name)
+    tree_dir = str(paths.tree_data_dir(tree_name))
     variants = discover_variants(tree_dir)
     if not variants:
         print("WARNING: no variant folder with a taper.txt found under %s - skipping %s."

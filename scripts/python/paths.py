@@ -20,7 +20,7 @@
 #  itself might one day want a path from here), that would create a
 #  circular import the moment compare_volumes.py tried to import
 #  something from this file. Keeping this module's only dependencies on the
-#  standard library (os, pathlib, json) means it can be imported from
+#  standard library (os, re, pathlib, json) means it can be imported from
 #  literally anywhere in this project with zero risk of an import cycle,
 #  now or later.
 #
@@ -36,6 +36,7 @@
 # =====================================================================
 
 import os
+import re
 import json
 from pathlib import Path
 
@@ -52,6 +53,21 @@ ANSYS_DIR      = SCRIPTS_DIR / "ansys"
 MATLAB_DIR     = SCRIPTS_DIR / "matlab"
 ANSYS_EVAL_DIR = PYTHON_DIR / "ansys_eval"
 DATA_DIR       = PROJECT_ROOT / "data"
+
+# ---- Tree data folders, grouped by SERIES -------------------------------
+# data/ is split into one subfolder per SERIES of trees (= one plot, one
+# scan year/state), and every tree has its own folder inside it:
+#     data/<series folder>/<tree ID>/      e.g. data/2021_bezlisty/B21_S01/
+# The SERIES is the part of the tree ID before "_S<number>" (B21_S01 -> "B21").
+# It can be any free text, e.g. "B23_po_ol" (tree ID B23_po_ol_S01).
+# For a NEW series, add one line here - tree_data_dir() stops with an error
+# until you do. Keys are series, values are folders under data/.
+SERIES_DATA_DIRS = {
+    "B21": DATA_DIR / "2021_bezlisty",             # Babice, scans 2021, leafless
+    "B24": DATA_DIR / "2024_bezlisty_po_redukci",  # Babice, scans 2024, leafless, after thinning
+    # González de Tánago et al. (2017) reference trees (IND01_054, ...):
+    "IND": DATA_DIR / "IND_tanago2017",
+}
 
 # local_paths.json holds the paths that DIFFER between computers (scan
 # folders, TreeGraph results, ...). It is listed in .gitignore, so every
@@ -83,6 +99,35 @@ def get_local_path(key):
             f"neexistuje. Oprav cestu v {LOCAL_PATHS_FILE.name} nebo "
             f"tento klíč smaž.")
     return path
+
+
+def series_of(tree_id):
+    """Return the series of a tree ID: 'B21_S01' -> 'B21',
+    'B21_S10_NOBUTT' -> 'B21', 'B23_po_ol_S01' -> 'B23_po_ol'.
+    The older Tanago trees ('IND01_054', no _S<number>) -> 'IND'."""
+    m = re.match(r"^(.+?)_S\d+", tree_id)   # shortest text before "_S<digits>"
+    if m:
+        return m.group(1)
+    if re.match(r"^IND\d+_\d+", tree_id):
+        return "IND"
+    raise ValueError(
+        f"Z názvu stromu '{tree_id}' nepoznám sérii. Očekávám tvar "
+        f"<SÉRIE>_Sxx (např. B21_S01).")
+
+
+def tree_data_dir(tree_id):
+    """Return the data folder of one tree as a Path:
+    data/<series folder>/<tree_id>. The series folder comes from
+    SERIES_DATA_DIRS. Stops with a readable (Czech) error if the series is
+    missing there. It does NOT check that the folder exists (a new tree's
+    folder is created by hand) - the script that reads from it reports that."""
+    series = series_of(tree_id)
+    if series not in SERIES_DATA_DIRS:
+        raise KeyError(
+            f"Série '{series}' (strom '{tree_id}') není v paths.SERIES_DATA_DIRS. "
+            f"Známé série: {', '.join(SERIES_DATA_DIRS)}. "
+            f"Doplň novou sérii do SERIES_DATA_DIRS v paths.py.")
+    return SERIES_DATA_DIRS[series] / tree_id
 
 
 # ---- Output directories (absolute, as str) ----------------------------

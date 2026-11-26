@@ -27,6 +27,7 @@ import os
 import numpy as np
 
 import adqsm_build_median_variant as m
+import paths   # tree data folders: paths.tree_data_dir(tree)
 from tree_geom_utils import parse_adqsm_taper_file, _reject_taper_spikes
 
 SCRATCH_DIR = "scratch_999_regression"
@@ -58,7 +59,7 @@ def _ratio_map(tree_name, variant):
     decision always comes from calling _reject_taper_spikes() itself
     (see check_tree() below), not from this helper, so there is still
     only ONE definition of "what counts as a spike" in the codebase."""
-    path = os.path.join(m.DATA_ROOT, tree_name, variant, "taper.txt")
+    path = os.path.join(str(paths.tree_data_dir(tree_name)), variant, "taper.txt")
     h, d = parse_adqsm_taper_file(path, raw=True)
     ratios = {}
     for i in range(1, len(d) - 1):
@@ -83,7 +84,7 @@ def check_tree(tree_name, source_variants):
     failing_per_variant = {}
     ratio_per_variant = {}
     for v in source_variants:
-        path = os.path.join(m.DATA_ROOT, tree_name, v, "taper.txt")
+        path = os.path.join(str(paths.tree_data_dir(tree_name)), v, "taper.txt")
         h, d = parse_adqsm_taper_file(path, raw=True)
         failing = _reject_taper_spikes(h, d, path, factor=m.SPIKE_FACTOR, detect_only=True)
         failing_per_variant[v] = set(failing.tolist())
@@ -107,7 +108,7 @@ def check_tree(tree_name, source_variants):
                   % (m.TAPER_H_LOWER, m.TAPER_H_UPPER))
 
     # ---- load the EXISTING (old-code) result for comparison -----------
-    old_path = os.path.join(m.DATA_ROOT, tree_name, "999", "taper.txt")
+    old_path = os.path.join(str(paths.tree_data_dir(tree_name)), "999", "taper.txt")
     h_old, d_old = parse_adqsm_taper_file(old_path, raw=True)
     h_new, d_new = ref_h, median_diam
 

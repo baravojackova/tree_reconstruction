@@ -88,7 +88,6 @@ from base_vs_dbh_compare import (
     parse_field_file,
     TREEQSM_ARCHIVE_DIR,
     MATLAB_ARCHIVE_ROOT,
-    DATA_ROOT,
     RESULTS_CSV,
 )
 
@@ -210,7 +209,7 @@ def adqsm_diam_at_heights(tree, variant, heights_m):
     tree's own taper.txt for `variant`. Returns None if the file doesn't
     exist, else a list of diameters (cm), same order/length as
     `heights_m`."""
-    path = os.path.join(DATA_ROOT, tree, variant, "taper.txt")
+    path = os.path.join(str(paths.tree_data_dir(tree)), variant, "taper.txt")
     if not os.path.exists(path):
         return None
     heights, diameters = parse_adqsm_taper_file(path)

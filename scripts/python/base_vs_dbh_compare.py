@@ -112,10 +112,9 @@ from tree_geom_utils import parse_adqsm_taper_file, make_trunk_radius_func
 import paths
 
 # =====================  PARAMETERS  ===================================
-# Where every tree's taper.txt lives (same convention as every other
-# script in this project that reads AdQSM output - see e.g.
-# adqsm_build_median_variant.py's own DATA_ROOT).
-DATA_ROOT = str(paths.DATA_DIR)
+# Where every tree's taper.txt lives: data/<series folder>/<tree>/<variant>/
+# taper.txt - the tree folder comes from paths.tree_data_dir() (same
+# convention as every other script in this project that reads AdQSM output).
 
 # Shared master results table - read-only in this script (never written).
 RESULTS_CSV = paths.VOLUME_RESULTS_CSV
@@ -221,7 +220,7 @@ def adqsm_base_dbh_cm(tree, variant):
     """AdQSM/AdTree-calibrated base and DBH diameter, in cm, from the REAL
     make_trunk_radius_func() (tree_geom_utils.py) built on that tree's own
     taper.txt for `variant`. Returns None if the file doesn't exist."""
-    path = os.path.join(DATA_ROOT, tree, variant, "taper.txt")
+    path = os.path.join(str(paths.tree_data_dir(tree)), variant, "taper.txt")
     if not os.path.exists(path):
         return None
     heights, diameters = parse_adqsm_taper_file(path)

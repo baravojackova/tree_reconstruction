@@ -79,11 +79,9 @@ SOURCE_VARIANTS = ["040", "050", "060", "070", "080", "090", "100"]
 # taper_curve_compare.py's discover_variants() `sorted(labels, key=int)`
 # - all parse "999" the same as any other all-digit folder name) and
 # confirmed to NOT collide with any existing variant folder for ANY tree
-# currently under DATA_ROOT (checked data/*/  - only B21_S01 uses 3-digit
+# currently under data/ (checked data/*/*/  - only B21_S01 uses 3-digit
 # folders, "040".."100"; no tree has a "999" folder today).
 NEW_VARIANT_NAME = "999"
-
-DATA_ROOT = str(paths.DATA_DIR)
 
 # Threshold (ratio of a taper.txt row's diameter to the max of its two
 # immediate neighbours) above which _reject_taper_spikes()
@@ -124,7 +122,7 @@ TAPER_H_UPPER = 10.0
 
 
 def _variant_dir(tree_name, variant):
-    return os.path.join(DATA_ROOT, tree_name, variant)
+    return os.path.join(str(paths.tree_data_dir(tree_name)), variant)
 
 
 # ---------------------------------------------------------------------

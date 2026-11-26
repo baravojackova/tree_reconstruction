@@ -66,12 +66,13 @@ MIN_PAIRS_PER_ORDER = 15     # adtree_reconstruct_compare.py PARAMETERS block
 # imported, same reasoning as the constants below).
 CALREF_THRESHOLD_M = 0.005
 
-DATA_ROOT = str(paths.DATA_DIR)
+# Tree folder = data/<series folder>/<TREE_NAME> (see paths.tree_data_dir()).
+TREE_DATA_DIR = str(paths.tree_data_dir(TREE_NAME))
 # Same convention as adtree_reconstruct_compare.py:113/117 (AdTree_DIR,
 # INPUT_PLY) and :110-111/314-315 (ADQSM_BASE_DIR, BranchStructure.txt path).
-AdTree_DIR = os.path.join(DATA_ROOT, TREE_NAME)
+AdTree_DIR = TREE_DATA_DIR
 INPUT_PLY = os.path.join(AdTree_DIR, "%s_noplate_clean_skeleton.ply" % TREE_NAME)
-ADQSM_BASE_DIR = os.path.join(DATA_ROOT, TREE_NAME)
+ADQSM_BASE_DIR = TREE_DATA_DIR
 BRANCH_FILE = os.path.join(ADQSM_BASE_DIR, ADQSM_VARIANT, "BranchStructure.txt")
 
 # Copied verbatim from adtree_reconstruct_compare.py:216 (MERGE_DECIMALS)
