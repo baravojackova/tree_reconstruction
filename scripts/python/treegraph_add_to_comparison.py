@@ -34,7 +34,7 @@ import paths
 JSON_PATH = str(paths.get_local_path("treegraph_results_dir") / "test_smoke" / "IND01_054-cs0.15-tipNone.json")
 
 # The master results table (same file compare_volumes.py reads/writes).
-RESULTS_CSV = "volume_results.csv"
+RESULTS_CSV = paths.VOLUME_RESULTS_CSV
 
 # Method label for this variant in the CSV. Leave as None to build one
 # automatically from the run's cluster_size, e.g. "TreeGraph (cs0.15)".

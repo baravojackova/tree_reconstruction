@@ -75,6 +75,7 @@ from plot_volumes import ensure_plots_dir
 # like ensure_plots_dir above) since paths.py is the actual source of
 # truth for both.
 from paths import ensure_csv_dir, CSV_DIR
+import paths
 
 # Shared visual style (colors/sizes) - see plot_style.py's own header.
 # This chart previously had no colors/sizes in common with the rest of
@@ -102,7 +103,7 @@ INCLUDE_CALREF_MIN5MM = True
 # etc. for RESULTS_CSV; taper_curve_compare.py for TAPER_SUMMARY_CSV) -
 # both are plain relative paths, resolved from wherever this script is
 # actually run from (normally scripts/python/).
-RESULTS_CSV = "volume_results.csv"
+RESULTS_CSV = paths.VOLUME_RESULTS_CSV
 # TAPER_SUMMARY_CSV names the SAME file as taper_curve_compare.py's own
 # SUMMARY_CSV_PATH constant - both must be kept in sync (same filename,
 # same directory) or this script will fail to find what that one wrote.

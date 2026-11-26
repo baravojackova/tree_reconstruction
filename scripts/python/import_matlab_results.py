@@ -44,7 +44,7 @@ FILE_PATTERN = "volumes_*.csv"
 IMPORT_GROUPS = ["Optimal", "Simplified (no islands)", "Filtered <10cm"]  # the de Tanago field crew physically only measured sections down to a 10 cm taper diameter (see AdQSM.pdf Appendix A) - this reference NEVER has a "none" (full/unfiltered) version, by methodology.
 
 # Shared master results table (read by compare_volumes.py).
-RESULTS_CSV = "volume_results.csv"
+RESULTS_CSV = paths.VOLUME_RESULTS_CSV
 
 # The MATLAB script may use a SHORT tree id (e.g. "IND01") while the Python
 # scripts use the FULL id (e.g. "IND01_054"). Rows are only comparable when

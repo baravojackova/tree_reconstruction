@@ -84,7 +84,7 @@ METHOD_LABEL_10CM = "TreeQSM de Tanago (mean, Filtered<10cm)"
 
 # Shared master results table (see compare_volumes.py). Each script upserts
 # its own row(s) into this CSV so results from all methods live in one place.
-RESULTS_CSV = "volume_results.csv"
+RESULTS_CSV = paths.VOLUME_RESULTS_CSV
 # =====================================================================
 
 

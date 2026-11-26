@@ -52,7 +52,7 @@ METHOD_LABEL = "Reference (destructive)"
 
 # Shared master results table (see compare_volumes.py). Each script upserts
 # its own row(s) into this CSV so results from all methods live in one place.
-RESULTS_CSV = "volume_results.csv"
+RESULTS_CSV = paths.VOLUME_RESULTS_CSV
 
 # Which fractions to INCLUDE in the total. Set True to count that fraction,
 # False to leave it out. "stem" + "branch" (+ "twig") is the woody structure

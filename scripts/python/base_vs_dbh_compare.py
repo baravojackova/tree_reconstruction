@@ -118,11 +118,13 @@ import paths
 DATA_ROOT = str(paths.DATA_DIR)
 
 # Shared master results table - read-only in this script (never written).
-RESULTS_CSV = "volume_results.csv"
+RESULTS_CSV = paths.VOLUME_RESULTS_CSV
 
 # The field-measurement source file (see this script's own header for the
 # exact column layout used below).
-FIELD_FILE = "Popis_Babice_VSE_09012025_ans_lev6_0.txt"
+# NOTE: this is a DATA file - Git ignores it, so on a new computer (e.g. the
+# Mac) it must be copied by hand into scripts/python/ before running.
+FIELD_FILE = str(paths.PYTHON_DIR / "Popis_Babice_VSE_09012025_ans_lev6_0.txt")
 
 # Root folder holding runsken.m's per-tree archive snapshots (one dated,
 # tree-tagged subfolder per tree, created when that tree's MATLAB run was

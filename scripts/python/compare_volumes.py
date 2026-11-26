@@ -66,9 +66,13 @@ import os
 import math
 import re
 
+# paths.py (same folder as this script) knows where the master results
+# table lives, so it is found from any working directory.
+import paths
+
 # =====================  PARAMETERS  ==================================
 # The master results table. Edit this file to add trees/methods.
-RESULTS_CSV = "volume_results.csv"
+RESULTS_CSV = paths.VOLUME_RESULTS_CSV
 
 # Which tree to show in detail: a specific ID like "IND01_054", or "ALL".
 SELECT_TREE = "ALL"

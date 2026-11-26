@@ -335,7 +335,7 @@ WRITE_THIN_BRANCH_FILTERED_ROW = False
 # Shared master results table (see compare_volumes.py). When CALIBRATE_RADII
 # is True, each generated threshold variant upserts its own row into this CSV
 # so results from all methods live in one place.
-RESULTS_CSV = "volume_results.csv"
+RESULTS_CSV = paths.VOLUME_RESULTS_CSV
 
 # Output folders, so the working directory doesn't fill up with dozens of
 # .npz/.png files mixed in with the scripts. NPZ_DIR is this script's own

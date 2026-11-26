@@ -58,6 +58,7 @@ import matplotlib.lines as mlines
 # paths.py's own header for why "plots" as a bare string literal must
 # never appear outside that one file.
 from paths import ensure_csv_dir, ensure_all_plots_dir
+import paths
 
 # Shared visual style - see plot_style.py's own header. Reused so this
 # chart's colors/sizes match every other chart in the project (and
@@ -92,7 +93,9 @@ from base_vs_dbh_compare import (
 )
 
 # =====================  PARAMETERS  ===================================
-FIELD_FILE = "Popis_Babice_VSE_09012025_ans_lev6_0.txt"
+# NOTE: this is a DATA file - Git ignores it, so on a new computer (e.g. the
+# Mac) it must be copied by hand into scripts/python/ before running.
+FIELD_FILE = str(paths.PYTHON_DIR / "Popis_Babice_VSE_09012025_ans_lev6_0.txt")
 
 # Field survey's own level labels, in the file's own column order (level I
 # = highest measured point, level VI = base, h = 0 m by definition) -

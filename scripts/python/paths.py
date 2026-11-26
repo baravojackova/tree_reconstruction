@@ -101,7 +101,8 @@ PLOTS_DIR = str(PYTHON_DIR / "plots")
 # the "PNG goes under plots/, CSV goes under csv/" rule applied literally.
 # volume_results.csv itself is the one exception: it is SHARED STATE (the
 # project's master input/output table, not a derived report) and stays in
-# scripts/python's own root, untouched by this constant.
+# scripts/python's own root, untouched by this constant (see
+# VOLUME_RESULTS_CSV below for its absolute path).
 CSV_DIR = str(PYTHON_DIR / "csv")
 
 # NPZ_DIR: calibrated-geometry cache files (calib_*.npz) written by
@@ -124,6 +125,14 @@ NPZ_DIR = str(PYTHON_DIR / "npz")
 # unrelated function - keep these two "geom" things apart; they are not
 # the same artifact).
 ANSYS_GEOM_DIR = str(PYTHON_DIR / "ansys_geom")
+
+# VOLUME_RESULTS_CSV: the project's MASTER results table (one row per tree x
+# method), written by the extraction scripts and read by the comparison and
+# plotting scripts. It lives directly in scripts/python (NOT in CSV_DIR - see
+# CSV_DIR's comment). The absolute path means every script finds the SAME
+# file no matter which folder it is launched from; a bare relative name would
+# silently read/create another copy in the current working directory.
+VOLUME_RESULTS_CSV = str(PYTHON_DIR / "volume_results.csv")
 
 # ALL_TREES_DIRNAME: the subfolder name (under PLOTS_DIR) for charts that
 # POOL data across multiple trees (e.g. total_volume_by_tree.png,
