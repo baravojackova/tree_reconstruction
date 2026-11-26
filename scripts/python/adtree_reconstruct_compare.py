@@ -341,10 +341,9 @@ RESULTS_CSV = "volume_results.csv"
 # .npz/.png files mixed in with the scripts. NPZ_DIR is this script's own
 # new folder; FIGURES_DIR reuses the project's shared PLOTS_DIR convention
 # (paths.py - already used by plot_box.py/plot_volumes.py for their own
-# charts), grouped under a per-tree subfolder. export_geom_ansys.py has its
-# OWN matching NPZ_DIR parameter (see that file) - keep both in sync by
-# hand if this one ever changes.
-NPZ_DIR = "npz"
+# charts), grouped under a per-tree subfolder. export_geom_ansys.py reads
+# the same paths.NPZ_DIR, so the two always stay in sync.
+NPZ_DIR = paths.NPZ_DIR
 FIGURES_DIR = os.path.join(PLOTS_DIR, TREE_NAME)
 
 # Reference heights [m] used for DBH (lower) and the taper metric (lower/

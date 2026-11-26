@@ -24,12 +24,15 @@
 #  literally anywhere in this project with zero risk of an import cycle,
 #  now or later.
 #
-#  Every directory name below is relative, matching this project's
-#  existing convention throughout scripts/python: every script assumes it
-#  is LAUNCHED with scripts/python as the current working directory (see
-#  scratch_output_path_audit.md's own opening note), so a bare relative
-#  name here resolves under scripts/python exactly like the pre-existing
-#  "plots"/"npz" literals already did.
+#  Every output directory below (PLOTS_DIR, CSV_DIR, NPZ_DIR,
+#  ANSYS_GEOM_DIR) is an ABSOLUTE path under scripts/python, built from
+#  PYTHON_DIR (= where this file lives). It therefore does NOT depend on
+#  the folder a script is launched from: "plots", "csv", ... always end up
+#  in scripts/python, whether you run from there, from the project root, or
+#  from VS Code's default folder. (They used to be bare relative names, which
+#  only worked when scripts/python was the current working directory.)
+#  The values are kept as plain str (not Path), so os.path.join() and the
+#  ensure_*() helpers below behave exactly as before.
 # =====================================================================
 
 import os
@@ -82,13 +85,13 @@ def get_local_path(key):
     return path
 
 
-# ---- Directory NAMES (the literal strings) ---------------------------
+# ---- Output directories (absolute, as str) ----------------------------
 # PLOTS_DIR: every PNG chart this project produces, of any kind, lives
 # somewhere under here - either directly in a per-tree or all-trees
 # subfolder (see ensure_tree_plots_dir()/ensure_all_plots_dir() below),
 # never loose in PLOTS_DIR itself (that bare-root placement is exactly
 # the "90 misplaced files" bug this reorganisation exists to fix).
-PLOTS_DIR = "plots"
+PLOTS_DIR = str(PYTHON_DIR / "plots")
 
 # CSV_DIR: every CSV this project WRITES as an output (decision summaries,
 # coverage reports, cross-tree sensitivity tables, ...) lives here, FLAT -
@@ -99,13 +102,14 @@ PLOTS_DIR = "plots"
 # volume_results.csv itself is the one exception: it is SHARED STATE (the
 # project's master input/output table, not a derived report) and stays in
 # scripts/python's own root, untouched by this constant.
-CSV_DIR = "csv"
+CSV_DIR = str(PYTHON_DIR / "csv")
 
 # NPZ_DIR: calibrated-geometry cache files (calib_*.npz) written by
 # adtree_reconstruct_compare.py and read back by export_geom_ansys.py.
-# Unchanged by this reorganisation - listed here only so every output
-# location is named in one place, per this file's own purpose.
-NPZ_DIR = "npz"
+# Listed here so every output location is named in one place, per this
+# file's own purpose. Both scripts above use this constant (they no longer
+# keep their own local "npz" literal).
+NPZ_DIR = str(PYTHON_DIR / "npz")
 
 # ANSYS_GEOM_DIR: the actual geom_*.txt ANSYS INPUT geometry text files
 # written by export_geom_ansys.py's write_geom() call. Before this file
@@ -119,7 +123,7 @@ NPZ_DIR = "npz"
 # "geom_*.png" diagnostic charts under plots/<tree>/geom/, produced by an
 # unrelated function - keep these two "geom" things apart; they are not
 # the same artifact).
-ANSYS_GEOM_DIR = "ansys_geom"
+ANSYS_GEOM_DIR = str(PYTHON_DIR / "ansys_geom")
 
 # ALL_TREES_DIRNAME: the subfolder name (under PLOTS_DIR) for charts that
 # POOL data across multiple trees (e.g. total_volume_by_tree.png,

@@ -424,8 +424,7 @@ def main():
         print(line)
 
     # =====================  WRITE CSV  ===================================
-    ensure_csv_dir()
-    csv_path = os.path.join("csv", CSV_OUT_NAME)
+    csv_path = os.path.join(ensure_csv_dir(), CSV_OUT_NAME)  # ensure_csv_dir() returns the csv folder
     fieldnames = list(csv_rows[0].keys()) if csv_rows else []
     with open(csv_path, "w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)

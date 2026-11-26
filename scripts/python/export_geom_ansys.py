@@ -30,6 +30,7 @@ from tree_geom_utils import write_geom
 # npz already stores it (see list_available_npz()'s own use of
 # data["tree_name"] above).
 from paths import ensure_ansys_geom_dir
+import paths
 
 # =====================  PARAMETERS  ===================================
 # Which .npz file (written by adtree_reconstruct_compare.py) to convert to
@@ -41,8 +42,9 @@ NPZ_FILE = "calib_B21_S21_r5mm_adqsm070_seg50-500-k80-wlen.npz"
 
 # Folder to look for "calib_*.npz" files in - matches
 # adtree_reconstruct_compare.py's own NPZ_DIR, which now writes .npz files
-# into "npz/" instead of the working directory.
-NPZ_DIR = "npz"
+# into scripts/python/npz (absolute path from paths.py, so it works from
+# any working directory).
+NPZ_DIR = paths.NPZ_DIR
 # =====================================================================
 
 
