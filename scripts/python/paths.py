@@ -179,6 +179,27 @@ ANSYS_GEOM_DIR = str(PYTHON_DIR / "ansys_geom")
 # silently read/create another copy in the current working directory.
 VOLUME_RESULTS_CSV = str(PYTHON_DIR / "volume_results.csv")
 
+# VOLUME_RESULTS_CSV_BY_SERIES: každá série stromů má SVŮJ soubor s výsledky,
+# aby se výsledky různých sérií nikdy nepřepsaly ani nesmíchaly.
+#   B21 -> stávající volume_results.csv (na něm závisí ostatní skripty)
+#   B24 -> nový volume_results_B24.csv
+# Pro NOVOU sérii přidej jeden řádek sem.
+VOLUME_RESULTS_CSV_BY_SERIES = {
+    "B21": PYTHON_DIR / "volume_results.csv",
+    "B24": PYTHON_DIR / "volume_results_B24.csv",
+}
+
+
+def volume_results_csv(series):
+    """Vrátí absolutní cestu k souboru s výsledky pro danou sérii ("B21", "B24").
+    Neznámá série = srozumitelná chyba (raději stop než zápis do špatného souboru)."""
+    if series not in VOLUME_RESULTS_CSV_BY_SERIES:
+        raise SystemExit(
+            f"Série '{series}' nemá v paths.VOLUME_RESULTS_CSV_BY_SERIES žádný soubor "
+            f"s výsledky. Známé série: {', '.join(VOLUME_RESULTS_CSV_BY_SERIES)}. "
+            f"Doplň novou sérii do VOLUME_RESULTS_CSV_BY_SERIES v paths.py.")
+    return str(VOLUME_RESULTS_CSV_BY_SERIES[series])
+
 # ALL_TREES_DIRNAME: the subfolder name (under PLOTS_DIR) for charts that
 # POOL data across multiple trees (e.g. total_volume_by_tree.png,
 # error_boxplot_*.png) - as opposed to a chart whose content concerns

@@ -21,6 +21,7 @@
 
 # 3) Vybrane vysledkove tabulky (male, dulezite pro SAG)
 !scripts/python/volume_results.csv
+!scripts/python/volume_results_B2*.csv
 !scripts/python/csv/volume_summary_settled*.csv
 
 # 4) Dokumenty (docx/pptx ve slozce docs/) NA GIT NEPATRI - jsou
